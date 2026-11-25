@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The song's sends as values (roadmap step S5.20, the sends' area): a send as a value (SendValue), every send of a song
 // (SongSends) with the helpers that alone write it, and the conversion between a SEND element and the value (Schema.h). The
-// song holds its sends in an area of its values (SongValues.h: sends; SendsArea.h), and its tree holds no SEND: the sends'
+// song holds its sends in an area of its values (SongValues.h: sends; SendsArea.h): the sends'
 // code (model/mixer/internal/Mixer.h: getSendValue(), getSendValues(), getSendTrack(), and the writers) reads and sets the
-// area. What still names SEND: this conversion, which the loader (model/project/Project.cpp: keepSendAsHeld()), the keeper's
-// safety net and adoption (SendsArea.h), whole state (writeSendsIn()), the versions' pass and a merge's choice read and write
+// area. What still names SEND: this conversion, which the loader (model/project/Project.cpp: keepSendAsHeld()), the song made
+// of its state (SendsArea.h), whole state (writeSendsIn()), the versions' pass and a merge's choice read and write
 // a send's element with; the versions' difference and merge, which compare whole copies (model/versions/SongDiff.cpp,
-// SongMerge.cpp); and the readers below of a song that holds no values (the loader's song as it is made consistent, a check's
-// copy), which read its tree.
+// SongMerge.cpp); and the readers below of a file's tree (the loader's) and the tests'.
 //
 // Its own header, beside SongValues.h and the other areas' (one header for each area's values). The song's reader of whether
 // it holds a send is here, in the model's base, rather than with the sends' code, because the selection (Selection.h), which
@@ -90,8 +89,8 @@ bool holdsItsLists (const SongSends&);
 // ID and its return as readID() reads one, a number or text (its return written as a number: Schema.h, sendTo, which no one
 // is to make text); its level by its description (SongText.h: readDescribed(), within -100 to 6, 0 where it has none or no
 // finite number); before its fader where its element says so. A property Phazite doesn't know is no part of it. Its track is
-// the one given (the TRACK its element is on). What reads the sends of a song that holds no values (Mixer.h: getSendValue(),
-// getSendValues()), and the tests.
+// the one given (the TRACK its element is on). What the tests read
+// a send by.
 SendValue readSendValue (const juce::ValueTree& sendElement, TrackID from);
 
 // How many sends were read into values (readSendValue(), which every reader below reads each send with) since Phazite
@@ -112,7 +111,7 @@ void countSendLook() noexcept;
 float keepSendLevel (float decibels);
 
 // A send's value read so from its SEND element as the song holds it, which everything that enters the sends' area reads
-// (what the song takes in as it opens, the keeper's safety net, a version's sends and a merge's choice): as readSendValue()
+// (what the song takes in as it is made of its state, a version's sends and a merge's choice): as readSendValue()
 // reads it, its level kept by keepSendLevel(); none for an element that is no SEND, and for one without an ID the song can
 // count on from (0, or at or past schema::maxID), which no send holds.
 std::optional<SendValue> readHeldSend (const juce::ValueTree& sendElement, TrackID from);
@@ -126,7 +125,7 @@ juce::ValueTree writeSendElement (const SendValue&);
 // The one rule for a SEND as the song holds it, the loader's (model/project/internal/Project.h: makeConsistent()) and the
 // held reader's: the element made what writeSendElement() writes of what readHeldSend() reads of it (each property the writer
 // writes as its text, none it leaves out: a level of 0, a preFader of false; no property Phazite doesn't know, no child), so
-// that the song's adoption of a song the loader made consistent takes in what the file holds unchanged (SendsArea.h, which
+// that a song made of the state of a file the loader made consistent takes in what the file holds unchanged (SendsArea.h, which
 // asserts it: isSendWrittenAsHeld()). Whether it changed the element; nothing for an element readHeldSend() reads as none.
 // What needs no change is found without anything allocated (the loader goes through every send). And whether an element is
 // so already: what keepSendAsHeld() leaves every SEND of a song it went through.
@@ -134,9 +133,8 @@ bool keepSendAsHeld (juce::ValueTree sendElement);
 bool isSendWrittenAsHeld (const juce::ValueTree& sendElement);
 
 // A TRACK element's sends, in the order the element holds them, each as readSendValue() reads it (none for an element that
-// is no TRACK); and its send of an ID, or none (the first with it). What reads a track's sends of a song that holds no values
-// (Mixer.h: getSendValues(), getSendValue(): the loader's song, a check's copy); a walk of the element's children, nothing
-// else.
+// is no TRACK); and its send of an ID, or none (the first with it). For the tests; a
+// walk of the element's children, nothing else.
 std::vector<SendValue> readTrackSends (const juce::ValueTree& trackElement);
 std::optional<SendValue> findTrackSend (const juce::ValueTree& trackElement, DeviceID);
 
@@ -144,8 +142,8 @@ std::optional<SendValue> findTrackSend (const juce::ValueTree& trackElement, Dev
 // one): each TRACK of its track list with an ID (a folder before the tracks in it), with that ID as held, and its SEND
 // elements with an ID the song holds a send by (readHeldSend()), each the first of its ID in the song, in the track's order
 // (a track's list, empty for one with none, valid during the call). A track without an ID holds none of the song's sends and
-// hides none (the loader gives every track one). What readSendsValue() reads the song's sends from, and what the song's
-// adoption takes them in by (SendsArea.h), so that the two read the same tree the same way. A walk of the tracks' children,
+// hides none (the loader gives every track one). What readSendsValue() reads the song's sends from, and what the song made
+// of its state takes them in by (SendsArea.h), so that the two read the same tree the same way. A walk of the tracks' children,
 // reading each SEND's ID alone.
 struct HeldSendElement
 {
@@ -166,13 +164,12 @@ DeviceID readHeldSendID (const juce::ValueTree& sendElement);
 // sends.
 SongSends readSendsValue (const juce::ValueTree& song);
 
-// The song's sends whole, cheap to copy: the area's value (SongValues.h: sends); for a song that holds no values (the loader's
-// song, a check's copy, which hold everything in their trees), read from its tree (readSendsValue()). For a pass over every
-// send, not for one track's (Mixer.h: getSendValues()).
+// The song's sends whole, cheap to copy: the area's value (SongValues.h: sends). For a pass over every send, not for one
+// track's (Mixer.h: getSendValues()).
 SongSends getSendsValue (const Song&);
 
 // Whether the song holds a send with this ID (an invalid one: no): what the selection asks of an automation point's owner
-// (Selection.h). A look in the area; for a song that holds no values, a walk of each track's children.
+// (Selection.h). A look in the area.
 bool holdsSend (const Song&, DeviceID);
 
 // A send with a property given a value as the send would read it from an element that held it, or taken away (a void value:

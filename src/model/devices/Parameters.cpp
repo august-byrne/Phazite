@@ -172,22 +172,22 @@ namespace
                && std::find (chains->begin(), chains->end(), chain) != chains->end();
     }
 
-    // locateParameter()'s look, with how a device, a container or a chain is found by its ID (a pointer valid while the look
-    // lasts, nullptr for none), whether a chain has a crossover, and how a fader's parameter is found (the song's tracks
-    // looked at: locateParameterInTree(), or tracks given).
-    template <typename FindDevice, typename HasCrossover, typename OnFader>
-    std::optional<FoundParameter> locate (const Song& song, const ParameterRef& ref, FindDevice&& findDeviceOf, HasCrossover&& crossover,
-                                          OnFader&& onFaderOf)
+    // locateParameter()'s look, with how a modulator or a macro is found by its ID, whether a send of an ID is there, how a
+    // device, a container or a chain is found by its ID (a pointer valid while the look lasts, nullptr for none), whether a
+    // chain has a crossover, how a fader's parameter is found, and whether a plug-in has a parameter (the song's areas looked
+    // at, or a file's tree's read once: locateParameterIn()).
+    template <typename FindModulator, typename HasSend, typename FindDevice, typename HasCrossover, typename OnFader, typename PluginHas>
+    std::optional<FoundParameter> locate (const ParameterRef& ref, FindModulator&& findModulatorOf, HasSend&& hasSend,
+                                          FindDevice&& findDeviceOf, HasCrossover&& crossover, OnFader&& onFaderOf, PluginHas&& pluginHas)
     {
         if (! ref.isValid())
             return {};
 
-        // A modulator's or a macro's first: a look in modulation's area by its ID (its FoundParameter holds no element: the
-        // song's tree holds none of it), which allocates nothing, before the tree's walks (locateParameterInTree()), which a
-        // macro's turn (the automation's watcher asks at each step) would otherwise pay for every track. A reference to a
-        // device, a chain or a fader looks there for an ID no modulator has (the song's IDs are each one item's), and finds
-        // none whatever the area holds.
-        if (const auto modulator = findModulatorOf (song, ref))
+        // A modulator's or a macro's first: a look in modulation's area by its ID, which allocates nothing, before the other
+        // looks, which a macro's turn (the automation's watcher asks at each step) would otherwise pay for every track. A
+        // reference to a device, a chain or a fader looks there for an ID no modulator has (the song's IDs are each one
+        // item's), and finds none whatever the area holds.
+        if (const auto modulator = findModulatorOf (ref))
         {
             // A macro's one parameter has the macro's ID.
             if (modulator->isMacro())
@@ -199,19 +199,18 @@ namespace
             return {};
         }
 
-        // A send's level, by the send's ID: a look in the sends' area (its FoundParameter holds no element: the song's tree
-        // holds no send). Its level is a send's one parameter (where it goes and whether it is before the fader are no
-        // parameters), and no chain or modulator has a send's ID, so only a reference to that parameter asks the sends.
+        // A send's level, by the send's ID: a look in the sends' area. Its level is a send's one parameter (where it goes and
+        // whether it is before the fader are no parameters), and no chain or modulator has a send's ID, so only a reference
+        // to that parameter asks the sends.
         if (ref.parameter == schema::sendLevelParameter)
-            if (getSendValue (song, ref.device).has_value())
+            if (hasSend (ref.device))
                 return found (ref, ParameterSource::send);
 
-        // A fader's, which controls read most, in the song's tree.
+        // A fader's, which controls read most, by its channel.
         if (auto onFader = onFaderOf (ref))
             return onFader;
 
-        // A device's, a plug-in's or a chain's: a look in the devices' area by its ID (its FoundParameter holds no element:
-        // the song's tree holds none of them).
+        // A device's, a plug-in's or a chain's: a look in the devices' area by its ID.
         const auto* value = findDeviceOf (ref.device);
 
         if (value == nullptr)
@@ -223,9 +222,7 @@ namespace
             {
                 // One its instance has, or one the song keeps a value of (a plug-in that doesn't load keeps what refers to
                 // it).
-                const auto there =
-                    findPluginParameter (song, ref).first != nullptr || findPluginValue (song, ref.device, ref.parameter).has_value();
-                return there ? found (ref, ParameterSource::plugin) : std::nullopt;
+                return pluginHas (ref) ? found (ref, ParameterSource::plugin) : std::nullopt;
             }
 
             case DeviceValue::Form::own:
@@ -265,12 +262,24 @@ namespace
 std::optional<FoundParameter> locateParameter (const Song& song, const ParameterRef& ref)
 {
     return locate (
-        song, ref, [&song] (DeviceID id) { return findDevice (song, id); }, [&song] (DeviceID chain) { return hasCrossover (song, chain); },
-        [&song] (const ParameterRef& onFader) { return locateParameterInTree (song, onFader); });
+        ref, [&song] (const ParameterRef& modulator) { return findModulatorOf (song, modulator); },
+        [&song] (DeviceID send) { return getSendValue (song, send).has_value(); }, [&song] (DeviceID id) { return findDevice (song, id); },
+        [&song] (DeviceID chain) { return hasCrossover (song, chain); },
+        [&song] (const ParameterRef& onFader)
+        {
+            const auto channel = findChannelOfFader (song, onFader.device);
+            return locateOnFader (onFader, channel, channel.isValid() ? getChannelVCA (song, channel) : DeviceID());
+        },
+        [&song] (const ParameterRef& plugin)
+        {
+            // One its instance has, or one the song keeps a value of (a plug-in that doesn't load keeps what refers to it).
+            return findPluginParameter (song, plugin).first != nullptr
+                   || findPluginValue (song, plugin.device, plugin.parameter).has_value();
+        });
 }
 
-std::optional<FoundParameter> locateParameter (const Song& song, const ParameterRef& ref, const SongDevices& devices,
-                                               const SongTracks& tracks, const std::vector<TrackID>& order)
+std::optional<FoundParameter> locateParameterIn (const juce::ValueTree& song, const ParameterRef& ref, const SongDevices& devices,
+                                                 const SongTracks& tracks, const std::vector<TrackID>& order, const SongSends& sends)
 {
     // A fader's among the tracks given, in their order, then the master's; its channel's VCA from the same.
     const auto onFaderOf = [&tracks, &order] (const ParameterRef& onFader)
@@ -280,19 +289,14 @@ std::optional<FoundParameter> locateParameter (const Song& song, const Parameter
         return locateOnFader (onFader, channel, value != nullptr ? value->vca : DeviceID());
     };
 
+    // A modulator's element of the ID read alone (never every modulator of the song for each curve), a send among the sends
+    // given; and no plug-in's parameter (no instance plays a file's song; its curves and links are kept by the loader as their
+    // elements say they are a plug-in's).
     return locate (
-        song, ref, [&devices] (DeviceID id) { return devices.find (id); },
-        [&devices] (DeviceID chain) { return hasCrossoverIn (devices, chain); }, onFaderOf);
-}
-
-std::optional<FoundParameter> locateParameterInTree (const Song& song, const ParameterRef& ref)
-{
-    if (! ref.isValid())
-        return {};
-
-    // A fader's, by its channel.
-    const auto channel = findChannelOfFader (song, ref.device);
-    return locateOnFader (ref, channel, channel.isValid() ? getChannelVCA (song, channel) : DeviceID());
+        ref,
+        [&song] (const ParameterRef& modulator) { return readModulatorValueIn (song, ModulatorID::fromRaw (modulator.device.getRaw())); },
+        [&sends] (DeviceID send) { return sends.find (send) != nullptr; }, [&devices] (DeviceID id) { return devices.find (id); },
+        [&devices] (DeviceID chain) { return hasCrossoverIn (devices, chain); }, onFaderOf, [] (const ParameterRef&) { return false; });
 }
 
 bool isStillThere (const Song& song, const FoundParameter& parameter)

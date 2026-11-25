@@ -402,11 +402,11 @@ TEST_CASE ("A clip on a return or a folder is left out, as only a track holds cl
     CHECK (clips.front().getParent()[schema::trackName].toString() == juce::String ("Lead"));
 }
 
-TEST_CASE ("A clip anywhere but on a track, in an element Phazite doesn't know too, is left out of the song and of its tree")
+TEST_CASE ("A clip anywhere but on a track, in an element Phazite doesn't know too, is left out of the song")
 {
     // The loader takes a CLIP out of every element it knows that holds none (a device here), but leaves the insides of an
-    // element of a kind it doesn't know as they are (Project.cpp, makeConsistent()): the song, which holds its clips as
-    // values, takes those out of its tree as it opens (ClipsArea.cpp, adopt()), so that its tree holds no CLIP at all.
+    // element of a kind it doesn't know as they are (Project.cpp, makeConsistent()): the song reads each track's clips alone,
+    // and what it doesn't know goes.
     Edited edited;
     const auto project = edited.open (
         [] (juce::XmlElement& song)
@@ -423,14 +423,13 @@ TEST_CASE ("A clip anywhere but on a track, in an element Phazite doesn't know t
         });
     REQUIRE (project != nullptr); // open() checks the song: no CLIP in its tree
     auto& song = project->getSong();
-    CHECK (findAll (song.getState(), schema::CLIP).empty());
-    CHECK (phazite::getAllClips (song).size() == 2); // the MIDI clip and the audio clip, each once
+    CHECK (findAll (phazite::test::copyWholeSong (song), schema::CLIP).size() == 2); // each clip on its track alone
+    CHECK (phazite::getAllClips (song).size() == 2);                                 // the MIDI clip and the audio clip, each once
     CHECK (phazite::getClips (song, edited.lead).size() == 1);
 
     // What Phazite doesn't know goes as the song opens, with the clip in it: on a track (named, roadmap step S5.20, the tracks'
     // switch: a track is a value, which holds its own fields alone) and at the song's root (the song's own: SongOwnArea.h).
     CHECK_FALSE (phazite::test::copyTrack (song, edited.lead).getChildWithName ("FUTURE").isValid());
-    CHECK_FALSE (song.getState().getChildWithName ("ELSEWHERE").isValid());
     CHECK_FALSE (phazite::test::copyWholeSong (song).getChildWithName ("ELSEWHERE").isValid());
 }
 
@@ -562,10 +561,10 @@ TEST_CASE ("The loader's checks alone leave the song's count of IDs past every I
     REQUIRE (note != nullptr);
     note->setAttribute ("link", "900000");
 
-    phazite::Song song (juce::ValueTree::fromXml (*xml));
-    phazite::makeConsistent (song);
-    const auto counted = phazite::getNextID (song);
-    CHECK (phazite::findNextID (phazite::test::copyWholeSong (song)) <= counted); // past all it holds, its tree and values
+    auto file = juce::ValueTree::fromXml (*xml);
+    phazite::makeConsistent (file);
+    const auto counted = phazite::readID (file[schema::nextID]);
+    CHECK (phazite::findNextID (file) <= counted); // past all it holds
     CHECK (counted < 900000);
 }
 
@@ -1031,7 +1030,7 @@ TEST_CASE ("An ID past 2^61 inside an element Phazite doesn't know neither raise
             REQUIRE (reopened != nullptr);
             checkSong (reopened->getSong());
             CHECK (findNamedTrack (reopened->getSong(), "Added").isValid());
-            const auto future = reopened->getSong().getState().getChildWithName ("FUTURE");
+            const auto future = phazite::test::copyWholeSong (reopened->getSong()).getChildWithName ("FUTURE");
             CHECK_FALSE (future.isValid()); // dropped as the song opened (SongOwnArea.h), uncounted
             REQUIRE (reopened->save().wasOk());
             const auto text = file.loadFileAsString();
@@ -1219,11 +1218,11 @@ std::vector<juce::String> describeTempoMap (const phazite::Song& song)
 
 TEST_CASE ("A damaged tempo map opens as a whole value, each entry as its description reads it, saved and opened again the same")
 {
-    // The song takes in its file's tempo map as it opens (Song::holdValues(): TempoMapValue.h, readHeldTempoMap()): an entry
-    // without a bpm or a beat, with a number that is none, a map with no entry, one without a time signature, and what Phazite
-    // doesn't know on the map and its entries. Each opens holding together (the check, in Edited::open()), holds what its
-    // description reads, and is the same once saved and opened again, its TEMPOMAP written tempos first, then time
-    // signatures, without what Phazite doesn't know.
+    // The song takes in its file's tempo map as it opens (SongState.h, readSongTree(): TempoMapValue.h, readHeldTempoMap()): an
+    // entry without a bpm or a beat, with a number that is none, a map with no entry, one without a time signature, and what
+    // Phazite doesn't know on the map and its entries. Each opens holding together (the check, in Edited::open()), holds what its
+    // description reads, and is the same once saved and opened again, its TEMPOMAP written tempos first, then time signatures,
+    // without what Phazite doesn't know.
     struct Case
     {
         const char* about;
@@ -1313,9 +1312,9 @@ TEST_CASE ("A damaged tempo map opens as a whole value, each entry as its descri
 
 TEST_CASE ("A damaged chord lane opens as a whole value, each entry as its description reads it, saved and opened again the same")
 {
-    // The song takes in its file's chord lane as it opens (Song::holdValues(): ChordLaneValue.h, readHeldChordLane()): a chord
-    // without a start, a length or a degree, numbers that are none or outside their ranges, a key without a root, keys before
-    // chords, an empty lane, and what Phazite doesn't know on the lane and its entries. Each opens holding together (the
+    // The song takes in its file's chord lane as it opens (SongState.h, readSongTree(): ChordLaneValue.h, readHeldChordLane()): a
+    // chord without a start, a length or a degree, numbers that are none or outside their ranges, a key without a root, keys
+    // before chords, an empty lane, and what Phazite doesn't know on the lane and its entries. Each opens holding together (the
     // check, in Edited::open()), holds what its description reads, and is the same once saved and opened again, its CHORDLANE
     // written chords first, then keys, without what Phazite doesn't know. An empty lane stays a lane.
     struct Case
@@ -1661,7 +1660,7 @@ TEST_CASE ("A chord's start and a key change's written as text read as the same 
         CHECK (edited.file.loadFileAsString() == firstSave);
 
         // And as a lane is read where no loader read it first (ChordLaneValue.h: as the song holds one, a version's or a
-        // merge's, and as a song that keeps everything in its tree reads one), the same number for the same text.
+        // merge's), the same number for the same text.
         juce::ValueTree lane (schema::CHORDLANE);
         lane.appendChild (juce::ValueTree (schema::CHORD, { { schema::chordStart, text }, { schema::chordLength, 2.0 } }), nullptr);
 
@@ -2657,7 +2656,6 @@ TEST_CASE ("Elements and properties Phazite doesn't know stay where they are, as
     // At the song's root, what Phazite doesn't know goes as the song opens, with everything in it (roadmap step S5.20, the
     // song's own: the song holds its root's own as values, and nothing else of it: SongOwnArea.h).
     CHECK (saved->getChildByName ("FUTURE") == nullptr);
-    CHECK_FALSE (project->getSong().getState().getChildWithName ("FUTURE").isValid());
     // And a track's: what Phazite doesn't know on a TRACK (or the MASTER) isn't kept, as a track is a value beside the song's
     // tree, which holds its own fields alone (named, roadmap step S5.20, the tracks' switch: docs/project-format.md); nor a
     // note's and a controller's value: what Phazite doesn't know on a NOTE or a CONTROL isn't kept, as a clip's notes are
@@ -2751,13 +2749,13 @@ TEST_CASE ("A MIDI link to what the song hasn't, a controller's or a parameter's
 
 TEST_CASE ("Damaged sections open as a whole value, each section as its description reads it, saved and opened again the same file")
 {
-    // The song takes in its file's sections as it opens (Song::holdValues(): SectionsValue.h, readHeldSections()): numbers
-    // written as text, an ID as text, what Phazite doesn't know on the SECTIONS and a section, a child of another type, a
-    // section without a length (four beats, its description's fallback), an energy beyond its range, a colour written empty,
-    // two at one start (in the file's order), two of one ID and one without an ID (each kept, given an ID of its own), and an
-    // empty SECTIONS. Each opens holding together (the check, in Edited::open()), holds what its description reads, in the
-    // file's order, each section with an ID of its own, and is the same once saved and opened again, its SECTIONS written
-    // without what Phazite doesn't know, and the same file saved twice. An empty SECTIONS stays one.
+    // The song takes in its file's sections as it opens (SongState.h, readSongTree(): SectionsValue.h, readHeldSections()):
+    // numbers written as text, an ID as text, what Phazite doesn't know on the SECTIONS and a section, a child of another type, a
+    // section without a length (four beats, its description's fallback), an energy beyond its range, a colour written empty, two
+    // at one start (in the file's order), two of one ID and one without an ID (each kept, given an ID of its own), and an empty
+    // SECTIONS. Each opens holding together (the check, in Edited::open()), holds what its description reads, in the file's
+    // order, each section with an ID of its own, and is the same once saved and opened again, its SECTIONS written without what
+    // Phazite doesn't know, and the same file saved twice. An empty SECTIONS stays one.
     struct Case
     {
         const char* about;
@@ -2782,7 +2780,7 @@ TEST_CASE ("Damaged sections open as a whole value, each section as its descript
     {
         std::vector<juce::String> lines;
 
-        if (! song.getState().getChildWithName (schema::SECTIONS).isValid())
+        if (! phazite::test::copyWholeSong (song).getChildWithName (schema::SECTIONS).isValid())
             return lines;
 
         lines.push_back ("sections");
@@ -2813,7 +2811,7 @@ TEST_CASE ("Damaged sections open as a whole value, each section as its descript
           R"(<SECTIONS><SECTION id="900006" start="0" length="4" name="A"/><SECTION id="900006" start="4" length="4" name="B"/>)"
           R"(<SECTION start="8" length="4" name="C"/><SECTION id="" start="12" length="4" name="D"/></SECTIONS>)",
           { "sections", "A 0.000 4.000 0.50 none", "B 4.000 4.000 0.50 none", "C 8.000 4.000 0.50 none", "D 12.000 4.000 0.50 none" } },
-        { "an empty SECTIONS", R"(<SECTIONS/>)", { "sections" } },
+        { "an empty SECTIONS: none", R"(<SECTIONS/>)", {} },
     };
 
     for (const auto& each : cases)
@@ -2832,7 +2830,7 @@ TEST_CASE ("Damaged sections open as a whole value, each section as its descript
         CHECK (idsOf (project->getSong()).size() == phazite::getSectionsValue (project->getSong()).sections.size());
 
         const auto sections = phazite::test::copyWholeSong (project->getSong()).getChildWithName (schema::SECTIONS);
-        REQUIRE (sections.isValid());
+        REQUIRE (sections.isValid() == ! each.expected.empty()); // an empty SECTIONS is none
         CHECK (sections.getNumProperties() == 0);
 
         for (const auto& child : sections)
@@ -2857,12 +2855,12 @@ TEST_CASE ("Damaged sections open as a whole value, each section as its descript
 
 TEST_CASE ("Damaged MIDI links open as a whole value, each link as its description reads it, saved and opened again the same file")
 {
-    // The song takes in its file's links as it opens (Song::holdValues(): MidiLinksValue.h, readHeldMidiLinks()): numbers
-    // written as text, or not whole, a device's ID as a number, what Phazite doesn't know on the MIDILINKS and a link, a child
-    // of another type, a second link of one parameter (the first stays), and an empty MIDILINKS. Each opens holding together
-    // (the check, in Edited::open()), holds what its description reads, in the file's order, and is the same once saved and
-    // opened again, its MIDILINKS written without what Phazite doesn't know, and the same file saved twice. An empty MIDILINKS
-    // stays one.
+    // The song takes in its file's links as it opens (SongState.h, readSongTree(): MidiLinksValue.h, readHeldMidiLinks()):
+    // numbers written as text, or not whole, a device's ID as a number, what Phazite doesn't know on the MIDILINKS and a link, a
+    // child of another type, a second link of one parameter (the first stays), and an empty MIDILINKS. Each opens holding
+    // together (the check, in Edited::open()), holds what its description reads, in the file's order, and is the same once saved
+    // and opened again, its MIDILINKS written without what Phazite doesn't know, and the same file saved twice. An empty
+    // MIDILINKS stays one.
     struct Case
     {
         const char* about;
@@ -2874,7 +2872,7 @@ TEST_CASE ("Damaged MIDI links open as a whole value, each link as its descripti
     {
         std::vector<juce::String> lines;
 
-        if (! song.getState().getChildWithName (schema::MIDILINKS).isValid())
+        if (! phazite::test::copyWholeSong (song).getChildWithName (schema::MIDILINKS).isValid())
             return lines;
 
         lines.push_back ("links");
@@ -2898,7 +2896,7 @@ TEST_CASE ("Damaged MIDI links open as a whole value, each link as its descripti
           R"(<MIDILINK channel="1" number="1" device="SYNTH" parameter="cutoff"/>)"
           R"(<MIDILINK channel="1" number="2" device="SYNTH" parameter="resonance"/></MIDILINKS>)",
           { "links", "3 3 resonance", "1 1 cutoff" } },
-        { "an empty MIDILINKS", R"(<MIDILINKS/>)", { "links" } },
+        { "an empty MIDILINKS: none", R"(<MIDILINKS/>)", {} },
     };
 
     for (const auto& each : cases)
@@ -2917,7 +2915,7 @@ TEST_CASE ("Damaged MIDI links open as a whole value, each link as its descripti
         CHECK (describe (project->getSong()) == each.expected);
 
         const auto links = phazite::test::copyWholeSong (project->getSong()).getChildWithName (schema::MIDILINKS);
-        REQUIRE (links.isValid());
+        REQUIRE (links.isValid() == ! each.expected.empty()); // an empty MIDILINKS is none
         CHECK (links.getNumProperties() == 0);
 
         for (const auto& child : links)

@@ -405,11 +405,7 @@ SongSends readSendsValue (const juce::ValueTree& song)
 SongSends getSendsValue (const Song& song)
 {
     countSendLook();
-
-    if (const auto* values = song.getValues())
-        return values->sends.get();
-
-    return readSendsValue (song.getState());
+    return song.getValues()->sends.get();
 }
 
 bool holdsSend (const Song& song, DeviceID id)
@@ -418,16 +414,7 @@ bool holdsSend (const Song& song, DeviceID id)
         return false;
 
     countSendLook();
-
-    if (const auto* values = song.getValues())
-        return values->sends.get().find (id) != nullptr;
-
-    for (const auto& track : listTrackElements (song.getState()))
-        for (const auto& child : track)
-            if (child.hasType (schema::SEND) && readHeldID (child[schema::sendID]) == id.getRaw())
-                return true;
-
-    return false;
+    return song.getValues()->sends.get().find (id) != nullptr;
 }
 
 //==============================================================================

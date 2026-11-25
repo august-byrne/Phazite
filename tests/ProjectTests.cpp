@@ -121,7 +121,7 @@ TEST_CASE ("A new project creates its folder, subfolders and file")
     CHECK_FALSE (project->hasUnsavedChanges());
 
     // With the song, in memory and as the file, which holds it alone.
-    CHECK (project->getSong().getState().hasType (phazite::schema::PHAZITE));
+    CHECK (phazite::test::copyWholeSong (project->getSong()).hasType (phazite::schema::PHAZITE));
     CHECK (phazite::test::readXml (project->getFile())->hasTagName ("PHAZITE"));
 
     // A second project with the same name would overwrite the first, so it is refused.

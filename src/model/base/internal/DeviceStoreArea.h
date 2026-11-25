@@ -7,11 +7,6 @@
 // conversion of its properties and VALUE elements are DeviceStoreValue.h's. It holds no IDs of its own: its entries are by
 // the IDs of the devices and chains, which the devices hold. Message thread, but for whole state's parts and the
 // comparisons, which read only the values they are given.
-//
-// An area of properties and children of elements that stay in the song's tree (a DEVICE, a CHAIN), each entry by its item's
-// ID: its keeper takes in what comes with one, and keeps an item's entries when the item goes (a removal's Undo finds them;
-// an answer of a plug-in a step took away is written for it by ID), never writing nor comparing those of an item the song
-// doesn't hold; they are dropped as the song is saved and opened again.
 #pragma once
 
 #include "model/base/IDs.h"
@@ -34,7 +29,7 @@ struct SongValues::DeviceStoreTeller final : ValueArea<DeviceStore>::Listener
     DeviceStoreTeller (SongValues&, juce::ListenerList<SongValues::Listener>&);
     ~DeviceStoreTeller() override;
 
-    SongValues& values; // what the devices' keeper told, each item's place
+    SongValues& values; // what the devices' area told, each item's place
     ValueArea<DeviceStore>& area;
     juce::ListenerList<SongValues::Listener>& listeners;
 
@@ -42,42 +37,6 @@ struct SongValues::DeviceStoreTeller final : ValueArea<DeviceStore>::Listener
 
     JUCE_DECLARE_NON_COPYABLE (DeviceStoreTeller)
 };
-
-// The store's part of the keeper (SongValues.h), in the mode of the moment, nothing while the history undoes or redoes:
-//   (a) a DEVICE, a CONTAINER or a CHAIN that comes into the song by itself with what the store holds in a DEVICE or a CHAIN
-//       in it (a test's, on the master: DeviceStoreValue.h, holdsStoreIn(); a TRACK's is the tracks' safety net's,
-//       takeChannelStoreIn()): each such item's entries read as the song holds them (readHeldStoreOf()), made the item's in the
-//       store (its song's entries replaced: the element is what the item holds), its window's place given, all of it taken
-//       out of the element, each item counted (countDeviceStoreAdopted());
-//   (b) nothing for a VALUE by itself: none comes, as the song's tree holds no DEVICE (the devices' part of the keeper takes
-//       one out as it comes in, after (a): DevicesArea.h);
-//   (c) nothing as an item leaves: the store keeps its entries (DeviceStoreValue.h, rule (b)).
-// And the adoption from the loaded tree, which the song's holdValues() asks.
-struct SongValues::DeviceStoreKeeper
-{
-    DeviceStoreKeeper (SongValues&, Song&);
-
-    // A child added to an element of the song's tree (the keeper's callback, but while the history undoes or redoes, for every
-    // element, whoever's it is): nothing, at once, but for what is the store's.
-    void childAdded (juce::ValueTree& parent, juce::ValueTree& child);
-
-    // What every DEVICE and CHAIN of the tree the loader made consistent holds of the store, and its window's place, out of
-    // the tree, once its reader read them into the area and the windows' value as the song holds them (readHeldDeviceStoreIn(),
-    // each of which the loader left as it holds it: asserted, DeviceStoreValue.h: isStoreWrittenAsHeld(); SongValues.cpp:
-    // adopt()).
-    static void adopt (SongValues& into, Song& loaded);
-
-    SongValues& values;
-    Song& song;
-
-    JUCE_DECLARE_NON_COPYABLE (DeviceStoreKeeper)
-};
-
-// The DEVICE and CHAIN elements of a channel's element (a TRACK or the MASTER that comes into the song with them: the tracks'
-// safety net, TracksArea.h), in its devices and containers, what each holds of the store read in as the song holds it
-// (DeviceStoreValue.h: readHeldStoreOf(): its entries made the element's) and a device's window's place. How many of them held
-// any of it (DeviceStoreValue.h: holdsStoreIn()).
-int takeChannelStoreIn (DeviceStore&, DevicesOutside&, const juce::ValueTree& channel);
 
 // The store's part of whole state (WholeState.cpp: writeIn()): whether a child of an element in a copy of the song leads to a
 // DEVICE or a CHAIN (the master, a channel's devices and containers, a container's chains, a chain's devices, from the song's

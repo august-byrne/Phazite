@@ -3,10 +3,6 @@
 // a list of SongValues.h's, WholeState.h's or IDsHeld.h's asks in turn, a line for each area. Its value and the conversion of
 // its elements are SendsValue.h's. It holds IDs (each send's). Message thread, but for whole state's parts and the
 // comparisons, which read only the values they are given.
-//
-// An area under an element that stays in the song's tree, a TRACK, as the clips are: so its keeper follows a track as it
-// comes and goes (alone, a folder with its tracks, the track list), as the clips' keeper does; no other element holds a send,
-// and no edit moves one to another track (a version's pass sets its track: model/versions/ApplySong.cpp, makeSendsLike()).
 #pragma once
 
 #include "model/base/IDs.h"
@@ -40,16 +36,6 @@ struct SongValues::SendsTeller final : ValueArea<SongSends>::Listener
     JUCE_DECLARE_NON_COPYABLE (SendsTeller)
 };
 
-// The sends' adoption from the loaded tree, which the song's holdValues() asks: every SEND element out of the tree the loader
-// made consistent, those anywhere else too, once its reader read the song's into the area as the song holds them
-// (readHeldSendsIn(): each track's in its order, read by readHeldSend(), each of which the loader left as the song holds it:
-// asserted; SongValues.cpp: adopt()). The keeper asks the sends of nothing: no track is in a live song's tree for a SEND to
-// come into it on (the tracks' safety net reads a TRACK's: takeTrackSendsIn(), below).
-struct SongValues::SendsKeeper
-{
-    static void adopt (SongValues& into, Song& loaded);
-};
-
 // The sends' part of whole state (WholeState.cpp: writeIn()): a copy's TRACK given its sends from the values kept, by its ID,
 // in their list's order, after its other children (its modulators and macros among them, which modulation's part writes
 // before: decision L.5 of roadmap step S5.20's design). Nothing for another element. Whole state writes each TRACK itself
@@ -59,9 +45,4 @@ void writeSendsIn (juce::ValueTree& element, const SongState&);
 // The sends' reader of a song's tree (SongState.h: readSongTree(), a line of it): every send of its tracks into the state, as
 // the song holds them; no tree changed. Any thread.
 void readHeldSendsIn (const juce::ValueTree& song, SongState&);
-
-// The SEND elements on a track's element (one that comes into the song with them: the tracks' safety net, TracksArea.h), each
-// read as the song holds one (SendsValue.h: readHeldSend()) from the track of this ID, after its others; one of an ID the
-// sends hold already left out. How many it read.
-int takeTrackSendsIn (SongSends&, const juce::ValueTree& track, TrackID);
 } // namespace phazite

@@ -1963,7 +1963,7 @@ TEST_CASE ("A whole curve set, taken out, renamed and put in order by its parame
     const auto theTwoLeft = textOf ({ pan, makeup });
     CHECK (told.take() == juce::StringArray { textOf ({ pan }), textOf ({ makeup }), theTwoLeft, theTwoLeft });
     checkAutomation (model, {});
-    CHECK (model.getState().getChildWithName (phazite::schema::AUTOMATION).isValid());
+    CHECK_FALSE (phazite::test::copyWholeSong (model).getChildWithName (phazite::schema::AUTOMATION).isValid());
 
     // A curve set into a song without curves: one action.
     CHECK (countActionsOf (undo, model, "Set into None",

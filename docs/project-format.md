@@ -61,7 +61,10 @@ S5.20). An element it does know, where `Schema.h` doesn't put it, it leaves out 
 
 ## 3. The song
 
-`PHAZITE` holds, among others (Schema.h names every one):
+`PHAZITE` holds, among others (Schema.h names every one), its children written in one order, the order Schema.h describes
+them in (`LASTKEY`, `TEMPOMAP`, `PIANOROLL`, `TRACKS`, `MASTER`, `AUTOMATION`, `MIDILINKS`, `MERGING`, `SECTIONS`,
+`CHORDLANE`), each where the song holds it: a file whose children came in another order is read as well, and written in
+this one at its first save:
 - `TEMPOMAP`: the tempos (`TEMPO`: `beat`, `bpm`, and `curve`, written only while it isn't 1, a step) and time
   signatures (`TIMESIGNATURE`: `beat`, `numerator`, `denominator`), each from its beat. Read in any order, each kind
   by beat, one of a kind for a beat (a tempo's or a time signature's key is its beat: of two at one beat the first
@@ -90,7 +93,7 @@ S5.20). An element it does know, where `Schema.h` doesn't put it, it leaves out 
   parameter, the first kept as the song opens; a `channel` or a `number` written as text reads as the loader reads a
   number, made whole, and a property or an element Phazite doesn't know on `MIDILINKS` or a link isn't kept. Written
   in the song's order (a link made goes after the others), each link's four properties, its `device`'s ID as text; the
-  element is written once the first link is made, and stays, empty, once the last goes;
+  element is written only while the song has a link, and an empty one is read as none;
 - `SECTIONS`: the song's parts (`SECTION`: `id`, `start`, `length`, `name` and `energy`, always written, and `role`, `tip`
   and `colour` each written only where the section has one, a `colour` written empty kept so). Read in any order (the
   sections' readers sort them by their starts, two at one start in the file's order), each ID once (a second section of
@@ -98,7 +101,7 @@ S5.20). An element it does know, where `Schema.h` doesn't put it, it leaves out 
   a clip would be: section 7, "IDs"); a number that is absent or none reads as its description says (a `start` of 0, a
   `length` of 4, an `energy` of 0.5), a number written as text reads as the loader reads a number, and a property or an
   element Phazite doesn't know on `SECTIONS` or a section isn't kept. Written in the song's order (a section made goes
-  after the others); the element is written once the first section is made, and stays, empty, once the last goes;
+  after the others); the element is written only while the song has a section, and an empty one is read as none;
 - `CHORDLANE`, once the song has a chord lane (without one, its keys are the key set last, `LASTKEY`): its chords
   (`CHORD`: `start`, `length`, `degree`, `type`, and `accidental` and `inversion`, each written only while it isn't 0)
   and the keys they are in (`CHORDKEY`: `start`, `keyRoot`, `keyScale`). Read in any order (the lane's readers sort each
@@ -343,8 +346,7 @@ file Phazite wrote is consistent already and comes through unchanged, and so doe
   grid that held only that holds none); a `LASTKEY` without a `keyRoot` goes (it holds no key; one with a root and no
   `keyScale` stays so, read as major); an empty text on `MERGING` goes (one without its `version`, `head` or `before`
   stays as it is: no merge waits, the versions say so, and Cancel Merge takes it out). A property or an element Phazite
-  doesn't know on `PHAZITE`, `LASTKEY`, `PIANOROLL` or `MERGING` goes as the song opens (section 2). `LASTKEY`,
-  `PIANOROLL` and `MERGING`, where the song holds them, are written after its other elements, in that order.
+  doesn't know on `PHAZITE`, `LASTKEY`, `PIANOROLL` or `MERGING` goes as the song opens (section 2).
 - **Alias groups:** the clips of a group (`link`) hold the same notes and controllers' values, and its audio clips play
   one file alike: they share their `file` (the path as written, compared as text, whether the file is there or not),
   `tempo`, `pitch`, `reversed` and `WARP` markers. Each keeps its own place, the part of the file it plays (`fileStart`,

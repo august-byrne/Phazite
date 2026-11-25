@@ -330,43 +330,19 @@ TEST_CASE ("Song values' clips: a warp marker added to an audio clip tells the c
     CHECK (phazite::getWarpMarkers (w.song, clip).size() >= 1);
 }
 
-TEST_CASE ("Song values' clips: what listens to the song's tree hears nothing of a clip, and the clips' listener nothing else")
+TEST_CASE ("Song values' clips: the clips' listener hears each edit of a clip once, and nothing else")
 {
-    // The song's tree holds no clip: what listens to it hears nothing of one, and the clips' listener hears each once.
+    // The clips' listener hears each once.
     Watched w;
     const auto clip = w.s.addMidiClip (w.s.firstTrack, 0.0, 4.0);
     REQUIRE (clip.isValid());
-    CHECK_FALSE (phazite::test::treeHolds (w.song, phazite::schema::CLIP));
 
-    // Everything a listener of the song's root hears.
-    struct TreeHeard final : juce::ValueTree::Listener
-    {
-        explicit TreeHeard (const juce::ValueTree& rootToHear)
-            : root (rootToHear)
-        {
-            root.addListener (this);
-        }
-        ~TreeHeard() override { root.removeListener (this); }
-
-        juce::ValueTree root;
-        int heard = 0;
-
-        void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { ++heard; }
-        void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override { ++heard; }
-        void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override { ++heard; }
-        void valueTreeChildOrderChanged (juce::ValueTree&, int, int) override { ++heard; }
-    };
-
-    TreeHeard tree (w.song.getState());
-
-    // A clip's property set, and a clip renamed: through the tree, nothing; to the clips' listener, one call each, which
+    // A clip's property set, and a clip renamed: to the clips' listener, one call each, which
     // tells that clip alone, once.
-    const auto toldOnce = [&w, &tree, clip] (const std::function<void()>& edit)
+    const auto toldOnce = [&w, clip] (const std::function<void()>& edit)
     {
-        tree.heard = 0;
         w.told.calls.clear();
         edit();
-        CHECK (tree.heard == 0);
         REQUIRE (w.told.calls.size() == 1);
         REQUIRE (w.told.calls[0].clips.size() == 1);
         CHECK (w.told.calls[0].clips[0].id == clip);
@@ -378,11 +354,8 @@ TEST_CASE ("Song values' clips: what listens to the song's tree hears nothing of
     toldOnce ([&w, clip] { phazite::toggleClipsMuted (w.song, { clip }); });
     toldOnce ([&w, clip] { phazite::renameClips (w.song, { clip }, "Renamed"); });
 
-    // A track's name: through the tracks' value since the tracks' switch (roadmap step S5.20; through the tree before), so
-    // that the tree hears nothing of it either; nothing told the clips' listener.
-    tree.heard = 0;
+    // A track's name: through the tracks' value: nothing told the clips' listener.
     w.told.calls.clear();
     phazite::setTrackName (w.song, w.s.firstTrack, "Renamed");
-    CHECK (tree.heard == 0);
     CHECK (w.told.calls.empty());
 }

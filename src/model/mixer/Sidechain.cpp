@@ -9,6 +9,8 @@
 #include "model/base/internal/DevicesArea.h"
 #include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SendsValue.h"
+#include "model/base/internal/TracksValue.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/DrumKit.h"
@@ -20,6 +22,7 @@
 #include <functional>
 #include <set>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace phazite
@@ -65,17 +68,29 @@ namespace
         return tracks;
     }
 
+    // The channel a device or a container is on, by its value: a track's ID, or the master's (as Mixer.h's getDeviceChannel()
+    // finds it); none for a chain or an ID the devices haven't.
+    TrackID findChannelIn (const SongTracks& tracks, const SongDevices& devices, DeviceID device)
+    {
+        const auto* value = devices.find (device);
+
+        if (value == nullptr || value->form == DeviceValue::Form::chain)
+            return {};
+
+        return value->place.onMaster ? tracks.master.id : value->place.track;
+    }
+
     // Whether a track's sound comes from any of these tracks: a folder mixes the tracks inside it, a return takes in what
     // is sent to it, a drum pad's track plays what its sampler's track's sampler plays for it (DrumKit.h), and a device can
-    // listen to a sidechain. The track's value and those inside a folder from the tracks given (taken once by the caller: a
-    // song without values reads its tree for them, Tracks.h: readTracksWithoutValues()).
-    bool isFedBy (const Song& song, const SongTracks& tracks, const SongDevices& devices, const TrackValue& value,
+    // listen to a sidechain. Of the song's values given (a song's areas, or a file's tree's read once by the loader:
+    // forgetSidechainLoopsIn()).
+    bool isFedBy (const SongTracks& tracks, const SongDevices& devices, const SongSends& sends, const TrackValue& value,
                   const std::vector<TrackID>& feeding)
     {
         const auto track = value.id;
         const auto kind = value.kind;
 
-        if (value.pad.has_value() && contains (feeding, getDeviceChannel (song, value.padDevice)))
+        if (value.pad.has_value() && contains (feeding, findChannelIn (tracks, devices, value.padDevice)))
             return true;
 
         // Every track inside a folder, in folders inside it too.
@@ -94,9 +109,10 @@ namespace
 
         if (kind == TrackValue::Kind::returnTrack)
             for (const auto sender : feeding)
-                for (const auto send : getSends (song, sender))
-                    if (getSendTarget (song, send) == track)
-                        return true;
+                if (const auto* list = sends.tracks.find (sender.getRaw()))
+                    for (const auto send : *list)
+                        if (const auto* found = sends.find (send); found != nullptr && found->to == track)
+                            return true;
 
         if (const auto* list = devices.findList (makeChannelPlace (track, false)))
             for (const auto id : *list)
@@ -104,6 +120,67 @@ namespace
                     return true;
 
         return false;
+    }
+
+    // The tracks whose sound comes from a track's, the track first (getTracksFedBy()), of the song's values given, the tracks
+    // in the song's order.
+    std::vector<TrackID> findTracksFedBy (const SongTracks& tracks, const std::vector<TrackID>& order, const SongDevices& devices,
+                                          const SongSends& sends, TrackID track)
+    {
+        std::vector<TrackID> fed { track };
+
+        for (auto grew = true; grew;)
+        {
+            grew = false;
+
+            for (const auto id : order)
+            {
+                if (const auto* other = tracks.tracks.find (id.getRaw());
+                    other != nullptr && ! contains (fed, id) && isFedBy (tracks, devices, sends, *other, fed))
+                {
+                    fed.push_back (id);
+                    grew = true;
+                }
+            }
+        }
+
+        return fed;
+    }
+
+    // The devices whose sidechains are loops (forgetSidechainLoops()), of the song's values given, one at a time, so that of two
+    // devices listening to each other's tracks only the first lets go: the other's is no loop then. Each device on a track's
+    // channel in the song's order (a device in a container has no sidechain: Containers.h, nor does the master's listen to a
+    // loop), its sidechain taken away in the devices given as it is found.
+    std::vector<DeviceID> findSidechainLoops (const SongTracks& tracks, const std::vector<TrackID>& order, SongDevices devices,
+                                              const SongSends& sends)
+    {
+        std::vector<DeviceID> loops;
+
+        for (const auto track : order)
+        {
+            const auto* list = devices.findList (makeChannelPlace (track, false));
+
+            if (list == nullptr)
+                continue;
+
+            for (const auto id : std::vector<DeviceID> (list->begin(), list->end()))
+            {
+                const auto* device = devices.find (id);
+
+                if (device == nullptr || ! device->sidechain.isValid() || device->place.container.isValid())
+                    continue;
+
+                if (! contains (findTracksFedBy (tracks, order, devices, sends, track), device->sidechain))
+                    continue;
+
+                auto cut = *device;
+                cut.sidechain = {};
+                devices.devices = devices.devices.set (id.getRaw(), std::move (cut));
+                loops.push_back (id);
+            }
+        }
+
+        return loops;
     }
 
     SidechainChoice describe (const Song& song, TrackID track)
@@ -234,52 +311,11 @@ namespace
         if (findOfType (song, id, Vocoder::typeID) != nullptr)
             setDeviceValue (song, id, (int) Vocoder::carrier, (float) Vocoder::Carrier::track);
     }
-
-    // A channel's DEVICE element by its ID in the tree of a song that holds no values (the loader's, whose tree holds its
-    // devices: model/project/internal/Project.h, makeConsistent()), invalid for none: a device that listens to a sidechain is
-    // on a channel, never in a container.
-    juce::ValueTree findChannelDeviceElement (const juce::ValueTree& element, DeviceID id)
-    {
-        for (const auto& child : element)
-        {
-            if (child.hasType (schema::DEVICE) && readDeviceElementID (child) == id)
-                return child;
-
-            if (child.hasType (schema::TRACKS) || child.hasType (schema::TRACK) || child.hasType (schema::MASTER))
-                if (auto found = findChannelDeviceElement (child, id); found.isValid())
-                    return found;
-        }
-
-        return {};
-    }
 } // namespace
 
 std::vector<TrackID> getTracksFedBy (const Song& song, TrackID track)
 {
-    std::vector<TrackID> fed { track };
-    const auto all = getTrackIDs (song);
-    // Read once (a copy, whatever reads the song meanwhile): nothing here changes it; for a song that holds no values (the
-    // loader's) its tree read once (Tracks.h: readTracksWithoutValues()), and its tree's devices' fields alone
-    // (DevicesValue.h: readDevicesFields()), never a device's values.
-    const auto tracks = song.getValues() != nullptr ? getTracksValue (song) : readTracksWithoutValues (song);
-    const auto devices = song.getValues() != nullptr ? getDevicesValue (song) : readDevicesFields (song.getState());
-
-    for (auto grew = true; grew;)
-    {
-        grew = false;
-
-        for (const auto id : all)
-        {
-            if (const auto* other = tracks.tracks.find (id.getRaw());
-                other != nullptr && ! contains (fed, id) && isFedBy (song, tracks, devices, *other, fed))
-            {
-                fed.push_back (id);
-                grew = true;
-            }
-        }
-    }
-
-    return fed;
+    return findTracksFedBy (getTracksValue (song), getTrackOrder (song).order, getDevicesValue (song), getSendsValue (song), track);
 }
 
 bool hasSidechain (const Song& song, DeviceID id)
@@ -437,21 +473,32 @@ void forgetSidechainsOfBus (Song& song, TrackID bus)
 
 void forgetSidechainLoops (Song& song)
 {
-    // One at a time, so that of two devices listening to each other's tracks only the first lets go: the other's is no loop
-    // then. A device in a container has no sidechain (Containers.h), nor does the master's listen to a loop.
-    for (const auto& device : getSongDeviceOutline (song))
-    {
-        if (! device.sidechain.isValid() || device.container.isValid() || ! isSongTrack (song, device.channel))
-            continue;
+    for (const auto id :
+         findSidechainLoops (getTracksValue (song), getTrackOrder (song).order, getDevicesValue (song), getSendsValue (song)))
+        setDeviceFields (song, id, [] (DeviceValue& value) { value.sidechain = {}; });
+}
 
-        if (! contains (getTracksFedBy (song, device.channel), device.sidechain))
-            continue;
+void forgetSidechainLoopsIn (juce::ValueTree& song)
+{
+    // By the one rule, of the tree's devices (their own fields alone) read once, and, where one listens to a sidechain, its
+    // tracks and sends read once; each found device's element, on a track's channel, without its sidechain.
+    auto devices = readDevicesFields (song);
+    auto listens = false;
 
-        // The loader's song holds no values yet: its tree holds its devices.
-        if (song.getValues() != nullptr)
-            setDeviceFields (song, device.id, [] (DeviceValue& value) { value.sidechain = {}; });
-        else
-            findChannelDeviceElement (song.getState(), device.id).removeProperty (schema::deviceSidechain, nullptr);
-    }
+    for (const auto& entry : devices.devices)
+        listens = listens || entry.second.sidechain.isValid();
+
+    if (! listens)
+        return;
+
+    const auto loops = findSidechainLoops (readTracksValue (song), readTrackOrder (song).order, std::move (devices), readSendsValue (song));
+
+    if (loops.empty())
+        return;
+
+    for (auto track : listTrackElements (song))
+        for (auto device : track)
+            if (device.hasType (schema::DEVICE) && std::find (loops.begin(), loops.end(), readDeviceElementID (device)) != loops.end())
+                device.removeProperty (schema::deviceSidechain, nullptr);
 }
 } // namespace phazite

@@ -1743,7 +1743,7 @@ TEST_CASE ("Benchmark: a song of 100,000 notes made consistent as it opens, and 
 
     for (int i = 0; i < 5; ++i)
     {
-        phazite::Song song (asFile.createCopy());
+        auto song = asFile.createCopy();
         times.push_back (millisecondsOf ([&] { phazite::makeConsistent (song); }));
     }
 

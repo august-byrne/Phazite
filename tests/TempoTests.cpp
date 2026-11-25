@@ -929,11 +929,6 @@ TEST_CASE ("Every edit of the tempo map is one exact undo step, with a loop that
     CHECK_FALSE (phazite::hasTempoChanges (song));
     CHECK (undo.getNumSteps() == 17);
 
-    // The tempo map ensured, as a project opens: no undo step, and on a song that has one, nothing changed that undo steps
-    // keep (UndoCheck.h: a change without a step leaves that alone).
-    undo.check ("Ensure the Tempo Map", [&] { phazite::ensureTempoMap (song); });
-    CHECK (undo.getNumSteps() == 17);
-
     // The notes' clip and the note in it, the loop and the curve's points on their beats all the while.
     CHECK (phazite::getClipRange (song, clip).getStart().inBeats() == doctest::Approx (4.0));
     const auto notes = phazite::getClipNotes (song, clip);

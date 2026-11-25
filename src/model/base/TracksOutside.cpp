@@ -290,13 +290,6 @@ TracksOutside withMasterView (const TracksOutside& outside, TrackView view)
     return next;
 }
 
-TracksOutside withoutIDsFrom (const TracksOutside& outside, std::uint64_t first)
-{
-    auto kept = outside;
-    kept.tracks = withoutIDsFrom (outside.tracks, first);
-    return kept;
-}
-
 TrackView readViewOf (const juce::ValueTree& element)
 {
     return readView (element, false);
@@ -305,11 +298,6 @@ TrackView readViewOf (const juce::ValueTree& element)
 TrackView readHeldViewOf (const juce::ValueTree& element)
 {
     return readView (element, true);
-}
-
-immer::flex_vector<LaneValue> readHeldLanesOf (const juce::ValueTree& element)
-{
-    return isTrackOrMaster (element) ? readView (element, true).lanes : immer::flex_vector<LaneValue>();
 }
 
 LaneValue readLaneValue (const juce::ValueTree& lane)
@@ -337,6 +325,10 @@ std::optional<LaneValue> readHeldLane (const juce::ValueTree& lane)
     const auto device = readID (lane[schema::laneDevice]);
 
     if (device == 0 || device >= schema::maxID)
+        return std::nullopt;
+
+    // A lane names a parameter, always (Schema.h: laneParameter): one without names nothing.
+    if (lane[schema::laneParameter].toString().isEmpty())
         return std::nullopt;
 
     LaneValue value;
@@ -407,18 +399,6 @@ bool keepViewAsHeld (juce::ValueTree element)
     return true;
 }
 
-bool holdsViewIn (const juce::ValueTree& element)
-{
-    if (! isTrackOrMaster (element))
-        return false;
-
-    for (const auto* property : getViewProperties())
-        if (isDescribedOn (element, *property) && element.hasProperty (*property))
-            return true;
-
-    return element.getChildWithName (schema::LANES).isValid();
-}
-
 bool isViewProperty (const juce::ValueTree& element, const juce::Identifier& property)
 {
     if (! isTrackOrMaster (element))
@@ -426,20 +406,6 @@ bool isViewProperty (const juce::ValueTree& element, const juce::Identifier& pro
 
     return std::any_of (getViewProperties().begin(), getViewProperties().end(),
                         [&element, &property] (const auto* each) { return each->getName() == property && isDescribedOn (element, *each); });
-}
-
-void takeViewOutOf (juce::ValueTree element, juce::UndoManager* undo)
-{
-    if (! isTrackOrMaster (element))
-        return;
-
-    for (const auto* property : getViewProperties())
-        if (isDescribedOn (element, *property) && element.hasProperty (*property))
-            element.removeProperty (*property, undo);
-
-    for (auto i = element.getNumChildren(); --i >= 0;)
-        if (element.getChild (i).hasType (schema::LANES))
-            element.removeChild (i, undo);
 }
 
 TracksOutside readTracksOutside (const juce::ValueTree& song)

@@ -14,7 +14,7 @@
 // (isTrackMuted(), isTrackSoloed(), isTrackFrozen(), setTrackMuted(), setTrackSoloed(), setTrackFrozen(),
 // getTrackSwitches(), setTrackSwitches()) and model/automation/internal/Automation.h (getAutomationMode(),
 // setAutomationMode()). The conversion below is what a file's, a whole copy's or a version's element is read from and written
-// into (the loader, the adoption, the keeper's safety net, whole state, the versions' pass). Its own header, beside the other
+// into (the loader, the song made of its state, whole state, the versions' pass). Its own header, beside the other
 // areas' (one header for each area's values); immer is the model's alone (tools/check-architecture.sh: immer-outside-model).
 #pragma once
 
@@ -89,11 +89,6 @@ bool holdSameSwitchesOf (const TrackSwitches&, const TrackSwitches&, std::uint64
 // track an earlier step took away kept.
 bool holdsSwitchesOf (const TrackSwitches&, std::uint64_t key);
 
-// The switches without the entries of tracks whose IDs are at or above first (the master's mode, under 0, stays), one walk of
-// each map; the very maps where they hold none. What the song as copied drops as its count of IDs is set back to the copy's
-// (model/versions/ApplySong.cpp: makeSongAsCopied()): no step its history holds can bring such a track back.
-TrackSwitches withoutIDsFrom (const TrackSwitches&, std::uint64_t first);
-
 //==============================================================================
 // The conversion: the one place that reads and writes a TRACK's and the MASTER's switches by name.
 
@@ -121,14 +116,9 @@ void writeSwitchesInto (juce::ValueTree& trackOrMaster, const TrackSwitches&);
 // (TracksValue.h) and keepViewAsHeld() (TracksOutside.h).
 bool keepSwitchesAsHeld (juce::ValueTree trackOrMaster);
 
-// Whether a TRACK or the MASTER holds any of the switches' properties (a TRACK's four, the MASTER's mode), and whether a
-// property is one of them on its type (a merge's clash on one: model/arrangement/Tracks.cpp, chooseTrackClash()); and those
-// taken out of it, with an undo manager (a step's) or none: what the adoption and the keeper's safety net take out of an
-// element that comes with them (TracksArea.h), and a merge's whole track out of its copy (chooseTrackClash()). Nothing for any
-// other element.
-bool holdsSwitchesIn (const juce::ValueTree& trackOrMaster);
+// Whether a property of a TRACK or the MASTER is one of the switches' on its type (a merge's clash on one:
+// model/arrangement/Tracks.cpp, chooseTrackClash()).
 bool isSwitchProperty (const juce::ValueTree& trackOrMaster, const juce::Identifier& property);
-void takeSwitchesOutOf (juce::ValueTree trackOrMaster, juce::UndoManager*);
 
 // Every track's and the master's switches of a song's tree (PHAZITE), read as readSwitchesOf() reads them, in the song's
 // order (the order makes no difference to the value). For the tests, and what reads them whole while the tree holds them.

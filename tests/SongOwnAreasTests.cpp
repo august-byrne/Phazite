@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // What the song holds of its own is three areas of its values (roadmap step S5.20, the song's own switch; model/base/internal/
-// SongOwnArea.h): the song's tree holds none of it, nor its count of IDs (Song.h: makeID(), which tells no one). Its part of
-// the keeper's safety net takes in what is written to the song's root outside the history, counted, and refuses it in a step;
+// SongOwnArea.h), with its count of IDs (Song.h: makeID(), which tells no one), which a whole copy writes in their places;
 // the keyed standing undoes by entry, a key set outside the history surviving the Undo of a step that changed another entry;
 // each writer's step is exact (UndoCheck); a file with what Phazite doesn't know at its root opens and saves without it, and
 // a version with it, switched to, lists no change; a merge waiting set by hand in a song with nothing to undo is saved with
 // it; and how the song plays and shows, changed after a save, leaves the project saved, and is the file's again as it opens.
 // With the tracks' area beside it: the count of IDs is past every track's IDs, which only that area holds; and a project
-// opened holds only empty placeholders on its live root, opens again as the same song, and counts on across Undo and Redo.
+// opened opens again as the same song, and counts on across Undo and Redo.
 //   phazite_tests.exe --test-case="Song's own areas*"
 #include "SongCheck.h"
 #include "TestHelpers.h"
@@ -57,34 +56,6 @@ juce::String repeat (char c, int times)
     return juce::String::repeatedString (juce::String::charToString ((juce::juce_wchar) c), times);
 }
 
-// How many notifications the song's tree gave, of any kind, while a listener of its root listened.
-struct TreeCount final : juce::ValueTree::Listener
-{
-    explicit TreeCount (juce::ValueTree root)
-        : tree (std::move (root))
-    {
-        tree.addListener (this);
-    }
-
-    ~TreeCount() override { tree.removeListener (this); }
-
-    void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { ++count; }
-    void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override { ++count; }
-    void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override { ++count; }
-    void valueTreeChildOrderChanged (juce::ValueTree&, int, int) override { ++count; }
-
-    juce::ValueTree tree;
-    int count = 0;
-};
-
-// Whether the song's tree holds anything of the song's own: a property on its root, a LASTKEY, a PIANOROLL or a MERGING.
-bool treeHoldsSongOwn (const phazite::Song& song)
-{
-    const auto root = song.getState();
-    return root.getNumProperties() > 0 || root.getChildWithName (schema::LASTKEY).isValid()
-           || root.getChildWithName (schema::PIANOROLL).isValid() || root.getChildWithName (schema::MERGING).isValid();
-}
-
 juce::String keepVersion (phazite::ProjectContext& context, const juce::String& name)
 {
     REQUIRE (phazite::test::waitForVersionHistory (context));
@@ -108,7 +79,7 @@ juce::String findBranch (const phazite::ProjectContext& context, const juce::Str
 } // namespace
 
 //==============================================================================
-TEST_CASE ("Song's own areas: the song's tree holds none of the song's own, nor its count of IDs, which a whole copy writes")
+TEST_CASE ("Song's own areas: a whole copy writes the song's own and its count of IDs, each in its place")
 {
     phazite::test::TestSong s;
     auto& song = *phazite::findSong (s.context);
@@ -123,27 +94,27 @@ TEST_CASE ("Song's own areas: the song's tree holds none of the song's own, nor 
     auto grid = phazite::loadGridSettings (song, phazite::GridOwner::pianoRoll);
     grid.snap = ! grid.snap;
     phazite::saveGridSettings (song, phazite::GridOwner::pianoRoll, grid);
-    CHECK_FALSE (treeHoldsSongOwn (song));
     phazite::test::checkSong (song);
 
-    // A whole copy writes each, and the count: after the root's other children, LASTKEY, PIANOROLL, MERGING.
+    // A whole copy writes each, and the count, each element in its place in the description's order (Schema.h): LASTKEY
+    // first, PIANOROLL after TEMPOMAP, MERGING after MASTER.
     const auto whole = phazite::test::copyWholeSong (song);
     CHECK (whole[schema::notes].toString() == "Notes");
     CHECK ((bool) whole[schema::loop]);
     CHECK (phazite::readID (whole[schema::nextID]) == phazite::getNextID (song));
-    const auto count = whole.getNumChildren();
-    REQUIRE (count >= 3);
-    CHECK (whole.getChild (count - 3).hasType (schema::LASTKEY));
-    CHECK (whole.getChild (count - 2).hasType (schema::PIANOROLL));
-    CHECK (whole.getChild (count - 1).hasType (schema::MERGING));
+    const auto indexOf = [&whole] (const juce::Identifier& type) { return whole.indexOf (whole.getChildWithName (type)); };
+    CHECK (indexOf (schema::LASTKEY) == 0);
+    CHECK (indexOf (schema::TEMPOMAP) == 1);
+    CHECK (indexOf (schema::PIANOROLL) == 2);
+    CHECK (indexOf (schema::TRACKS) == 3);
+    CHECK (indexOf (schema::MASTER) == 4);
+    CHECK (indexOf (schema::MERGING) > indexOf (schema::MASTER));
 
-    // An ID made: the count moves on, telling no one (no tree notification, no undo step).
-    TreeCount heard (song.getState());
+    // An ID made: the count moves on, telling no one (no undo step).
     const auto steps = song.getUndoManager().getUndoDescriptions().size();
     const auto next = phazite::getNextID (song);
     CHECK (song.makeID() == next);
     CHECK (phazite::getNextID (song) == next + 1);
-    CHECK (heard.count == 0);
     CHECK (song.getUndoManager().getUndoDescriptions().size() == steps);
     CHECK (phazite::readID (phazite::test::copyWholeSong (song)[schema::nextID]) == next + 1);
     phazite::test::checkSong (song);
@@ -179,7 +150,6 @@ TEST_CASE ("Song's own areas: a merge waiting set by hand in a song just opened 
     REQUIRE (s.reopenAs (phazite::test::TestSong::Reopening::withoutSaving));
     auto& reopened = *phazite::findSong (s.context);
     CHECK (phazite::getSongOwn (reopened).merging == std::optional (merge));
-    CHECK_FALSE (treeHoldsSongOwn (reopened));
     CHECK_FALSE (s.getProject().hasUnsavedChanges());
     phazite::test::checkSong (reopened);
 
@@ -191,59 +161,6 @@ TEST_CASE ("Song's own areas: a merge waiting set by hand in a song just opened 
 #if JUCE_DEBUG
     CHECK (withSteps.getCount() == 1);
 #endif
-}
-
-TEST_CASE ("Song's own areas: the safety net takes in what is written to the song's root outside the history, counted, and refuses "
-           "it in a step")
-{
-    const auto song = phazite::createSong();
-    auto& values = *song->getValues();
-    auto root = song->getState();
-    const auto adopted = values.countSongOwnAdopted();
-
-    // Outside the history: a property of its own, of each kind, its count, and an element of its own, each read in as the song
-    // holds it and taken out.
-    {
-        const phazite::Song::OutsideHistory outside (*song);
-        root.setProperty (schema::notes, "Written", nullptr);
-        root.setProperty (schema::loop, true, nullptr);
-        root.setProperty (schema::versionsBase, repeat ('e', schema::versionsBaseDigits), nullptr);
-        root.setProperty (schema::nextID, (juce::int64) (phazite::getNextID (*song) + 100), nullptr);
-        juce::ValueTree key (schema::LASTKEY);
-        key.setProperty (schema::keyRoot, 3, nullptr);
-        key.setProperty (schema::keyScale, "minor", nullptr);
-        root.appendChild (key, nullptr);
-    }
-
-    CHECK_FALSE (treeHoldsSongOwn (*song));
-    CHECK (values.countSongOwnAdopted() == adopted + 5);
-    CHECK (phazite::getSongOwn (*song).notes == "Written");
-    CHECK (phazite::isLoopOn (*song));
-    CHECK (phazite::getSongStanding (*song).versionsBase == repeat ('e', schema::versionsBaseDigits));
-    CHECK (phazite::getLastKey (*song) == phazite::Key { .root = 3, .scale = phazite::Scale::minor });
-    CHECK (song->getUndoManager().getUndoDescriptions().isEmpty());
-    phazite::test::checkSong (*song);
-
-    // In a step: refused (a JUCE assertion), the song's own as it was; the step's Undo takes what was written out again.
-    const auto own = phazite::getSongOwn (*song);
-    const auto standing = phazite::getSongStanding (*song);
-
-    {
-        const phazite::test::ExpectedAssertion refused ("SongOwnArea.cpp");
-        const phazite::UndoStep step (*song, "Written");
-        root.setProperty (schema::outline, "Refused", &song->getUndoManager());
-        root.appendChild (juce::ValueTree (schema::MERGING), &song->getUndoManager());
-#if JUCE_DEBUG
-        CHECK (refused.getCount() == 2);
-#endif
-    }
-
-    CHECK (phazite::getSongOwn (*song) == own);
-    CHECK (phazite::getSongStanding (*song) == standing);
-    CHECK (values.countSongOwnAdopted() == adopted + 5);
-    phazite::undo (*song);
-    CHECK_FALSE (treeHoldsSongOwn (*song));
-    phazite::test::checkSong (*song);
 }
 
 //==============================================================================
@@ -377,7 +294,6 @@ TEST_CASE ("Song's own areas: a merge taken and cancelled are each one exact und
     undo.check ("Merge", [&] { REQUIRE (phazite::test::finished (s.context, [&] { return phazite::finishMerge (s.context); })); });
     REQUIRE (phazite::isMerging (s.context));
     CHECK (phazite::getSongOwn (song).merging.has_value());
-    CHECK_FALSE (treeHoldsSongOwn (song));
     phazite::test::checkSong (song);
 
     undo.check ("Cancel Merge", [&] { phazite::cancelMerge (s.context); });
@@ -403,8 +319,6 @@ TEST_CASE ("Song's own areas: what Phazite doesn't know at the song's root goes 
 
     REQUIRE (s.reopenAs (phazite::test::TestSong::Reopening::withoutSaving));
     auto& song = *phazite::findSong (s.context);
-    CHECK_FALSE (treeHoldsSongOwn (song));
-    CHECK_FALSE (song.getState().getChildWithName ("FUTURE").isValid());
     const auto whole = phazite::test::copyWholeSong (song);
     CHECK_FALSE (whole.hasProperty ("laterProperty"));
     CHECK_FALSE (whole.getChildWithName ("FUTURE").isValid());
@@ -532,7 +446,6 @@ TEST_CASE ("Song's own areas, with the tracks': the count of IDs is past a track
     const auto fader = held->fader.getRaw();
     REQUIRE (fader > track.getRaw()); // made after the track's own: the largest ID the song holds
     REQUIRE (phazite::getNextID (*song) == fader + 1);
-    CHECK (song->getState().getChildWithName (schema::TRACKS).getNumChildren() == 0); // the tree holds no track
 
     // The count put back at the fader (as a copy's may be: IDCount::mayBeBehind): what the song finds its next ID to be is past
     // the fader all the same, and the check reports the count, both counting the tracks' area.
@@ -551,7 +464,7 @@ TEST_CASE ("Song's own areas, with the tracks': the count of IDs is past a track
     CHECK (song->makeID() == fader + 1);
 }
 
-TEST_CASE ("Song's own areas, with the tracks': a project opened holds only empty placeholders on its live root, is the same song "
+TEST_CASE ("Song's own areas, with the tracks': a project opened is the same song "
            "saved and opened again, and its count of IDs never goes back across an Undo and a Redo")
 {
     phazite::test::TestSong s;
@@ -575,26 +488,7 @@ TEST_CASE ("Song's own areas, with the tracks': a project opened holds only empt
 
     REQUIRE (s.getProject().save().wasOk());
     REQUIRE (s.reopenAs (phazite::test::TestSong::Reopening::withoutSaving));
-
-    // Opened: the live root holds no property, and nothing but its placeholders, each empty (the check's rule too).
-    const auto checkRoot = [] (const phazite::Song& song)
-    {
-        const auto root = song.getState();
-        CHECK (root.getNumProperties() == 0);
-
-        for (const auto& child : root)
-        {
-            INFO (child.getType().toString());
-            CHECK ((child.hasType (schema::TEMPOMAP) || child.hasType (schema::AUTOMATION) || child.hasType (schema::TRACKS)
-                    || child.hasType (schema::MASTER) || child.hasType (schema::CHORDLANE) || child.hasType (schema::MIDILINKS)
-                    || child.hasType (schema::SECTIONS)));
-            CHECK (child.getNumProperties() == 0);
-            CHECK (child.getNumChildren() == 0);
-        }
-    };
-
     auto* song = phazite::findSong (s.context);
-    checkRoot (*song);
     CHECK (phazite::isLoopOn (*song));
     CHECK (phazite::getLastKey (*song) == phazite::Key { .root = 3, .scale = phazite::Scale::minor });
     CHECK (phazite::getSongOwn (*song).merging.has_value());
@@ -608,7 +502,6 @@ TEST_CASE ("Song's own areas, with the tracks': a project opened holds only empt
     REQUIRE (s.getProject().save().wasOk());
     REQUIRE (s.reopenAs (phazite::test::TestSong::Reopening::withoutSaving));
     song = phazite::findSong (s.context);
-    checkRoot (*song);
     CHECK (phazite::test::copyWholeSong (*song).isEquivalentTo (opened));
     phazite::test::checkSong (*song);
 
@@ -627,20 +520,17 @@ TEST_CASE ("Song's own areas, with the tracks': a project opened holds only empt
     CHECK (after > before);
     CHECK (added.getRaw() < after);
     CHECK (held->fader.getRaw() < after);
-    checkRoot (*song);
     phazite::test::checkSong (*song);
 
     phazite::undo (*song);
     CHECK_FALSE (phazite::findHeldTrack (*song, added).has_value());
     CHECK (phazite::getNextID (*song) == after);
-    checkRoot (*song);
     phazite::test::checkSong (*song);
 
     phazite::redo (*song);
     REQUIRE (phazite::findHeldTrack (*song, added).has_value());
     CHECK (phazite::getNextID (*song) == after);
     CHECK (phazite::findHeldTrack (*song, added)->fader == held->fader);
-    checkRoot (*song);
     phazite::test::checkSong (*song);
 
     // The next ID made is past them all.

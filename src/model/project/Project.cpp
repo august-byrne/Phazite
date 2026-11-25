@@ -16,6 +16,7 @@
 #include "model/base/internal/ModulationValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SendsArea.h"
+#include "model/base/internal/SendsValue.h"
 #include "model/base/internal/SongOwnArea.h"
 #include "model/base/internal/SongOwnValue.h"
 #include "model/base/internal/SongText.h"
@@ -943,7 +944,7 @@ namespace
 
         struct Keeper
         {
-            Song& song;
+            juce::ValueTree song;    // the file's song's tree, made consistent in place
             juce::File folder;       // the project's, or none
             bool readInPart = false; // makeConsistent()'s ReadAs::inPart: what names an ID the song hasn't may lead into what wasn't read
             const schema::Tables& tables; // the description's ranges, words and hexadecimal ids, which a test may change
@@ -953,22 +954,24 @@ namespace
             // links (keepCurves(), keepMidiLinks()), which find each there by its ID and read none whole.
             SongDevices heldDevices {};
 
-            // The song's tracks and the master, and their order, read once for the same checks at the first look that needs
-            // them (Tracks.h: readTracksWithoutValues(), readTrackOrderWithoutValues()), which find a fader's channel among
-            // them: a song without curves or links reads none.
+            // The song's tracks and the master, and their order, and its sends, read once for the same checks at the first look
+            // that needs them (TracksValue.h: readTracksValue(), readTrackOrder(); SendsValue.h: readSendsValue()), which find a
+            // fader's channel and a send among them: a song without curves or links reads none.
             std::optional<SongTracks> heldTracks {};
             TrackOrder heldOrder {};
+            SongSends heldSends {};
 
             // A parameter a curve or a link names, located among the devices and the tracks held (Parameters.h).
             std::optional<FoundParameter> locateHeld (const ParameterRef& parameter)
             {
                 if (! heldTracks.has_value())
                 {
-                    heldTracks = song.getValues() != nullptr ? getTracksValue (song) : readTracksWithoutValues (song);
-                    heldOrder = song.getValues() != nullptr ? getTrackOrder (song) : readTrackOrderWithoutValues (song);
+                    heldTracks = readTracksValue (song);
+                    heldOrder = readTrackOrder (song);
+                    heldSends = readSendsValue (song);
                 }
 
-                return locateParameter (song, parameter, heldDevices, *heldTracks, heldOrder.order);
+                return locateParameterIn (song, parameter, heldDevices, *heldTracks, heldOrder.order, heldSends);
             }
 
             //==============================================================================
@@ -1194,7 +1197,7 @@ namespace
                         return found->second;
                 }
 
-                const auto made = song.makeID();
+                const auto made = makeIDIn (song);
                 noteIDs.insert (made);
 
                 if (given != nullptr)
@@ -1269,7 +1272,7 @@ namespace
                             auto found = relinked.find (link);
 
                             if (found == relinked.end())
-                                found = relinked.emplace (link, song.makeID()).first;
+                                found = relinked.emplace (link, makeIDIn (song)).first;
 
                             child.setProperty (schema::clipLink, (juce::int64) found->second, nullptr);
                         }
@@ -1294,7 +1297,7 @@ namespace
                             auto found = notesGiven.find (old);
 
                             if (found == notesGiven.end())
-                                found = notesGiven.emplace (old, song.makeID()).first;
+                                found = notesGiven.emplace (old, makeIDIn (song)).first;
 
                             id = found->second;
                         }
@@ -1321,7 +1324,7 @@ namespace
 
                         if (const auto id = readID (child[*property]); isToGiveAnew (id) || ! seen.insert (id).second)
                         {
-                            const auto made = song.makeID();
+                            const auto made = makeIDIn (song);
                             seen.insert (made);
                             child.setProperty (*property, (juce::int64) made, nullptr);
 
@@ -1395,7 +1398,8 @@ namespace
             }
 
             // What names an item naming one the song has: a lane, a curve and a modulation of what isn't there go, and so does
-            // a sidechain or a pad's track's sampler.
+            // a sidechain or a pad's track's sampler; and one without a text its description says it always holds (a lane's
+            // parameter).
             void keepNames (juce::ValueTree tree, const std::set<std::uint64_t>& items)
             {
                 for (auto i = tree.getNumChildren(); --i >= 0;)
@@ -1406,6 +1410,12 @@ namespace
                         continue;
 
                     auto gone = false;
+
+                    // A text every element of its type holds, without words (Schema.h: always: a lane's parameter), empty or
+                    // missing: it names nothing, and goes, in a song read in part too.
+                    for (const auto* property : tables.on (child.getType()).all)
+                        if (property->isAlways() && property->getWords().empty() && child[*property].toString().isEmpty())
+                            gone = true;
 
                     // Those that name an ID, listed first, as taking one away moves the others; no list for an element that
                     // names none, as nearly all (a note) don't.
@@ -1608,7 +1618,7 @@ namespace
             // (describeParameter() finds none); and a device's in what wasn't read, which the song that takes it in knows.
             void keepCurves()
             {
-                auto automation = song.getState().getChildWithName (schema::AUTOMATION);
+                auto automation = song.getChildWithName (schema::AUTOMATION);
 
                 for (auto i = automation.getNumChildren(); --i >= 0;)
                 {
@@ -1665,7 +1675,7 @@ namespace
             // controller and one of a parameter, the first staying, as after a merge (keepOneMidiLinkEach()).
             void keepMidiLinks()
             {
-                auto links = song.getState().getChildWithName (schema::MIDILINKS);
+                auto links = song.getChildWithName (schema::MIDILINKS);
 
                 for (int i = 0; i < links.getNumChildren();)
                 {
@@ -1677,7 +1687,7 @@ namespace
                         continue;
                     }
 
-                    const auto parameter = readMidiLinkParameter (song, link);
+                    const auto parameter = readMidiLinkParameterIn (song, link);
                     const auto* device = heldDevices.find (parameter.device);
                     const auto isThere = readInPart || locateHeld (parameter).has_value() || (device != nullptr && device->isPlugin());
 
@@ -1691,7 +1701,7 @@ namespace
                     ++i;
                 }
 
-                keepOneMidiLinkEach (song);
+                keepOneMidiLinkEach (links);
             }
 
             //==============================================================================
@@ -1798,7 +1808,7 @@ namespace
                     return;
 
                 std::map<std::uint64_t, std::vector<juce::ValueTree>> groups;
-                collectLinkedClips (song.getState(), groups);
+                collectLinkedClips (song, groups);
 
                 for (auto& group : groups)
                 {
@@ -1871,7 +1881,7 @@ namespace
 
             void keep()
             {
-                auto state = song.getState();
+                auto state = song;
                 keepPropertiesOnce (state);       // first of all: before anything reads or removes a property by its name
                 keepTexts (state, false, tables); // then: before anything reads a number
                 keepPlaces (state);
@@ -1911,7 +1921,7 @@ namespace
                     keepRenumberedNames (state);
                 keepSends (state, items);
                 keepNames (state, items);
-                forgetSidechainLoops (song); // what the model refuses: a device hearing its own track's sound round a loop
+                forgetSidechainLoopsIn (state); // what the model refuses: a device hearing its own track's sound round a loop
                 keepKeys (state);
 
                 // The song's own (its root's properties, LASTKEY, PIANOROLL, MERGING) as it holds it, once its numbers are
@@ -2001,24 +2011,21 @@ const std::vector<SwitchProperty>& getSwitchProperties()
     return switches;
 }
 
-void makeConsistent (Song& song, ReadAs read)
+void makeConsistent (juce::ValueTree& song, const juce::File& projectFolder, ReadAs read)
 {
-    makeConsistent (song, read, schema::getTables());
+    makeConsistent (song, projectFolder, read, schema::getTables());
 }
 
-void makeConsistent (Song& song, ReadAs read, const schema::Tables& tables)
+void makeConsistent (juce::ValueTree& song, const juce::File& projectFolder, ReadAs read, const schema::Tables& tables)
 {
-    consistent::Keeper { song, song.getFile() != juce::File() ? song.getFile().getParentDirectory() : juce::File(), read == ReadAs::inPart,
-                         tables }
-        .keep();
+    consistent::Keeper { song, projectFolder, read == ReadAs::inPart, tables }.keep();
 }
 
 //==============================================================================
-juce::ValueTree makeNewSong()
+SongState makeNewSong()
 {
     // A song of its own, numbering its items itself: its tempo map and its master (makeSong() makes them, the master's
-    // element first), and one empty track, which the tracks' setters put in its values (outside its history: no undo step),
-    // written whole.
+    // element first), and one empty track, which the tracks' setters put in its values (outside its history: no undo step).
     const auto song = makeSong (juce::ValueTree (schema::PHAZITE));
     jassert (song != nullptr);
 
@@ -2027,7 +2034,7 @@ juce::ValueTree makeNewSong()
         ensureTracks (*song, 1);
     }
 
-    return copyWholeSong (*song);
+    return getSongState (*song);
 }
 
 Song::Ptr createSong (const juce::File& file)
@@ -2040,6 +2047,55 @@ juce::File getDefaultProjectsFolder()
     return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile (appName).getChildFile ("Projects");
 }
 
+namespace
+{
+    // What every song has that a file's may lack, on its tree once the loader made it consistent, before the song is made of
+    // it: its tempo map (Tempo.h: ensureTempoMap()), its MASTER, with IDs of the song's count for the master and its fader
+    // (made after every ID the loader gave), and its TRACKS; then its count of IDs past every ID it holds. Without the curves
+    // of what is gone, which no undo can bring back now (Automation.h: forgetCurvesOfGoneDevices()). No history: the tree is
+    // the file's alone.
+    void completeSongTree (juce::ValueTree& song)
+    {
+        ensureTempoMap (song);
+
+        if (! song.getChildWithName (schema::MASTER).isValid())
+        {
+            juce::ValueTree master (schema::MASTER);
+            master.setProperty (schema::trackID, (juce::int64) makeIDIn (song), nullptr);
+            master.setProperty (schema::channelFader, (juce::int64) makeIDIn (song), nullptr);
+            song.appendChild (master, nullptr);
+        }
+
+        song.getOrCreateChildWithName (schema::TRACKS, nullptr);
+        countIDsIn (song);
+        forgetCurvesOfGoneDevices (song);
+    }
+
+    // A song made of a state, its file and its cache folder given; without the frozen files that are gone, on its switches,
+    // outside the history, as no undo can bring them back now (Freeze.h: forgetMissingFrozenFiles()); and playing from its
+    // start. None of it is the user's change, so it is neither an undo step nor an unsaved change: no listener is there yet,
+    // and the history is cleared.
+    Song::Ptr makeSongOf (SongState state, const juce::File& file, const juce::File& cacheFolder)
+    {
+        Song::Ptr song (new Song (std::move (state)));
+        song->setFile (file);
+        song->setCacheFolder (cacheFolder);
+
+        {
+            const Song::OutsideHistory outside (*song);
+            forgetMissingFrozenFiles (*song);
+        }
+
+        // Playing from its start: where it plays from is the song's own, outside the history (SongOwnValue.h: setSongOutside()).
+        auto outside = getSongOutside (*song);
+        outside.playStart = 0.0;
+        setSongOutside (*song, std::move (outside));
+
+        song->getUndoManager().clearUndoHistory();
+        return song;
+    }
+} // namespace
+
 Song::Ptr makeSong (const juce::ValueTree& state, const juce::File& file, const juce::File& cacheFolder)
 {
     JUCE_ASSERT_MESSAGE_THREAD
@@ -2047,30 +2103,18 @@ Song::Ptr makeSong (const juce::ValueTree& state, const juce::File& file, const 
     if (! state.hasType (schema::PHAZITE))
         return {};
 
-    // What every song has: its tempo map, its track list with the master, and its next ID past every ID it holds; without
-    // the frozen files that are gone and the curves of devices gone, which no undo can bring back now; and playing from its
-    // start. None of it is the user's change, so it is neither an undo step nor an unsaved change.
-    Song::Ptr song (new Song (state));
-    song->setFile (file);
-    song->setCacheFolder (cacheFolder);
-    makeConsistent (*song);
-    ensureTempoMap (*song);
-    getTrackList (*song);
-    countIDs (*song);
-    forgetMissingFrozenFiles (*song);
-    forgetCurvesOfGoneDevices (*song);
+    // The file's tree made consistent in place, what every song has added to it, then read into values (SongState.h:
+    // readSongTree()), which the song is made of.
+    auto tree = state;
+    makeConsistent (tree, file != juce::File() ? file.getParentDirectory() : juce::File());
+    completeSongTree (tree);
+    return makeSongOf (readSongTree (tree), file, cacheFolder);
+}
 
-    // Its clips, and their notes and controllers' values, as values beside its tree from here on, its tree holding no CLIP
-    // element (model/base/internal/SongValues.h).
-    song->holdValues();
-
-    // Playing from its start: where it plays from is the song's own, outside the history (SongOwnValue.h: setSongOutside()).
-    auto outside = getSongOutside (*song);
-    outside.playStart = 0.0;
-    setSongOutside (*song, std::move (outside));
-
-    song->getUndoManager().clearUndoHistory();
-    return song;
+Song::Ptr makeSong (SongState state, const juce::File& file, const juce::File& cacheFolder)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    return makeSongOf (std::move (state), file, cacheFolder);
 }
 
 std::unique_ptr<Project> Project::create (const juce::File& parentFolder, const juce::String& name, juce::String& error,
@@ -2278,7 +2322,6 @@ namespace
 
 Project::Project (Song::Ptr s, const juce::File& f)
     : song (std::move (s)),
-      songState (song->getState()),
       file (f),
       autosaveWriter (std::make_unique<BackgroundWriter>()),
       namesWriter (std::make_unique<BackgroundWriter>())
@@ -2288,7 +2331,6 @@ Project::Project (Song::Ptr s, const juce::File& f)
     song->setCacheFolder (getCacheFolder());
     rememberSavedState(); // what opening made of it isn't a change
     changesOutsideHistory = getOwnChangesOutsideHistory();
-    songState.addListener (this);
 
     if (auto* values = song->getValues())
         values->addListener (this);
@@ -2345,7 +2387,6 @@ Project::~Project()
         tellNamesFailed();
 
     autosaveWriter = nullptr; // before the autosave goes
-    songState.removeListener (this);
 
     if (auto* values = song->getValues())
         values->removeListener (this);
@@ -2938,7 +2979,7 @@ void Project::clearToCompare()
     deviceOwnersToCompare.clear();
     comparingStoreWhole = false;
     storeToCompare.clear();
-    placesToCompare = channelsToCompare = false;
+    channelsToCompare = false;
     notesToCompare.clear();
     clipsToCompare.clear();
     tracksToCompare.clear();
@@ -3021,8 +3062,7 @@ void Project::compareWithSavedState()
         return;
 
     // No saved copy (forgetSavedState()): none is the same. A store of the plug-ins' states (compareStoredStates()): the tracks
-    // and the master whole, as values (WholeState.h: holdSameChannels()). Then the root's places the tree told of, which it
-    // holds (arePlacesAsSaved()), and the song's own.
+    // and the master whole, as values (WholeState.h: holdSameChannels()). Then the song's own.
     auto same = savedState.has_value();
 
     if (same && channelsToCompare)
@@ -3031,7 +3071,6 @@ void Project::compareWithSavedState()
         same = holdSameChannels (getSongState (*song), *savedState);
     }
 
-    same = same && arePlacesAsSaved();
     same = same && isSongOwnAsSaved(); // the song's own, by its values
 
     // What the values' listener marked of each area the song keeps beside its tree, against the saved copy's: each area in
@@ -3059,41 +3098,12 @@ void Project::compareWithSavedState()
     }
 }
 
-void Project::markChanged (const juce::ValueTree& tree)
-{
-    if (isWriting)
-        return;
-
-    // (Where the song stands in its versions, the root's other own properties and its LASTKEY: songStandingChanged(),
-    // songOwnChanged().)
-    const auto state = song->getState();
-
-    if (! (tree == state || tree.isAChildOf (state)) || ! schema::isCounted (tree, {}))
-        return;
-
-    // Another song shown in place (a version open) changes nothing of the project's: noted below, to compare once it went.
-    if (! song->isShowingOther())
-        ++changeCount;
-
-    if (changedSinceSave)
-    {
-        changedSinceAutosave = true;
-        return;
-    }
-
-    // Perhaps nothing changed: compared with savedState when asked, once. What a live song's tree tells is its own element's (a
-    // place come or gone, or its places in another order) and the master's, where a step left an element a safety net refused
-    // until its Undo, which no file holds: the root's places compared (arePlacesAsSaved()).
-    mayHaveChanged = true;
-    placesToCompare = true;
-}
-
 void Project::versionsMoved()
 {
     // With unsaved changes, the file holds an older song, which the names it holds go with: these go with the song at its
     // next save, and into the autosave at the next. Without, into the file in the background, once nothing else writes it.
-    // Whether it has any is found at the next turn (writeVersionsNames()), not here: this is a tree's callback, which reads
-    // none of the song's clips (model/base/internal/SongValues.h), as the comparison with the saved copy does.
+    // Whether it has any is found at the next turn (writeVersionsNames()), not here: a listener only marks, and reads
+    // nothing of the song (model/base/internal/SongValues.h), as the comparison with the saved copy does.
     namesPending = true;
 
     if (changedSinceSave || ! savedState.has_value())
@@ -3184,7 +3194,7 @@ bool Project::hasVersionsNamesWritten() const
 
 void Project::clipNotesChanged (const std::vector<ClipID>& clips)
 {
-    // As markChanged() marks an element of the song, a change in each clip: counted, and compared when asked.
+    // A change in each clip: counted, and compared when asked.
     if (isWriting)
         return;
 
@@ -3201,18 +3211,9 @@ void Project::clipNotesChanged (const std::vector<ClipID>& clips)
     notesToCompare.insert (notesToCompare.end(), clips.begin(), clips.end());
 }
 
-void Project::markChildChanged (const juce::ValueTree& parent, const juce::ValueTree& child)
-{
-    // The areas' (isHeardAsKept()): tempoMapChanged(), chordLaneChanged(), curvesChanged(), midiLinksChanged(). What is left
-    // is the song's own element's: a placeholder come or gone, which counts (and an element a safety net refused in a step,
-    // until that step's Undo: one that doesn't count is no change).
-    if (! schema::isUncountedElement (parent, child) && ! isHeardAsKept (parent, child))
-        markChanged (parent);
-}
-
 void Project::tempoMapChanged()
 {
-    // As markChanged() marks an element of the song: counted, and compared when asked.
+    // Counted, and compared when asked.
     if (isWriting)
         return;
 
@@ -3231,7 +3232,7 @@ void Project::tempoMapChanged()
 
 void Project::chordLaneChanged()
 {
-    // As markChanged() marks an element of the song: counted, and compared when asked.
+    // Counted, and compared when asked.
     if (isWriting)
         return;
 
@@ -3269,7 +3270,7 @@ void Project::songStandingChanged (bool lastKey, bool versionsNames)
 
 void Project::markSongOwnChanged()
 {
-    // As markChanged() marks the song's element: counted, and compared when asked.
+    // Counted, and compared when asked.
     if (isWriting)
         return;
 
@@ -3288,7 +3289,7 @@ void Project::markSongOwnChanged()
 
 void Project::midiLinksChanged()
 {
-    // As markChanged() marks an element of the song: counted, and compared when asked.
+    // Counted, and compared when asked.
     if (isWriting)
         return;
 
@@ -3307,7 +3308,7 @@ void Project::midiLinksChanged()
 
 void Project::sectionsChanged (const std::vector<SectionID>&)
 {
-    // As markChanged() marks an element of the song: counted, and compared when asked (the sections as one value).
+    // Counted, and compared when asked (the sections as one value).
     if (isWriting)
         return;
 
@@ -3326,7 +3327,7 @@ void Project::sectionsChanged (const std::vector<SectionID>&)
 
 void Project::curvesChanged (const std::vector<ParameterRef>& parameters)
 {
-    // As markChanged() marks an element of the song: counted, and compared when asked; past mostToCompare curves, all of
+    // Counted, and compared when asked; past mostToCompare curves, all of
     // them.
     if (isWriting)
         return;
@@ -3382,7 +3383,7 @@ bool Project::areCurvesAsSaved() const
 
 void Project::clipsChanged (const std::vector<SongValues::ClipChange>& clips, const std::vector<TrackID>& reordered)
 {
-    // As markChanged() marks an element of the song: counted, and compared when asked.
+    // Counted, and compared when asked.
     if (isWriting)
         return;
 
@@ -3417,7 +3418,7 @@ void Project::clipsChanged (const std::vector<SongValues::ClipChange>& clips, co
 
     tracksToCompare.insert (reordered.begin(), reordered.end());
 
-    // Past mostToCompare clips, the track each was on, whole (as markChanged() does past as many notifications).
+    // Past mostToCompare clips, the track each was on, whole.
     if (! comparingClipsWhole && clipsToCompare.size() > mostToCompare)
     {
         comparingClipsWhole = true;
@@ -3510,7 +3511,7 @@ bool Project::areSectionsAsSaved() const
 
 void Project::modulationChanged (const std::vector<SongValues::ModulationChange>& modulators, const std::vector<ModulatorPlace>& reordered)
 {
-    // As markChanged() marks an element of the song: counted, and compared when asked; past mostToCompare of them, the tracks
+    // Counted, and compared when asked; past mostToCompare of them, the tracks
     // and the master whole.
     if (isWriting)
         return;
@@ -3585,7 +3586,7 @@ bool Project::areModulatorsAsSaved() const
 
 void Project::sendsChanged (const std::vector<SongValues::SendChange>& sends, const std::vector<TrackID>& reordered, const SongSends&)
 {
-    // As markChanged() marks an element of the song: counted, and compared when asked; past mostToCompare of them, the sends
+    // Counted, and compared when asked; past mostToCompare of them, the sends
     // whole.
     if (isWriting)
         return;
@@ -3638,7 +3639,7 @@ void Project::sendsChanged (const std::vector<SongValues::SendChange>& sends, co
 void Project::devicesChanged (const std::vector<SongValues::DeviceChange>& devices, const std::vector<DevicePlace>& reordered,
                               const SongDevices&)
 {
-    // As markChanged() marks an element of the song: counted, and compared when asked; past mostToCompare of them, the tracks
+    // Counted, and compared when asked; past mostToCompare of them, the tracks
     // and the master whole.
     if (isWriting)
         return;
@@ -3725,7 +3726,7 @@ bool Project::areDevicesAsSaved() const
 
 void Project::deviceStoreChanged (const std::vector<SongValues::DeviceStoreChange>& entries, const DeviceStore&)
 {
-    // As markChanged() marks an element of the song, where the song's entries changed of an item it holds (a property it counts,
+    // Where the song's entries changed of an item it holds (a property it counts,
     // which a plug-in's state, program, format ID and version, its values set by hand and a chain's mute and solo all are):
     // counted, and compared when asked; past mostToCompare of them, the tracks and the master whole. A held value alone, and
     // what is written for an item the song doesn't hold (an answer of a plug-in a step took away), are no change of the
@@ -3964,21 +3965,6 @@ bool Project::holdSameTrackClips (TrackID track, const SongState& now) const
 
     // Its clips, in their order, against the saved copy's clips of its ID.
     return phazite::holdSameTrackClips (now, *savedState, track);
-}
-
-bool Project::arePlacesAsSaved() const
-{
-    if (! placesToCompare)
-        return true;
-
-    // Which of the places that come and go the root holds (a lane's CHORDLANE, its value's placed; a MIDILINKS; a SECTIONS),
-    // against the saved copy's, as the whole comparison compares them (WholeState.h: holdSameSong()): their order no part of
-    // it. One compared.
-    elementsComparedWithSaved.fetch_add (1, std::memory_order_relaxed);
-    const auto now = getSongState (*song);
-    return now.chordLane.placed == savedState->chordLane.placed
-           && now.holdsPlace (RootPlace::midiLinks) == savedState->holdsPlace (RootPlace::midiLinks)
-           && now.holdsPlace (RootPlace::sections) == savedState->holdsPlace (RootPlace::sections);
 }
 
 bool Project::isWholeAsSaved() const

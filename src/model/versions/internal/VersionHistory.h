@@ -55,8 +55,7 @@ struct VersionsAudioFound
 // read without waiting for a join under way. Any thread.
 juce::String findVersionsAudioKey (VersionStore&);
 
-class VersionHistory : private juce::ValueTree::Listener,
-                       private SongValues::Listener,
+class VersionHistory : private SongValues::Listener,
                        private juce::Timer
 {
 public:
@@ -706,7 +705,6 @@ public:
 
 private:
     Song& song;
-    juce::ValueTree state; // the song's, which this listens to
     std::function<void()> onChange;
     juce::File folder; // the store's
     std::shared_ptr<VersionStore> store;
@@ -939,16 +937,8 @@ private:
     void keepLeft (Switch&);
     void setBaseline (juce::ValueTree song, PluginParameterValues, ReportCounts, bool songIsIt = false);
 
-    // What the song's tree says changed, marked for the next rounds of the changes (ChangesWorker.h): the song's own line (a
-    // placeholder come or gone, its elements in another order), or the master's or a track's (an element a safety net
-    // refused in a step, left there until the step's Undo).
-    void markChanged (const juce::ValueTree&);
-    void markChildChanged (const juce::ValueTree& parent, const juce::ValueTree& child);
-
-    // A track's line or the master's, from the tree's callbacks by its element (the TRACK or the MASTER nearest what changed),
-    // or by its ID (markLine(), the master's by its): the master's by one key whatever its ID, which a version
-    // may give anew (ChangesWorker::masterKey; known bug 244).
-    void markTrack (const juce::ValueTree& track);
+    // A track's line or the master's, by its ID (markLine(), the master's by its): the master's by one key whatever its ID,
+    // which a version may give anew (ChangesWorker::masterKey; known bug 244).
     void markLine (TrackID);
 
     // The clips whose notes changed (the song holds them beside its tree: SongValues.h), heard as the values change and their
@@ -962,50 +952,48 @@ private:
     // The clips that changed (SongValues.h): their tracks' lines, before and after, marked by their IDs as they are told.
     void clipsChanged (const std::vector<SongValues::ClipChange>&, const std::vector<TrackID>& reordered) override;
 
-    // The tempo map (SongValues.h), which the tree's callbacks below leave alone (isHeardAsKept()): the song's own line.
+    // The tempo map (SongValues.h): the song's own line.
     void tempoMapChanged() override;
 
-    // The chord lane (SongValues.h), what is in whose CHORDLANE the tree's callbacks below leave alone (isHeardAsKept()):
-    // the song's own line, as a change of its element was. The element's own coming and going they mark as any element's.
+    // The chord lane (SongValues.h), a lane placed or taken away among it: the song's own line, as a change of its element
+    // was.
     void chordLaneChanged() override;
 
-    // The curves (SongValues.h), which the tree's callbacks below leave alone (isHeardAsKept()): each one's.
+    // The curves (SongValues.h): each one's.
     void curvesChanged (const std::vector<ParameterRef>&) override;
 
-    // The MIDI links (SongValues.h), what is in whose MIDILINKS the tree's callbacks below leave alone (isHeardAsKept()): the
-    // song's own line, as a change of its element was. The element's own coming and going they mark as any element's.
+    // The MIDI links (SongValues.h): the song's own line, as a change of its element was.
     void midiLinksChanged() override;
 
-    // The sections (SongValues.h), what is in whose SECTIONS the tree's callbacks below leave alone (isHeardAsKept()): the
-    // song's own line, as a change of its element was. The element's own coming and going they mark as any element's.
+    // The sections (SongValues.h): the song's own line, as a change of its element was.
     void sectionsChanged (const std::vector<SectionID>&) override;
 
-    // The modulators and macros (SongValues.h), which the tree's callbacks below leave alone (isHeardAsKept()): the lines of
+    // The modulators and macros (SongValues.h): the lines of
     // the channels each was on and is on, and of those whose modulators came in another order, by their tracks' IDs (a
     // container's macros' too: their channel's), as a change under one marked its channel's line; the master's by its own
     // ID, which it reads as the changes are next asked for (markHeard()), not as it is told.
     void modulationChanged (const std::vector<SongValues::ModulationChange>&, const std::vector<ModulatorPlace>& reordered) override;
     bool masterHeard = false; // the master's line, to mark by its ID (markHeard())
 
-    // The sends (SongValues.h), which the song's tree holds none of: the lines of the tracks each was on and is on, and of
+    // The sends (SongValues.h): the lines of the tracks each was on and is on, and of
     // those whose sends came in another order, by their IDs, as a change of a SEND marked its track's line (none is the
     // master's: a send is a track's).
     void sendsChanged (const std::vector<SongValues::SendChange>&, const std::vector<TrackID>& reordered, const SongSends& now) override;
 
-    // The devices, containers and chains (SongValues.h), what the devices' value covers of which the tree's callbacks below
-    // leave alone (isHeardAsKept()): the lines of the channels each was on and is on, and of those whose devices came in
+    // The devices, containers and chains (SongValues.h): the lines of the channels each was on and is on, and of those whose
+    // devices came in
     // another order, by their tracks' IDs, as a change at or under a device marked its channel's line; the master's by its own
     // ID, as for modulation (masterHeard).
     void devicesChanged (const std::vector<SongValues::DeviceChange>&, const std::vector<DevicePlace>& reordered,
                          const SongDevices& now) override;
 
-    // The devices' store (SongValues.h; the song's tree holds none of it): a change of the song's, counted as a store's property
+    // The devices' store (SongValues.h): a change of the song's, counted as a store's property
     // or a VALUE was, and the line of the channel of each item whose song's entries changed, by its place as the change names
-    // it (the devices' keeper's), as a change of a DEVICE's or a CHAIN's property marked its channel's line. A held value
+    // it (the devices' area's), as a change of a DEVICE's or a CHAIN's property marked its channel's line. A held value
     // alone, and what is written for an item the song doesn't hold, mark nothing.
     void deviceStoreChanged (const std::vector<SongValues::DeviceStoreChange>&, const DeviceStore& now) override;
 
-    // The tracks (SongValues.h), what their values cover of which the tree's callbacks below leave alone (isHeardAsKept()): a
+    // The tracks (SongValues.h): a
     // change of the song's, and the line of each track that changed, by its ID (each track in a folder added or taken out is
     // told, and marked, too), as a change of a TRACK's own property and a TRACK added or taken out marked it; the song's order
     // of them, for one added or taken out, come to another folder, renamed or of another kind, and for tracks in another
@@ -1016,8 +1004,8 @@ private:
     void trackSwitchesChanged (const std::vector<TrackSwitchChange>&, const TrackSwitches& now) override;
     void tracksViewChanged (const std::vector<TrackID>&, bool master) override;
 
-    // What the song holds of its own (SongValues.h, told by its areas' tellers; the tree's callbacks below leave what its
-    // keeper's safety net takes in alone, isHeardAsKept()), each a change of the song's count (songChanges), as each
+    // What the song holds of its own (SongValues.h, told by its areas' tellers), each a change of the song's count
+    // (songChanges), as each
     // property was: its own value (songOwnChanged()) and the key set last (songStandingChanged()), the song's own line, as
     // markChanged() marked them; a merge waiting taken, chosen in, finished or cancelled found again as it is asked for
     // (mergeDirty). Where the song stands in its versions, moved by an Undo or a Redo (not by the history itself:
@@ -1049,26 +1037,6 @@ private:
     PluginParameterValues readKnobs (const std::set<std::uint64_t>& devices) const;
     PluginParameterValues readBaseKnobs (const std::set<std::uint64_t>& devices);
     void timerCallback() override;
-
-    void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override
-    {
-        if (isHeardAsKept (parent, child))
-            return; // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged(), midiLinksChanged()
-
-        ++songChanges;
-        markChildChanged (parent, child);
-    }
-
-    void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override
-    {
-        if (isHeardAsKept (parent, child))
-            return; // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged(), midiLinksChanged()
-
-        ++songChanges;
-        markChildChanged (parent, child);
-    }
-
-    void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override;
 
     JUCE_DECLARE_WEAK_REFERENCEABLE (VersionHistory)
     JUCE_DECLARE_NON_COPYABLE (VersionHistory)

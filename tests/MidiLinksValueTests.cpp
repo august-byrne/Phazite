@@ -121,13 +121,6 @@ TEST_CASE ("MIDI links value: links read as the song holds them keep what their 
     CHECK_FALSE (phazite::holdsOneLinkEach ({ value.links.push_back ({ 2, 7, 14, "cutoff" }) }));
     CHECK_FALSE (phazite::readHeldMidiLink (links.getChild (0)).has_value());
     CHECK_FALSE (phazite::readHeldMidiLink (links.getChild (7)).has_value()); // not a link
-
-    // A link taken in after the others: kept where it is the first of its controller and its parameter.
-    const auto taken = phazite::withLinkTaken (value, phazite::writeMidiLinkElement ({ 4, 4, 12, "cutoff" }));
-    REQUIRE (taken.links.size() == 3);
-    CHECK (taken.links[2] == MidiLinkEntry { 4, 4, 12, "cutoff" });
-    CHECK (phazite::withLinkTaken (value, phazite::writeMidiLinkElement ({ 2, 7, 12, "cutoff" })) == value);
-    CHECK (phazite::withLinkTaken (value, juce::ValueTree ("OTHER")).isSameAs (value));
 }
 
 TEST_CASE ("MIDI links value: the song's links read through the value are the links its elements hold, a macro's by its ID")

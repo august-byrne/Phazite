@@ -739,9 +739,10 @@ TEST_CASE ("The versions make the song's modulation like a version's through mod
 
     // The song as copied after an edit undone: nothing of modulation written (asserted in Debug builds: ApplySong.cpp).
     const auto copy = phazite::test::copyWholeSong (song);
+    const auto copyState = phazite::getSongState (song);
     phazite::setModulatorOn (context, lfo, false);
     phazite::undo (song);
-    phazite::makeSongAsCopied (song, copy);
+    phazite::makeSongAsCopied (song, copyState);
     CHECK (phazite::holdTheSame (phazite::test::copyWholeSong (song), copy));
     undo.walkBackAndForth();
 }
@@ -1029,7 +1030,8 @@ TEST_CASE ("A song opened from a file whose modulators it holds otherwise than i
 
     // The song as copied, and a version of it applied, write nothing (the first asserted in Debug builds: ApplySong.cpp).
     const auto version = phazite::test::copyWholeSong (song);
-    phazite::makeSongAsCopied (song, version);
+    const auto versionState = phazite::getSongState (song);
+    phazite::makeSongAsCopied (song, versionState);
 
     {
         const phazite::UndoStep step (song, "Apply");

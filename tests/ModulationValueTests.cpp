@@ -9,6 +9,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/ModulationValue.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongState.h"
 #include "model/devices/internal/Parameters.h"
 #include "model/modulation/internal/Modulation.h"
 #include "model/project/internal/Project.h"
@@ -169,7 +170,7 @@ int findLfoParameter (const char* id)
 // container's macro.
 juce::ValueTree makeDamagedSong()
 {
-    auto state = phazite::makeNewSong();
+    auto state = phazite::writeSongTree (phazite::makeNewSong());
     const auto track =
         parse (R"(<TRACK id="9005" kind="track" name="Lead" fader="9006">)"
                R"(<DEVICE id="9007" type="phaziteSynth"/>)"
@@ -468,7 +469,7 @@ TEST_CASE ("Modulation value: a merge's clash sets each of a modulator's and a m
 }
 
 TEST_CASE ("Modulation value: the song's readers read its modulators and macros as its elements hold them, those made through the "
-           "model and those of a song without values")
+           "model")
 {
     phazite::test::TestSong s;
     auto& song = *phazite::findSong (s.context);
@@ -514,9 +515,4 @@ TEST_CASE ("Modulation value: the song's readers read its modulators and macros 
     REQUIRE (cutoff.size() == 1);
     CHECK (cutoff[0].modulator == lfo);
     CHECK (cutoff[0].amount == doctest::Approx (0.25f));
-
-    // A song whose tree holds everything (one made to be read or checked, without values): read from its elements alike.
-    const phazite::Song raw { whole.createCopy() };
-    REQUIRE (raw.getValues() == nullptr);
-    CHECK (phazite::getModulationValue (raw) == modulation);
 }

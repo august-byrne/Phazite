@@ -49,11 +49,6 @@ namespace
 {
     using EventType = devices::NoteEvent::Type;
 
-    std::int64_t getID (const juce::ValueTree& state, const juce::Identifier& property)
-    {
-        return (juce::int64) state[property];
-    }
-
     // A channel's ID as the plans key it: a track's raw ID (the master's is 0, which no track's is).
     std::int64_t getChannelKey (const TrackValue& channel)
     {
@@ -292,23 +287,16 @@ struct SongPlayer::HeldTracks
 SongPlayer::SongPlayer (Song& s, PluginInstances* p)
     : song (s),
       plugins (p),
-      songState (s.getState()),
       heldTracks (std::make_unique<HeldTracks>())
 {
     holdTracks();
     holdDevices();
-    songState.addListener (this);
-
-    if (auto* values = song.getValues())
-        values->addListener (this);
+    song.getValues()->addListener (this);
 }
 
 SongPlayer::~SongPlayer()
 {
-    if (auto* values = song.getValues())
-        values->removeListener (this);
-
-    songState.removeListener (this);
+    song.getValues()->removeListener (this);
 }
 
 void SongPlayer::clipNotesChanged (const std::vector<ClipID>& clips)
@@ -341,7 +329,7 @@ void SongPlayer::curvesChanged (const std::vector<ParameterRef>& parameters)
 void SongPlayer::modulationChanged (const std::vector<SongValues::ModulationChange>& changed, const std::vector<ModulatorPlace>& reordered)
 {
     // The channel each was on and is on (the master's under 0), as a change at or under a modulator marked the channel it is
-    // on (markChange()): every part, a value taken at once too (the next plan reads its devices again either way).
+    // on: every part, a value taken at once too (the next plan reads its devices again either way).
     const auto mark = [this] (const ModulatorPlace& place)
     {
         if (place.onMaster)
@@ -367,7 +355,7 @@ void SongPlayer::sendsChanged (const std::vector<SongValues::SendChange>& change
                                const SongSends& now)
 {
     // The channel a send was added to, taken out of, or came to and from, as a child added to a channel's element or taken out
-    // of it marks it (markChange()); a route or a level in place none.
+    // of it marks it; a route or a level in place none.
     using Change = SongValues::SendChange;
 
     for (const auto& send : changed)
@@ -386,7 +374,7 @@ void SongPlayer::devicesChanged (const std::vector<SongValues::DeviceChange>& ch
                                  const SongDevices&)
 {
     // The channel each was on and is on (the master's under 0), as a change at or under a device, a container or a chain
-    // marked the channel it is on (markChange()): every part, a value taken at once too (the next plan reads its channel's
+    // marked the channel it is on: every part, a value taken at once too (the next plan reads its channel's
     // devices again either way).
     using Change = SongValues::DeviceChange;
 
@@ -430,7 +418,7 @@ void SongPlayer::devicesChanged (const std::vector<SongValues::DeviceChange>& ch
 void SongPlayer::deviceStoreChanged (const std::vector<SongValues::DeviceStoreChange>& changed, const DeviceStore& now)
 {
     // The channel of a plug-in whose first value set by hand came or whose last went, and of a chain muted or soloed, as a
-    // VALUE added or taken out and a CHAIN's switch marked the channel they were on (markChange()): the next plan reads its
+    // VALUE added or taken out and a CHAIN's switch marked the channel they were on: the next plan reads its
     // devices again. A value in place, a state, a program, a format ID and a version: nothing.
     using Kind = SongValues::DeviceStoreChange::Kind;
 
@@ -554,11 +542,9 @@ bool SongPlayer::takeTrackSwitches (const std::vector<TrackSwitchChange>& change
 void SongPlayer::holdTracks()
 {
     // As the tracks' and the switches' areas hold them, so that what is held here and what tracksChanged() and
-    // trackSwitchesChanged() keep up to date never disagree; read from the song's tree for a song without values (none that
-    // plays).
-    const auto* values = song.getValues();
+    // trackSwitchesChanged() keep up to date never disagree.
     heldTracks->tracks = getTracksValue (song);
-    heldTracks->switches = values != nullptr ? values->trackSwitches.get() : readTrackSwitches (song.getState());
+    heldTracks->switches = song.getValues()->trackSwitches.get();
 }
 
 void SongPlayer::holdDevices()
@@ -568,9 +554,6 @@ void SongPlayer::holdDevices()
     // disagree. Not in a callback: as the player is made.
     heldDevices.clear();
     const auto* values = song.getValues();
-
-    if (values == nullptr)
-        return;
 
     for (const auto& [id, device] : values->devices.get().devices)
         if (device.form == DeviceValue::Form::own || device.form == DeviceValue::Form::plugin)
@@ -639,7 +622,7 @@ std::shared_ptr<const engine::NoteSequence> SongPlayer::getNotes (const TrackVal
         if (shouldCheck())
         {
             [[maybe_unused]] const auto same = isSameSequence (found->second.get(), compileNotes (song, trackState).get());
-            jassert (same); // the track's notes changed without the song saying so (markChange())
+            jassert (same); // the track's notes changed without the song saying so
         }
 
         return found->second;
@@ -648,60 +631,6 @@ std::shared_ptr<const engine::NoteSequence> SongPlayer::getNotes (const TrackVal
     auto compiled = compileNotes (song, trackState);
     notes[id] = compiled;
     return compiled;
-}
-
-void SongPlayer::markChange (const juce::ValueTree& changed)
-{
-    // The clips and their notes are values beside the tree, heard by clipsChanged() and clipNotesChanged(); the tempo map is
-    // heard by tempoMapChanged() (SongValues.h: its tree callbacks below leave it alone, isHeardAsKept()), which marks
-    // every track's audio, which plays in seconds (a tempo change moves no note: they are in beats); the curves by
-    // curvesChanged() (isHeardAsKept(), through isHeardAsCurves()), each by its parameter; the modulators and macros by
-    // modulationChanged() (the tree holds none of them), each by its channel; the sends by sendsChanged() (the tree holds
-    // none of them either), by the tracks they were added to or taken out of; the devices, containers and chains, by
-    // devicesChanged(), by their channels, their sounds by their devices, and what the store holds of them (a plug-in's
-    // state's format ID and version, a chain's mute and solo, a plug-in's first value set by hand) by deviceStoreChanged():
-    // the song's tree holds none of them. In a channel (a track, a folder, a return or the master), its devices' values are
-    // read again only for an element of the channel added, removed or moved; not for the channel's own properties (its
-    // height, mute, solo, volume, pan), which no device reads (a live song's tree holds no property: no callback for one).
-    for (auto element = changed; element.isValid(); element = element.getParent())
-    {
-        if (element.hasType (schema::TRACK) || element.hasType (schema::MASTER))
-        {
-            changes.channels.insert (element.hasType (schema::MASTER) ? 0 : getID (element, schema::trackID));
-            return;
-        }
-    }
-}
-
-void SongPlayer::valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child)
-{
-    // Something added to a channel: devices' sounds are devicesChanged()'s, which tells each device that came. View state
-    // added changes nothing that plays. The areas' (isHeardAsKept()): the tempo map's, tempoMapChanged(); the chord lane's,
-    // which nothing played reads; the curves', curvesChanged(); the devices', devicesChanged(); the tracks', tracksChanged()
-    // (tracks added, the master in place of another, a track's lanes).
-    if (isHeardAsKept (parent, child))
-        return;
-
-    if (! schema::isUncountedElement (parent, child))
-        markChange (parent);
-}
-
-void SongPlayer::valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int)
-{
-    if (isHeardAsKept (parent, child))
-        return; // the areas': tempoMapChanged(); the chord lane's, which nothing played reads; ..., tracksChanged()
-
-    if (! schema::isUncountedElement (parent, child))
-        markChange (parent);
-}
-
-void SongPlayer::valueTreeChildOrderChanged (juce::ValueTree& parent, int, int)
-{
-    // A track's devices, a chain's devices, a channel's modulators, tracks in a folder: reordered. The areas'
-    // (isHeardAsKept()): the tempo map's, tempoMapChanged(); the chord lane's, which nothing played reads; the curves',
-    // curvesChanged().
-    if (! isHeardAsKept (parent))
-        markChange (parent);
 }
 
 void SongPlayer::letGoOfPlugins()
@@ -730,7 +659,7 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
     // plan's. And the parts a check looks at, in turn (shouldCheck()).
     compiling = std::exchange (changes, {});
 
-    // A clip whose notes changed: its track's notes, as a change in the clip's element marks them (markChange()). One that is
+    // A clip whose notes changed: its track's notes, as a change in the clip's element marks them. One that is
     // gone isn't on a track any more: taking it off marked the track it was on.
     for (const auto clip : compiling.noteClips)
         if (const auto track = getClipTrack (song, clip); track.isValid())
@@ -926,7 +855,7 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
     // The song's sends as this plan read them (getChannels()), which sendsChanged() brings up to date until the next plan, for
     // what decides which send sends.
     heldSends = songSends;
-    holdTracks(); // and the tracks and their switches as the keeper told them (heldTracks)
+    holdTracks(); // and the tracks and their switches as their areas told them (heldTracks)
     updateAudibility();
 
     // The master adds up what goes to it: the tracks and buses in no bus, and the returns; or what a render plays of the
@@ -1140,7 +1069,7 @@ std::vector<float> SongPlayer::readValues (const devices::DeviceInfo& info, cons
 void SongPlayer::checkValues (const engine::DeviceNode& node, const DeviceValue& deviceState)
 {
     // As getDevice() would set them, each kept to its range: a difference is a change of the song's that its player didn't
-    // hear of (markChange()).
+    // hear of.
     const auto& info = node.getDeviceInfo();
     const auto values = readValues (info, deviceState);
     auto same = node.isOn() == ! deviceState.off;
@@ -2249,7 +2178,7 @@ void SongPlayer::readCurves()
                                                                           && juce::exactlyEqual (a.position, b.position)
                                                                           && juce::exactlyEqual (a.curve, b.curve);
                                                                });
-                jassert (same); // the curve changed without the song saying so (markChange())
+                jassert (same); // the curve changed without the song saying so
             }
 
             if (kept == before.end())
@@ -3012,7 +2941,7 @@ void SongPlayer::checkAudio (const TrackAudio& kept, const TrackValue& trackStat
     // What makeAudio() would make of the track now, without making anything: the same clips, each the same file (as this
     // player knows it now: a file that changed under the same name, once it asked, makes the track's audio again), the same
     // place in it and the same region, as the plan before placed them. A difference is a change of the song's that its
-    // player didn't hear of (markChange()), or a file it found changed and didn't make the track's audio again for.
+    // player didn't hear of, or a file it found changed and didn't make the track's audio again for.
     auto same = true;
     size_t index = 0;
 

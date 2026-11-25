@@ -67,10 +67,7 @@ const SectionValue* SectionsValue::find (SectionID id) const
 
 SectionsValue getSectionsValue (const Song& song)
 {
-    if (const auto* values = song.getValues())
-        return values->sections.get();
-
-    return readSectionsValue (song.getState().getChildWithName (schema::SECTIONS));
+    return song.getValues()->sections.get();
 }
 
 bool holdsSection (const Song& song, SectionID id)
@@ -79,18 +76,8 @@ bool holdsSection (const Song& song, SectionID id)
         return false;
 
     // A look in the area's value as it is held, nothing copied: a paint asks this of each section in view.
-    if (const auto* values = song.getValues())
-    {
-        for (const auto& section : values->sections.get().sections)
-            if (section.id == id)
-                return true;
-
-        return false;
-    }
-
-    // Each SECTION's ID compared where the tree holds it, read as the value reads it (setSectionProperty()), nothing copied.
-    for (const auto& child : song.getState().getChildWithName (schema::SECTIONS))
-        if (child.hasType (schema::SECTION) && SectionID::fromRaw ((std::uint64_t) (juce::int64) child[schema::sectionID]) == id)
+    for (const auto& section : song.getValues()->sections.get().sections)
+        if (section.id == id)
             return true;
 
     return false;
@@ -141,14 +128,6 @@ SectionsValue readHeldSections (const juce::ValueTree& sectionsElement)
             sections.push_back (std::move (*section));
 
     return keepSectionsHeld ({ sections.persistent() });
-}
-
-SectionsValue withSectionTaken (const SectionsValue& value, const juce::ValueTree& sectionElement)
-{
-    if (auto section = readHeldSection (sectionElement))
-        return keepSectionsHeld ({ value.sections.push_back (std::move (*section)) });
-
-    return value;
 }
 
 SectionsValue keepSectionsHeld (const SectionsValue& value)

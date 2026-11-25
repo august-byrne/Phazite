@@ -17,19 +17,6 @@ namespace
     using Change = SongValues::SendChange;
     using SendList = immer::flex_vector<DeviceID>;
 
-    // Every SEND element in an element and what it holds, taken out: what the adoption leaves of a file's anywhere in the
-    // song's tree once those of the song's tracks are the area's. So the song's tree holds none.
-    void dropSendElements (juce::ValueTree element)
-    {
-        for (auto i = element.getNumChildren(); --i >= 0;)
-        {
-            if (auto child = element.getChild (i); child.hasType (schema::SEND))
-                element.removeChild (i, nullptr);
-            else
-                dropSendElements (child);
-        }
-    }
-
     // What of a send differs between two of its values (the same ID).
     std::uint8_t findParts (const SendValue& was, const SendValue& now)
     {
@@ -179,13 +166,6 @@ void SongValues::SendsTeller::valueAreaChanged (const SongSends& before, const S
 }
 
 //==============================================================================
-void SongValues::SendsKeeper::adopt (SongValues&, Song& loaded)
-{
-    // Every SEND element out of the tree, its reader having read the song's into the area before (readHeldSendsIn():
-    // SongValues.cpp, adopt()), those anywhere else too, which are no sends of the song's (dropSendElements()).
-    dropSendElements (loaded.getState());
-}
-
 void readHeldSendsIn (const juce::ValueTree& song, SongState& into)
 {
     // Every send the loader made consistent, as the song holds each, in the elements' order (each track's, a folder's before
@@ -282,31 +262,12 @@ bool SongValues::setAllSends (Song& song, SongSends next)
     if (next.isSameAs (sends.get()) || next == sends.get())
         return false;
 
-    jassert (holdsItsLists (next)); // a pass's, an edit's of several and the keeper's, each held together as it was worked out
+    jassert (holdsItsLists (next)); // a pass's and an edit's of several, each held together as it was worked out
     setArea (song, sends, std::move (next));
     return true;
 }
 
 //==============================================================================
-int takeTrackSendsIn (SongSends& sends, const juce::ValueTree& track, TrackID from)
-{
-    auto taken = 0;
-
-    for (const auto& element : track)
-    {
-        if (! element.hasType (schema::SEND))
-            continue;
-
-        if (auto value = readHeldSend (element, from); value.has_value() && sends.find (value->id) == nullptr)
-        {
-            sends = withSend (sends, std::move (*value));
-            ++taken;
-        }
-    }
-
-    return taken;
-}
-
 void writeSendsIn (juce::ValueTree& element, const SongState& kept)
 {
     if (const auto* list = findKeptList (kept.sends, element))

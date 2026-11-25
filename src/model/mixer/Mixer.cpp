@@ -31,7 +31,6 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
-#include <deque>
 #include <functional>
 #include <optional>
 #include <set>
@@ -64,64 +63,6 @@ namespace
     const immer::flex_vector<DeviceID>* findChannelList (const Song& song, TrackID channel)
     {
         return getDevicesValue (song).findList (getDeviceChannelPlace (song, channel));
-    }
-
-    // A device's, a container's or a chain's element in a song's tree by its ID (the first of it: each track's, a folder's before
-    // the tracks in it, then the master's), invalid for none: what a song that holds no values reads (the loader's), whose
-    // tree holds its devices.
-    juce::ValueTree findDeviceElementIn (const juce::ValueTree& state, DeviceID id)
-    {
-        const auto isIt = [id] (const juce::ValueTree& element)
-        { return readDeviceForm (element).has_value() && readDeviceElementID (element) == id; };
-
-        const auto inChannel = [&isIt] (const juce::ValueTree& channel) -> juce::ValueTree
-        {
-            for (const auto& child : channel)
-            {
-                if (! (child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER)))
-                    continue;
-
-                if (isIt (child))
-                    return child;
-
-                for (const auto& chain : child)
-                {
-                    if (! chain.hasType (schema::CHAIN))
-                        continue;
-
-                    if (isIt (chain))
-                        return chain;
-
-                    for (const auto& device : chain)
-                        if (device.hasType (schema::DEVICE) && isIt (device))
-                            return device;
-                }
-            }
-
-            return {};
-        };
-
-        const std::function<juce::ValueTree (const juce::ValueTree&)> inTracks = [&inChannel, &inTracks] (const juce::ValueTree& list)
-        {
-            for (const auto& track : list)
-            {
-                if (! track.hasType (schema::TRACK))
-                    continue;
-
-                if (auto found = inChannel (track); found.isValid())
-                    return found;
-
-                if (auto found = inTracks (track); found.isValid())
-                    return found;
-            }
-
-            return juce::ValueTree();
-        };
-
-        if (auto found = inTracks (state.getChildWithName (schema::TRACKS)); found.isValid())
-            return found;
-
-        return inChannel (state.getChildWithName (schema::MASTER));
     }
 
     // What a container holds (its chains) or a chain (its devices), in their order; none for anything else.
@@ -189,7 +130,7 @@ namespace
     {
         auto* values = song.getValues();
 
-        if (macros.empty() || values == nullptr)
+        if (macros.empty())
             return;
 
         auto next = values->modulation.get();
@@ -200,13 +141,12 @@ namespace
         setAllModulation (song, std::move (next));
     }
 
-    // The song's sends as its area holds them (SongValues.h: sends), a pointer into the area's value as it is now, valid until
-    // its next change; none for a song that holds no values (the loader's song, a check's copy), whose tree holds them.
-    const SongSends* findHeldSends (const Song& song)
+    // The song's sends as its area holds them (SongValues.h: sends), by reference into the area's value as it is now, valid
+    // until its next change.
+    const SongSends& getHeldSends (const Song& song)
     {
         countSendLook();
-        const auto* values = song.getValues();
-        return values != nullptr ? &values->sends.get() : nullptr;
+        return song.getValues()->sends.get();
     }
 
     // A value of a channel's as the song holds it, to a ten-thousandth (a volume comes back from a fader's position a little
@@ -281,17 +221,7 @@ namespace
 //==============================================================================
 const SongDevices& getDevicesValue (const Song& song)
 {
-    if (const auto* values = song.getValues())
-        return values->devices.get();
-
-    // A song that holds no values (the loader's, a check's copy): its tree read whole, kept for the thread where it differs
-    // from what was read before, so that what was found in it stays while the tree doesn't change.
-    thread_local SongDevices fromTree;
-
-    if (auto read = readDevicesValue (song.getState()); ! (read == fromTree))
-        fromTree = std::move (read);
-
-    return fromTree;
+    return song.getValues()->devices.get();
 }
 
 const DeviceValue* findDevice (const Song& song, DeviceID id)
@@ -300,26 +230,7 @@ const DeviceValue* findDevice (const Song& song, DeviceID id)
         return nullptr;
 
     deviceLooks.fetch_add (1, std::memory_order_relaxed);
-
-    if (const auto* values = song.getValues())
-        return values->devices.get().find (id);
-
-    // A song that holds no values (the loader's, the tests' check of a song made of a tree): the one element of the ID read
-    // from its tree (never every device of the song for each look), kept for the thread among the last 16 read, so that what
-    // reads one, and another, still holds the first: good through the next 15 such looks on the thread.
-    const auto element = findDeviceElementIn (song.getState(), id);
-    auto value = element.isValid() ? readDeviceValue (element, readDevicePlace (element)) : std::nullopt;
-
-    if (! value.has_value())
-        return nullptr;
-
-    thread_local std::deque<DeviceValue> readFromTree;
-    readFromTree.push_back (std::move (*value));
-
-    if (readFromTree.size() > 16)
-        readFromTree.pop_front();
-
-    return &readFromTree.back();
+    return song.getValues()->devices.get().find (id);
 }
 
 std::uint64_t countDeviceLooks() noexcept
@@ -470,7 +381,9 @@ namespace
         if (list == nullptr)
             return;
 
-        const std::function<void (DeviceID)> visit = [&devices, &each, &visit] (DeviceID id)
+        // A lambda handed itself, not a std::function that holds it: one of three references is more than libstdc++'s
+        // std::function keeps in place, so each channel walked allocated there (a save walks every channel for its plug-ins).
+        const auto visit = [&devices, &each] (const auto& self, DeviceID id) -> void
         {
             const auto* value = devices.find (id);
 
@@ -481,11 +394,11 @@ namespace
 
             if (const auto* inside = findInside (devices, *value))
                 for (const auto item : *inside)
-                    visit (item);
+                    self (self, item);
         };
 
         for (const auto id : *list)
-            visit (id);
+            visit (visit, id);
     }
 
     void addOutlineOf (const Song& song, const SongDevices& devices, TrackID channel, std::vector<DeviceOutline>& outline)
@@ -519,8 +432,8 @@ std::vector<DeviceOutline> getDeviceOutline (const Song& song, TrackID channel)
 std::vector<DeviceOutline> getSongDeviceOutline (const Song& song)
 {
     std::vector<DeviceOutline> outline;
-    // Read once (a copy); for a song that holds no values (the loader's) its tree's fields alone, never a device's values.
-    const auto devices = song.getValues() != nullptr ? getDevicesValue (song) : readDevicesFields (song.getState());
+    // The devices' area, read in place: nothing here changes it.
+    const auto& devices = getDevicesValue (song);
 
     for (const auto track : getTrackIDs (song))
         addOutlineOf (song, devices, track, outline);
@@ -799,9 +712,6 @@ bool eraseChannelDevices (Song& song, const std::vector<TrackID>& channels)
 {
     auto* values = song.getValues();
 
-    if (values == nullptr)
-        return false;
-
     // Each channel's list alone, each item with what it holds.
     auto next = values->devices.get();
 
@@ -818,7 +728,7 @@ void takeDevicesOf (Song& song, const juce::ValueTree& channel)
     auto* values = song.getValues();
     const auto onMaster = channel.hasType (schema::MASTER);
 
-    if (values == nullptr || ! (onMaster || channel.hasType (schema::TRACK)))
+    if (! (onMaster || channel.hasType (schema::TRACK)))
         return;
 
     const auto place = makeChannelPlace (readTrackElementID (channel), onMaster);
@@ -876,10 +786,17 @@ void removeDevice (Song& song, DeviceID id)
 
 std::set<std::uint64_t> getItemIDs (const Song& song)
 {
-    // The tree's items (Schema.h: holdsID()), as what names one names it, and those the song's values hold (IDsHeld.h:
-    // forEachNameableIDHeld(): a modulator's and a macro's once they leave the tree, and a send's).
+    // Those the song's values hold (IDsHeld.h: forEachNameableIDHeld()), as what names one names it.
     std::set<std::uint64_t> ids;
     forEachNameableIDHeld (song, [&ids] (std::uint64_t id) { ids.insert (id); });
+    return ids;
+}
+
+std::set<std::uint64_t> getItemIDsIn (const juce::ValueTree& song)
+{
+    // The tree's items (Schema.h: holdsID()), as what names one names it: every element's but a clip's and what is in the song's
+    // AUTOMATION.
+    std::set<std::uint64_t> ids;
     const std::function<void (const juce::ValueTree&)> visit = [&ids, &visit] (const juce::ValueTree& tree)
     {
         for (const auto& child : tree)
@@ -895,7 +812,7 @@ std::set<std::uint64_t> getItemIDs (const Song& song)
         }
     };
 
-    visit (song.getState());
+    visit (song);
     return ids;
 }
 
@@ -1171,11 +1088,6 @@ ChannelRef findChannelOfFader (const Song& song, DeviceID fader)
     if (! fader.isValid())
         return {};
 
-    // The area's values; a song without values (the check's copy, which describes its parameters) read from its tree, by
-    // value (the loader reads it once for all its curves: findChannelOfFaderIn()).
-    if (song.getValues() == nullptr)
-        return findChannelOfFaderIn (readTracksWithoutValues (song), readTrackOrderWithoutValues (song).order, fader);
-
     return findChannelOfFaderIn (getTracksValue (song), getTrackOrder (song).order, fader);
 }
 
@@ -1296,18 +1208,8 @@ TrackID addReturnWithEffect (Song& song, TrackID sender, MadeDevices effect)
 
 std::vector<DeviceID> getSends (const Song& song, TrackID track)
 {
-    if (const auto* held = findHeldSends (song))
-    {
-        const auto* list = held->tracks.find (track.getRaw());
-        return list != nullptr ? std::vector<DeviceID> (list->begin(), list->end()) : std::vector<DeviceID>();
-    }
-
-    std::vector<DeviceID> sends;
-
-    for (const auto& send : getSendValues (song, track))
-        sends.push_back (send.id);
-
-    return sends;
+    const auto* list = getHeldSends (song).tracks.find (track.getRaw());
+    return list != nullptr ? std::vector<DeviceID> (list->begin(), list->end()) : std::vector<DeviceID>();
 }
 
 std::optional<SendValue> getSendValue (const Song& song, DeviceID send)
@@ -1315,15 +1217,7 @@ std::optional<SendValue> getSendValue (const Song& song, DeviceID send)
     if (! send.isValid())
         return std::nullopt;
 
-    if (const auto* held = findHeldSends (song))
-    {
-        const auto* found = held->find (send);
-        return found != nullptr ? std::optional<SendValue> (*found) : std::nullopt;
-    }
-
-    // A song that holds no values (the loader's, a check's copy): its tree's sends read.
-    const auto sends = readSendsValue (song.getState());
-    const auto* found = sends.find (send);
+    const auto* found = getHeldSends (song).find (send);
     return found != nullptr ? std::optional<SendValue> (*found) : std::nullopt;
 }
 
@@ -1335,25 +1229,12 @@ TrackID getSendTrack (const Song& song, DeviceID send)
 
 std::vector<SendValue> getSendValues (const Song& song, TrackID track)
 {
-    if (const auto* held = findHeldSends (song))
-    {
-        std::vector<SendValue> sends;
-
-        if (const auto* list = held->tracks.find (track.getRaw()))
-            for (const auto id : *list)
-                if (const auto* send = held->find (id))
-                    sends.push_back (*send);
-
-        return sends;
-    }
-
-    // A song that holds no values: its tree's sends read, the track's in their order.
+    const auto& held = getHeldSends (song);
     std::vector<SendValue> sends;
-    const auto read = readSendsValue (song.getState());
 
-    if (const auto* list = read.tracks.find (track.getRaw()))
+    if (const auto* list = held.tracks.find (track.getRaw()))
         for (const auto id : *list)
-            if (const auto* send = read.find (id))
+            if (const auto* send = held.find (id))
                 sends.push_back (*send);
 
     return sends;
@@ -1361,19 +1242,12 @@ std::vector<SendValue> getSendValues (const Song& song, TrackID track)
 
 DeviceID findSendFromTo (const Song& song, TrackID from, TrackID returnTrack)
 {
-    if (const auto* held = findHeldSends (song))
-    {
-        if (const auto* list = held->tracks.find (from.getRaw()))
-            for (const auto id : *list)
-                if (const auto* send = held->find (id); send != nullptr && send->to == returnTrack)
-                    return id;
+    const auto& held = getHeldSends (song);
 
-        return {};
-    }
-
-    for (const auto& send : getSendValues (song, from))
-        if (send.to == returnTrack)
-            return send.id;
+    if (const auto* list = held.tracks.find (from.getRaw()))
+        for (const auto id : *list)
+            if (const auto* send = held.find (id); send != nullptr && send->to == returnTrack)
+                return id;
 
     return {};
 }
@@ -1420,9 +1294,6 @@ DeviceID addSend (Song& song, TrackID from, TrackID returnTrack, bool preFader)
 
     auto* values = song.getValues();
 
-    if (values == nullptr)
-        return {};
-
     // After the track's other sends, in the step in progress.
     const auto id = DeviceID::fromRaw (song.makeID());
     values->setSend (song, { .id = id, .from = from, .to = returnTrack, .level = newSendDb, .preFader = preFader });
@@ -1441,7 +1312,7 @@ void setPreFader (Song& song, DeviceID send, bool preFader)
     auto* values = song.getValues();
     auto found = getSendValue (song, send);
 
-    if (values == nullptr || ! found.has_value() || found->preFader == preFader)
+    if (! found.has_value() || found->preFader == preFader)
         return;
 
     const UndoStep step (song, "Change Send");
@@ -1453,7 +1324,7 @@ void setSendLevel (Song& song, DeviceID send, float decibels)
 {
     auto* values = song.getValues();
 
-    if (auto found = getSendValue (song, send); values != nullptr && found.has_value())
+    if (auto found = getSendValue (song, send); found.has_value())
     {
         found->level = keepSendLevel (decibels);
         values->setSend (song, *found); // nothing for the level it holds
@@ -1481,7 +1352,7 @@ DeviceID addSendToNewReturn (Song& song, TrackID from)
 
 void removeSend (Song& song, DeviceID send)
 {
-    if (auto* values = song.getValues(); values != nullptr && getSendValue (song, send).has_value())
+    if (auto* values = song.getValues(); getSendValue (song, send).has_value())
     {
         const UndoStep step (song, "Remove Send");
         values->eraseSend (song, send);
@@ -1492,9 +1363,6 @@ void removeSend (Song& song, DeviceID send)
 bool eraseTrackSends (Song& song, const std::vector<TrackID>& tracks)
 {
     auto* values = song.getValues();
-
-    if (values == nullptr)
-        return false;
 
     std::vector<DeviceID> gone;
 
@@ -1510,7 +1378,7 @@ void takeSendsOf (Song& song, const juce::ValueTree& track)
     auto* values = song.getValues();
     const auto from = readTrackElementID (track);
 
-    if (values == nullptr || ! track.hasType (schema::TRACK) || ! from.isValid())
+    if (! track.hasType (schema::TRACK) || ! from.isValid())
         return;
 
     for (const auto& element : track)
@@ -1522,9 +1390,6 @@ void takeSendsOf (Song& song, const juce::ValueTree& track)
 void copySends (Song& song, CopiedIDs& copied)
 {
     auto* values = song.getValues();
-
-    if (values == nullptr)
-        return;
 
     // The tracks copied whose copies hold none, by the sends' lists alone: each original's, onto its copy, gathered before
     // any send's ID joins the copied.
@@ -1588,7 +1453,7 @@ AreaChoice chooseSendClash (Song& song, const MergeClash& clash, int value, cons
     // ten-thousandth).
     auto* values = song.getValues();
 
-    if (step == 0 || clash.path.size() != step + 1 || ! juce::isPositiveAndBelow (value, 3) || values == nullptr)
+    if (step == 0 || clash.path.size() != step + 1 || ! juce::isPositiveAndBelow (value, 3))
         return AreaChoice::refused;
 
     auto ownerPath = clash.path;

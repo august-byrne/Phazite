@@ -68,16 +68,13 @@ void purgeCache (Song&);
 // leave it frozen, and so do changes of what plays after the file: the track's fader, its sends, its name.
 //
 // Every change is compared at the next turn of the message loop, or as the song is stored or a plan of it compiled, whichever
-// comes first (Song::PendingWriter): a change the song's tree tells (a frozen device's value), as a tree's callback reads
-// none of the song's clips (model/base/internal/SongValues.h: during an undo the tree is back before the clips are); and the
-// clips, their notes, the tempo map and the curves, heard from the song's values (SongValues::Listener). A frozen track
+// comes first (Song::PendingWriter): what changed heard from the song's values (SongValues::Listener), which a listener
+// only marks (model/base/internal/SongValues.h: during an undo the step's areas move back one after another). A frozen track
 // whose clip changed plays live from then, and no save, version or plan takes it frozen meanwhile. A track frozen keeps a
 // copy of what it holds as it is frozen, which freezeFromFile() has this take at once (Song::writePending()), and else the
-// later moment takes; one that came back frozen (by an undo or a redo, or moved: JUCE takes a track out and puts it in
-// again) is compared with what its file was kept with as it was frozen, if this saw it frozen before. None of its tree
-// callbacks reads the song's clips or their notes (SongValues.h).
-class FreezeKeeper : private juce::ValueTree::Listener,
-                     private SongValues::Listener,
+// later moment takes; one that came back frozen (by an undo or a redo) is compared with what its file was kept with as it
+// was frozen, if this saw it frozen before.
+class FreezeKeeper : private SongValues::Listener,
                      private Song::PendingWriter,
                      private juce::AsyncUpdater
 {
@@ -110,7 +107,6 @@ public:
 
 private:
     Song& song;
-    juce::ValueTree state;             // the song's
     std::map<TrackID, Holds> frozen;   // what each frozen track's file holds
     std::map<TrackID, Holds> files;    // and each track's file, kept as it is unfrozen, as the file stays
     std::vector<ClipID> notesChanged;  // the clips whose notes changed, compared at the next turn of the message loop
@@ -125,7 +121,7 @@ private:
     // same of their modulators and macros, none of which was told changed since (modulationChanged()).
     std::set<TrackID> curvesAsFrozen, modulatorsAsFrozen;
 
-    // What the tree told (check()), for the next turn: the frozen tracks taken again (after an undo or a redo), these tracks
+    // What the values told, for the next turn: the frozen tracks taken again (after an undo or a redo), these tracks
     // compared, every frozen track compared.
     struct Waiting
     {
@@ -137,52 +133,50 @@ private:
     Waiting waiting;
 
     std::vector<TrackID> takeFrozenTracks (bool fromFiles = false);
-    void noteFrozenTracks (bool cameIn);                // the same at the later moment (markTrack()), from the tree alone
+    void noteFrozenTracks (bool cameIn);                // the same at the later moment (markTrack()), from the tracks alone
     void keepAsFrozen (const std::set<TrackID>& known); // of curvesAsFrozen and modulatorsAsFrozen, those whose holdings were kept
     void compare (TrackID);
-    void check (const juce::ValueTree& changed, bool cameIn);
-    void compareMarked(); // what waits: the clips', and what the tree told during an undo or a redo
+    void compareMarked(); // what waits: the clips', and what the values told during an undo or a redo
     void forgetMarked();
 
     // The notes of a frozen track's clip, its clips, and the tempo map (every frozen track's), heard as the song's values
     // change: marked, and compared once the step is whole (a listener of the values reads nothing of the song as it is told:
     // SongValues.h). The chord lane (chordLaneChanged()): nothing, as no frozen track's file holds anything of chords or keys;
-    // nor the MIDI links (midiLinksChanged()), which turn parameters live and are nothing a frozen file plays. The tree's
-    // callbacks below leave what the areas tell alone (isHeardAsKept()).
+    // nor the MIDI links (midiLinksChanged()), which turn parameters live and are nothing a frozen file plays.
     void clipNotesChanged (const std::vector<ClipID>&) override;
     void clipsChanged (const std::vector<SongValues::ClipChange>&, const std::vector<TrackID>& reordered) override;
     void tempoMapChanged() override;
 
     // The sections (sectionsChanged()): nothing, as no frozen track's file holds anything of them.
 
-    // The curves that changed (SongValues.h), which the tree's callbacks below leave alone (isHeardAsKept()): their devices
+    // The curves that changed (SongValues.h): their devices
     // marked, and the frozen tracks whose files play the automation of any of them compared at the later moment.
     void curvesChanged (const std::vector<ParameterRef>&) override;
 
-    // The modulators and macros that changed (SongValues.h), which the tree's callbacks below leave alone (isHeardAsKept()):
+    // The modulators and macros that changed (SongValues.h):
     // the frozen tracks they were on and are on (a container's macros' by its channel), and those whose modulators came in
     // another order, marked and compared at the later moment, their modulators read and compared too (modulatorsAsFrozen).
     void modulationChanged (const std::vector<SongValues::ModulationChange>&, const std::vector<ModulatorPlace>& reordered) override;
 
-    // The devices, containers and chains that changed (SongValues.h), what the devices' value covers of which the tree's
-    // callbacks below leave alone (isHeardAsKept()): the frozen tracks they were on and are on, and those whose devices came in
-    // another order, marked and compared at the later moment, as check() takes a change in a frozen track. Its Holds keep its
+    // The devices, containers and chains that changed (SongValues.h):
+    // the frozen tracks they were on and are on, and those whose devices came in
+    // another order, marked and compared at the later moment. Its Holds keep its
     // frozen devices by their IDs, with the song's devices and store as they were (Holds::values): compared as values, by
     // identity first, never written into elements.
     void devicesChanged (const std::vector<SongValues::DeviceChange>&, const std::vector<DevicePlace>& reordered,
                          const SongDevices& now) override;
 
-    // The devices' store (SongValues.h; the song's tree holds none of it): the frozen track of each item whose song's entries
+    // The devices' store (SongValues.h): the frozen track of each item whose song's entries
     // changed (its channel, as the change names it), marked and compared at the later moment, as a change of a DEVICE's or a
     // CHAIN's property or of a VALUE marked it; not a plug-in's state, which every save stores again, which the comparison
     // leaves out too.
     void deviceStoreChanged (const std::vector<SongValues::DeviceStoreChange>&, const DeviceStore& now) override;
 
-    // The tracks that changed (SongValues.h; the tree's callbacks below leave what the tracks' values cover alone,
-    // isHeardAsKept()): each track marked and compared at the later moment, and the folder it was in and is in where it came
-    // or went, as check() took a change of a TRACK; and the tracks that are frozen noted again at the later moment
+    // The tracks that changed (SongValues.h):
+    // each track marked and compared at the later moment, and the folder it was in and is in where it came
+    // or went; and the tracks that are frozen noted again at the later moment
     // (noteFrozenTracks(), which reads the song: never as it is told; during an undo or a redo taken again then, as
-    // check() takes them), one that came in noted as having come in. Their switches the same, a track frozen or played live
+    // the values tell them), one that came in noted as having come in. Their switches the same, a track frozen or played live
     // again among them (design J.4). The master's, nothing (no track's file holds anything of it); nor the view
     // (tracksViewChanged()), which no frozen file holds. As the frozen tracks are noted at the later moment, a frozen track
     // moved, or deleted and brought back, within one turn of the message loop stays known as frozen and isn't compared with
@@ -196,39 +190,13 @@ private:
     // The sends (sendsChanged()): nothing, as no frozen track's file holds anything of them: a frozen file is its track before
     // its fader, which its sends come after (its Holds keep its frozen devices, the song's values, its tempos, its frozen
     // devices' curves and its modulators, no send, nor a send's level's curve: getFrozenCurveOwners()), and nothing of a
-    // send is read to compare it. The tree's callbacks below leave the song's SEND elements alone (isHeardAsKept()), where a
-    // send added, taken out or changed on a frozen track compared the track's holdings again for nothing (roadmap step
-    // S5.20, the sends' second piece).
+    // send is read to compare it.
 
     // The song's own (songOwnChanged(), songStandingChanged(), songOutsideChanged()): nothing, as no frozen track's file holds
-    // anything of it. The tree's callbacks below leave the root's own properties and its LASTKEY, PIANOROLL and MERGING alone
-    // (isHeardAsKept()), where a counted one (the notes, an outline, a key set last, a merge waiting) compared every frozen
-    // track's holdings again for nothing (roadmap step S5.20, the song's own).
+    // anything of it.
 
     void handleAsyncUpdate() override { compareMarked(); }
     void writePending() override; // what is marked compared now, but during an undo or a redo (Song.h)
-
-    // The tree's callbacks: what a live song's tree still tells is a placeholder (CHORDLANE, MIDILINKS, SECTIONS) coming or
-    // going, its elements put in another order, and an element a safety net refused in a step, left where it was put until
-    // the step's Undo; no property is written to it but a safety net's, which the areas take (isHeardAsKept()): no callback
-    // for one.
-    void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override
-    {
-        if (! isHeardAsKept (parent, child))
-            check (parent, true);
-    }
-
-    void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override
-    {
-        if (! isHeardAsKept (parent, child))
-            check (parent, false);
-    }
-
-    void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override
-    {
-        if (! isHeardAsKept (parent))
-            check (parent, false);
-    }
 
     JUCE_DECLARE_NON_COPYABLE (FreezeKeeper)
 };

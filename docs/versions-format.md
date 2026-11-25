@@ -23,7 +23,9 @@ version, in a small file each computer writes for itself.
 What a song means (which children are ordered, what an element's key is, which properties hold IDs, what isn't a
 change) is data, in [`tests/golden/format/song-rules.json`](../tests/golden/format/song-rules.json), so that a tool can
 compare and merge songs as Phazite does without Phazite's code. Another kind of document could use the same store with
-rules of its own.
+rules of its own. Phazite writes a song as a project file holds it ([project-format.md](project-format.md), section 3):
+the song's element's children in the one order its description gives them, and no empty `MIDILINKS` or `SECTIONS` (a
+song without links or sections holds none; an empty one a version holds is read as none).
 
 ## 2. The folder
 

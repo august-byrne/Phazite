@@ -422,7 +422,7 @@ bool isAudioClip (const Song& song, ClipID clip)
 {
     // The clip's kind alone, where the song keeps it (SongValues.h: the clips' area).
     const auto* values = song.getValues();
-    const auto* value = values != nullptr ? values->findClip (clip) : nullptr;
+    const auto* value = values->findClip (clip);
     return value != nullptr && value->isAudio();
 }
 

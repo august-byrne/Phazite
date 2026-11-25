@@ -1,13 +1,11 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
-// The song's MIDI links as an area of its values (model/base/internal/SongValues.h, MidiLinksArea.h; roadmap step S5.20, the
-// MIDI links' switch). What hears the links change hears it from one place (Listener::midiLinksChanged()), which the links'
-// area tells: for each edit made through the model, its Undo and its Redo, once for each change of the value, and nothing of
-// another area; another area's change tells it nothing. What listens to the song's root hears what is in the song's
-// MIDILINKS from the area alone, and the MIDILINKS's own coming and going (with the first link) from the tree. The keeper
-// takes in a MIDILINKS that comes with links, and refuses a lone MIDILINK added in an undo step; a set equal to the links held
-// makes no step; every edit is one exact undo step; the MIDI tap follows the links by the next turn of the message loop;
-// the project's unsaved check compares them as one value; and the versions give the song another's links, or none, through
-// the links' code, and a merge's clash on a link is chosen each way.
+// SPDX-License-Identifier: AGPL-3.0-or-later The song's MIDI links as an area of its values (model/base/internal/SongValues.h,
+// MidiLinksArea.h; roadmap step S5.20, the MIDI links' switch). What hears the links change hears it from one place
+// (Listener::midiLinksChanged()), which the links' area tells: for each edit made through the model, its Undo and its Redo, once
+// for each change of the value, and nothing of another area; another area's change tells it nothing. A song's file holds a
+// MIDILINKS while it has a link (an empty one is none); a set equal to the links held makes no step; every edit is one exact undo
+// step; the MIDI tap follows the links by the next turn of the message loop; the project's unsaved check compares them as one
+// value; and the versions give the song another's links, or none, through the links' code, and a merge's clash on a link is
+// chosen each way.
 //   phazite_tests.exe --test-case="Song values' MIDI links*"
 #include "SongCheck.h"
 #include "TestClips.h"
@@ -64,54 +62,8 @@ struct Told final : phazite::SongValues::Listener
     int notes = 0, clips = 0, tempo = 0, chords = 0, links = 0;
 };
 
-// What a listener of the song's root is told: inside the song's MIDILINKS, of the MIDILINKS itself (added or taken out), and
-// all else.
-struct TreeHeard final : juce::ValueTree::Listener
-{
-    explicit TreeHeard (const juce::ValueTree& rootToHear)
-        : root (rootToHear)
-    {
-        root.addListener (this);
-    }
-
-    ~TreeHeard() override { root.removeListener (this); }
-
-    static bool isInLinks (juce::ValueTree element)
-    {
-        for (; element.isValid(); element = element.getParent())
-            if (element.hasType (schema::MIDILINKS))
-                return true;
-
-        return false;
-    }
-
-    void hear (const juce::ValueTree& element)
-    {
-        if (isInLinks (element))
-            ++inLinks;
-        else
-            ++other;
-    }
-
-    void hearChild (const juce::ValueTree& parent, const juce::ValueTree& child)
-    {
-        if (child.hasType (schema::MIDILINKS))
-            ++place;
-        else
-            hear (parent);
-    }
-
-    void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&) override { hear (tree); }
-    void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override { hearChild (parent, child); }
-    void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override { hearChild (parent, child); }
-    void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override { hear (parent); }
-
-    juce::ValueTree root;
-    int inLinks = 0, place = 0, other = 0;
-};
-
-// A song in a project of its own, with its versions and a synth on its first track, the values' listener and a listener of
-// its root recording what they are told.
+// A song in a project of its own, with its versions and a synth on its first track, the values' listener recording what it
+// is told.
 struct Watched
 {
     Watched()
@@ -126,7 +78,6 @@ struct Watched
     struct Heard
     {
         Told told;
-        int inLinks = 0, place = 0, other = 0;
         juce::int64 project = 0, versions = 0;
     };
 
@@ -135,16 +86,10 @@ struct Watched
         auto* versions = phazite::getVersionHistory (s.context);
         REQUIRE (versions != nullptr);
         told = {};
-        tree.inLinks = tree.place = tree.other = 0;
         const auto projectBefore = s.getProject().getChangeCount();
         const auto versionsBefore = versions->countSongChanges();
         change();
-        return { told,
-                 tree.inLinks,
-                 tree.place,
-                 tree.other,
-                 s.getProject().getChangeCount() - projectBefore,
-                 versions->countSongChanges() - versionsBefore };
+        return { told, s.getProject().getChangeCount() - projectBefore, versions->countSongChanges() - versionsBefore };
     }
 
     // A change as one undo step, then its Undo, then its Redo: what each told.
@@ -163,7 +108,6 @@ struct Watched
     phazite::Song& song = *phazite::findSong (s.context);
     phazite::DeviceID synth;
     Told told;
-    TreeHeard tree { song.getState() };
 };
 
 phazite::MidiLinksValue getLinks (const phazite::Song& song)
@@ -173,7 +117,7 @@ phazite::MidiLinksValue getLinks (const phazite::Song& song)
 
 bool hasLinksPlace (const phazite::Song& song)
 {
-    return song.getState().getChildWithName (schema::MIDILINKS).isValid();
+    return phazite::test::copyWholeSong (song).getChildWithName (schema::MIDILINKS).isValid();
 }
 
 phazite::AudioIO& getAudioIO()
@@ -209,9 +153,9 @@ TEST_CASE ("Song values' MIDI links: each edit through the model tells the links
     const ParameterRef cutoff { w.synth, "cutoff" }, resonance { w.synth, "resonance" };
     const auto volume = w.s.getVolumeParameter (w.s.firstTrack);
 
-    // The edit that makes the first link is heard twice by what counts: its MIDILINKS added by the tree, its link by the
-    // area. Every other edit only by the area, the tree telling nothing inside the song's MIDILINKS.
-    const auto check = [&w] (const juce::String& name, const std::function<void()>& change, bool makesThePlace = false)
+    // Each edit heard once by what counts, the first link's too: an empty MIDILINKS is none, and a song's file holds one while
+    // the song has a link.
+    const auto check = [&w] (const juce::String& name, const std::function<void()>& change)
     {
         INFO (name.toStdString());
         const std::array<const char*, 3> moments { "the step", "its Undo", "its Redo" };
@@ -226,15 +170,12 @@ TEST_CASE ("Song values' MIDI links: each edit through the model tells the links
             CHECK (heard[i].told.notes == 0);
             CHECK (heard[i].told.tempo == 0);
             CHECK (heard[i].told.chords == 0);
-            CHECK (heard[i].other == 0);
-            CHECK (heard[i].inLinks == 0);
-            CHECK (heard[i].place == (makesThePlace ? 1 : 0));
-            CHECK (heard[i].project == heard[i].told.links + heard[i].place);
-            CHECK (heard[i].versions == heard[i].told.links + heard[i].place);
+            CHECK (heard[i].project == heard[i].told.links);
+            CHECK (heard[i].versions == heard[i].told.links);
         }
     };
 
-    check ("Link MIDI Controller", [&] { phazite::linkMidiController (song, { 1, 21 }, cutoff); }, true);
+    check ("Link MIDI Controller", [&] { phazite::linkMidiController (song, { 1, 21 }, cutoff); });
     CHECK (hasLinksPlace (song));
     check ("Link MIDI Controller", [&] { phazite::linkMidiController (song, { 1, 22 }, resonance); });
     check ("Link MIDI Controller", [&] { phazite::linkMidiController (song, { 1, 21 }, volume); });   // the controller moves
@@ -244,11 +185,10 @@ TEST_CASE ("Song values' MIDI links: each edit through the model tells the links
     CHECK (getLinks (song).links.size() == 2);
     phazite::test::checkSong (song);
 
-    // A device removed takes its links along (forgetMidiLinksOfTheGone()): one write of the links, besides the tree's own.
+    // A device removed takes its links along (forgetMidiLinksOfTheGone()): one write of the links.
     for (const auto& heard : w.hearEach ("Remove Device", [&] { phazite::removeDevice (song, w.synth); }))
     {
         CHECK (heard.told.links == 1);
-        CHECK (heard.inLinks == 0);
     }
 
     REQUIRE (getLinks (song).links.size() == 1);
@@ -290,8 +230,6 @@ TEST_CASE ("Song values' MIDI links: another area's change tells nothing of the 
         for (const auto& heard : w.hearEach (name, change))
         {
             CHECK (heard.told.links == 0);
-            CHECK (heard.inLinks == 0);
-            CHECK (heard.place == 0);
         }
     };
 
@@ -301,86 +239,6 @@ TEST_CASE ("Song values' MIDI links: another area's change tells nothing of the 
     check ("Rename Track", [&] { phazite::setTrackName (song, track, "Renamed"); });
     check ("Add Effect", [&] { w.s.addEffect (track, phazite::devices::Equalizer::typeID); });
     check ("Add Track", [&] { CHECK (phazite::insertTrack (song, track, nullptr).isValid()); });
-}
-
-TEST_CASE ("Song values' MIDI links: the keeper takes in a MIDILINKS that comes into the song with links, and one added outside the "
-           "history, and refuses a lone link added in a step")
-{
-    // Its safety net (SongValues.h), which the versions never leave anything to (ApplySong.cpp, MidiLinks.cpp).
-    SynthSong s;
-    auto& song = *s.song;
-    auto& values = *song.getValues();
-    REQUIRE_FALSE (hasLinksPlace (song));
-    phazite::test::UndoCheck undo (song);
-    const auto adoptedBefore = values.countMidiLinksAdopted();
-
-    // A MIDILINKS with three links (the third the first's controller again, which goes), in a step: its links the song's, its
-    // element empty, what Phazite doesn't know of it gone with them.
-    undo.check ("Take In MIDI Links",
-                [&]
-                {
-                    const phazite::UndoStep step (song, "Take In MIDI Links");
-                    juce::ValueTree links (schema::MIDILINKS);
-                    links.appendChild (phazite::writeMidiLinkElement ({ 1, 21, s.synth.getRaw(), "cutoff" }), nullptr);
-                    links.appendChild (phazite::writeMidiLinkElement ({ 2, 7, s.synth.getRaw(), "resonance" }), nullptr);
-                    links.appendChild (phazite::writeMidiLinkElement ({ 1, 21, s.synth.getRaw(), "drive" }), nullptr);
-                    links.setProperty ("unknownToPhazite", 1, nullptr);
-                    links.appendChild (juce::ValueTree ("UNKNOWNTOPHAZITE"), nullptr);
-                    song.getState().appendChild (links, &song.getUndoManager());
-                });
-
-    REQUIRE (hasLinksPlace (song));
-    REQUIRE (getLinks (song).links.size() == 2);
-    CHECK (phazite::findLinkedParameter (song, { 1, 21 }) == s.cutoff());
-    CHECK (phazite::findLinkedParameter (song, { 2, 7 }) == s.resonance());
-    CHECK (song.getState().getChildWithName (schema::MIDILINKS).getNumChildren() == 0);
-    CHECK (song.getState().getChildWithName (schema::MIDILINKS).getNumProperties() == 0);
-    CHECK (values.countMidiLinksAdopted() == adoptedBefore + 3);
-    phazite::test::checkSong (song);
-
-    // Undone and redone: the area's own action, nothing taken in again; undone, no links and no MIDILINKS.
-    phazite::undo (song);
-    CHECK_FALSE (hasLinksPlace (song));
-    CHECK (getLinks (song) == phazite::MidiLinksValue {});
-    phazite::redo (song);
-    CHECK (getLinks (song).links.size() == 2);
-    CHECK (values.countMidiLinksAdopted() == adoptedBefore + 3);
-    phazite::test::checkSong (song);
-
-    // A link added to the song's MIDILINKS outside the history: after the others, taken out again.
-    {
-        const phazite::Song::OutsideHistory outside (song);
-        song.getState()
-            .getChildWithName (schema::MIDILINKS)
-            .appendChild (phazite::writeMidiLinkElement ({ 4, 1, s.synth.getRaw(), "drive" }), nullptr);
-    }
-
-    REQUIRE (getLinks (song).links.size() == 3);
-    CHECK (getLinks (song).links.back() == phazite::MidiLinkEntry { 4, 1, s.synth.getRaw(), "drive" });
-    CHECK (song.getState().getChildWithName (schema::MIDILINKS).getNumChildren() == 0);
-    CHECK (values.countMidiLinksAdopted() == adoptedBefore + 4);
-    phazite::test::checkSong (song);
-
-    // A link added to the song's MIDILINKS by itself in a step: refused (the links' functions change the links), the links as
-    // they were; the step undone takes it out again.
-    const auto held = getLinks (song);
-
-    {
-        const phazite::test::ExpectedAssertion refused ("MidiLinksArea.cpp");
-        const phazite::UndoStep step (song, "A Lone Link");
-        song.getState()
-            .getChildWithName (schema::MIDILINKS)
-            .appendChild (phazite::writeMidiLinkElement ({ 5, 5, s.synth.getRaw(), "cutoff" }), &song.getUndoManager());
-#if JUCE_DEBUG
-        CHECK (refused.getCount() == 1);
-#endif
-    }
-
-    CHECK (getLinks (song).isSameAs (held));
-    CHECK (values.countMidiLinksAdopted() == adoptedBefore + 4);
-    phazite::undo (song);
-    CHECK (song.getState().getChildWithName (schema::MIDILINKS).getNumChildren() == 0);
-    phazite::test::checkSong (song);
 }
 
 TEST_CASE ("Song values' MIDI links: links set equal to those the song holds make no undo step, tell nothing and keep the value held")
@@ -437,8 +295,8 @@ TEST_CASE ("Song values' MIDI links: the MIDILINKS its first link makes goes wit
                     });
     };
 
-    // The first link: the MIDILINKS added in the step (the tree's action), then the link (the area's); its Undo takes both
-    // back.
+    // The first link: the song's file holds a MIDILINKS while the song has a link; its Undo takes it back, and the song is
+    // written without one again.
     edit ("Link MIDI Controller", [&] { phazite::linkMidiController (song, { 1, 21 }, cutoff); });
     REQUIRE (hasLinksPlace (song));
     phazite::undo (song);
@@ -476,8 +334,8 @@ TEST_CASE ("Song values' MIDI links: the MIDI tap diverts a link's controller by
            "removal, Undo and Redo")
 {
     // The session follows the links' area (PlaybackSession.h: midiLinksChanged(), which only marks, and followMidiLinks() at the
-    // next turn of the message loop): no tree callback reads the links. A controller sent once its link is followed turns the
-    // parameter, never the instrument.
+    // next turn of the message loop): no listener reads the links as it is told. A controller sent once its link is followed
+    // turns the parameter, never the instrument.
     phazite::test::TestSong t;
     auto& song = *phazite::findSong (t.context);
     const auto synth = t.setInstrument (t.firstTrack, phazite::devices::Synth::typeID);
@@ -518,7 +376,7 @@ TEST_CASE ("Song values' MIDI links: a link made is an unsaved change, which its
            "again")
 {
     // The links are heard from the song's values (Listener::midiLinksChanged()), compared with the saved copy's as one value
-    // with whether each has a MIDILINKS (WholeState.h: holdSameMidiLinks()), as the whole song's comparison says.
+    // (WholeState.h: holdSameMidiLinks(): none is none), as the whole song's comparison says.
     phazite::test::TestSong t;
     auto& song = *phazite::findSong (t.context);
     const auto synth = t.setInstrument (t.firstTrack, phazite::devices::Synth::typeID);
@@ -533,7 +391,7 @@ TEST_CASE ("Song values' MIDI links: a link made is an unsaved change, which its
         change();
     };
 
-    // The first link, which makes the MIDILINKS: unsaved, as saved again once undone (before anything asked, as an unsaved
+    // The first link: unsaved, as saved again once undone (before anything asked, as an unsaved
     // change found stays one until a save).
     edit ("Link MIDI Controller", [&] { phazite::linkMidiController (song, { 1, 21 }, { synth, "cutoff" }); });
     CHECK_FALSE (project.isWholeAsSaved());
@@ -551,10 +409,10 @@ TEST_CASE ("Song values' MIDI links: a link made is an unsaved change, which its
     CHECK (project.isWholeAsSaved());
     CHECK_FALSE (project.hasUnsavedChanges());
 
-    // Taken away: unsaved, the MIDILINKS staying, empty, as the whole song's comparison says; and saved so, a link made again
-    // is a change.
+    // Taken away: unsaved (the saved copy holds the link), the song's file holding no MIDILINKS then (an empty list is none);
+    // and saved so, a link made again is a change.
     edit ("Remove MIDI Link", [&] { phazite::unlinkMidiController (song, { 1, 21 }); });
-    CHECK (hasLinksPlace (song));
+    CHECK_FALSE (hasLinksPlace (song));
     CHECK_FALSE (project.isWholeAsSaved());
     CHECK (project.hasUnsavedChanges());
     REQUIRE (project.save().wasOk());
@@ -582,7 +440,6 @@ TEST_CASE ("Song values' MIDI links: a version's links, and a version without th
 
     const auto other = phazite::test::copyWholeSong (*withLinks);
     const auto without = phazite::test::copyWholeSong (song);
-    const auto adopted = song.getValues()->countMidiLinksAdopted();
 
     const auto apply = [&] (const juce::String& name, const juce::ValueTree& from, const std::function<void (const juce::ValueTree&)>& make)
     {
@@ -641,7 +498,6 @@ TEST_CASE ("Song values' MIDI links: a version's links, and a version without th
     CHECK (getLinks (song).isSameAs (before));
     CHECK (hasLinksPlace (song));
 
-    CHECK (song.getValues()->countMidiLinksAdopted() == adopted);
     phazite::test::checkSong (song);
     undo.walkBackAndForth();
 }

@@ -38,20 +38,6 @@ namespace
                     collectTracks (child, tracks);
     }
 
-    // Every CLIP element in an element and what it holds, taken out (its notes with it): what the loader left of a file's in
-    // a place no clip of the song's is (in an element of a kind Phazite doesn't know, whose insides it leaves as they are:
-    // Project.cpp, makeConsistent()), once the clips directly on its tracks are the areas'. So the song's tree holds none.
-    void dropClipElements (juce::ValueTree element)
-    {
-        for (auto i = element.getNumChildren(); --i >= 0;)
-        {
-            if (auto child = element.getChild (i); child.hasType (schema::CLIP))
-                element.removeChild (i, nullptr);
-            else
-                dropClipElements (child);
-        }
-    }
-
     // Two entries of the clips' area alike: one clip's, the same value. A clip's value has no identity of its own to compare,
     // and is small: compared (its markers by identity first: ClipSound's ==).
     struct SameClip
@@ -165,22 +151,6 @@ void SongValues::ClipsTeller::valueAreaChanged (const SongClips& before, const S
 }
 
 //==============================================================================
-void SongValues::ClipsKeeper::adopt (SongValues&, Song& loaded)
-{
-    // Every CLIP element out of the tree, its reader having read those of the song's tracks into both areas before
-    // (readHeldClipsIn(): SongValues.cpp, adopt()): each track's, then those anywhere else too, which are no clips of the song's
-    // (dropClipElements()).
-    std::vector<juce::ValueTree> tracks;
-    collectTracks (loaded.getState().getChildWithName (schema::TRACKS), tracks);
-
-    for (auto& track : tracks)
-        for (int i = track.getNumChildren(); --i >= 0;)
-            if (track.getChild (i).hasType (schema::CLIP))
-                track.removeChild (i, nullptr);
-
-    dropClipElements (loaded.getState());
-}
-
 void readHeldClipsIn (const juce::ValueTree& song, SongState& into)
 {
     // Every CLIP of the tree the loader made consistent, into the clips and the notes: each track's in their order, the clips
@@ -279,7 +249,7 @@ void SongValues::setTrackClipOrder (Song& song, TrackID track, immer::flex_vecto
 
 void SongValues::eraseClips (Song& song, const std::vector<ClipID>& gone)
 {
-    // Each area's next value worked out whole, then set once (each tells once), as the keeper erased a track's clips.
+    // Each area's next value worked out whole, then set once (each tells once).
     auto nextClips = clips.get();
     auto nextNotes = notes.get();
     auto anyClip = false, anyNotes = false;
@@ -307,25 +277,6 @@ void SongValues::eraseClips (Song& song, const std::vector<ClipID>& gone)
 }
 
 //==============================================================================
-int takeTrackClipsIn (SongClips& clips, NotesByClip& notes, const juce::ValueTree& track, TrackID id)
-{
-    if (! holdsClips (track) || ! id.isValid())
-        return 0;
-
-    auto taken = 0;
-
-    for (const auto& element : track)
-    {
-        if (element.hasType (schema::CLIP))
-        {
-            takeClip (clips, notes, element, id, -1);
-            ++taken;
-        }
-    }
-
-    return taken;
-}
-
 void writeClipsIn (juce::ValueTree& element, const SongState& kept)
 {
     if (! element.hasType (schema::TRACK))

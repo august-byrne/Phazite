@@ -170,8 +170,8 @@ ClipValue readClipValue (const juce::ValueTree& clip);
 // what keeps it within what a clip holds is the clips' code's (keepWithinClip()). Its track is where the element goes.
 juce::ValueTree writeClipElement (const ClipValue&, const ClipNotes* notes = nullptr);
 
-// A clip's value kept within what a clip holds, as the clips' code keeps what it sets, and as the song takes in a clip read
-// from its element (Song::holdValues(), and the keeper's safety net): nothing of the other kind of clip's properties (each
+// A clip's value kept within what a clip holds, as the clips' code keeps what it sets, and as a song made of a file's state
+// reads a clip from its element (SongState.h: readSongTree()): nothing of the other kind of clip's properties (each
 // at its default, as readClipValue() reads them), each number within its description's range (keepClipNumbersDescribed(),
 // below: its start from 0 to the song's last beat among them), a MIDI clip's length at least
 // shortestClipBeats, the part of its file ending at its start or later, its fades' bends within -1 to 1, and its takes

@@ -160,17 +160,11 @@ struct Holdings
         phazite::test::checkSong (song);
     }
 
-    int countAdopted() const
-    {
-        return values().countTracksAdopted() + values().countModulationAdopted() + values().countDeviceStoreAdopted();
-    }
-
     // A remover, as one named undo step (an UndoCheck around it), then Undo, Redo and Undo again: nothing of what goes left
     // in any area after it, and the song whole as it was after each Undo.
     void checkRemoval (const juce::String& name, const std::function<void()>& remove, const std::vector<TrackID>& gone)
     {
         const auto before = phazite::test::writeSong (song, phazite::test::SongPart::whole);
-        const auto adopted = countAdopted();
         phazite::test::UndoCheck undo (s.context);
 
         undo.check (name,
@@ -182,7 +176,6 @@ struct Holdings
 
         CHECK (song.getUndoManager().getUndoDescription() == name);
         checkNothingOf (gone);
-        CHECK (countAdopted() == adopted);
 
         const auto after = phazite::test::writeSong (song, phazite::test::SongPart::whole);
 
@@ -201,8 +194,6 @@ struct Holdings
             if (! isUndo)
                 checkNothingOf (gone);
         }
-
-        CHECK (countAdopted() == adopted);
     }
 
     // The song whole after a change made and undone: a version of it, as the versions hold one.
@@ -524,10 +515,6 @@ TEST_CASE ("Track holdings: a merge's choice of a whole track gives it the side'
     CHECK (phazite::getOwnedModulators (h.song, channel) == modulators);
     CHECK (phazite::getOwnedModulators (h.song, inContainer) == macros);
     CHECK (phazite::getSendValues (h.song, h.track) == sends);
-    CHECK_FALSE (phazite::test::treeHolds (h.song, schema::CLIP));
-    CHECK_FALSE (phazite::test::treeHolds (h.song, schema::MODULATOR));
-    CHECK_FALSE (phazite::test::treeHolds (h.song, schema::MACRO));
-    CHECK_FALSE (phazite::test::treeHolds (h.song, schema::SEND));
 
     // The whole track as the other line holds it: its devices too, which its element brings until the devices' switch.
     const auto chosen = phazite::test::copyTrack (h.song, h.track);
@@ -610,6 +597,4 @@ TEST_CASE ("Track holdings: a merge's choice of the whole master gives it the si
     CHECK (phazite::getOwnedModulators (h.song, inContainer) == macros);
     CHECK (phazite::getContainerMacros (h.song, container) == masterMacros);
     CHECK (phazite::getModulations (h.song, masterMacro).size() == 1);
-    CHECK_FALSE (phazite::test::treeHolds (h.song, schema::MODULATOR));
-    CHECK_FALSE (phazite::test::treeHolds (h.song, schema::MACRO));
 }

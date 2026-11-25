@@ -179,7 +179,6 @@ TEST_CASE ("Song's own: the golden projects' roots read the same both ways once 
         const auto song = phazite::makeSong (juce::ValueTree::fromXml (*xml));
         REQUIRE (song != nullptr);
         checkRoundTrip (phazite::test::copyWholeSong (*song));
-        checkRoundTrip (song->getState());
     }
 
     // What the representative project holds of its own, through the getters (its versions' names are placeholders, which
@@ -245,7 +244,6 @@ TEST_CASE ("Song's own: a song with every field set through the model is written
 
     phazite::test::checkSong (song);
     checkRoundTrip (phazite::test::copyWholeSong (song));
-    checkRoundTrip (song.getState());
 
     // Each reader of the song's own, on the getters: what the model set.
     CHECK (phazite::isLoopOn (song));
@@ -286,14 +284,13 @@ TEST_CASE ("Song's own: a song with every field set through the model is written
     CHECK_FALSE (phazite::isMetronomeOn (song));
     CHECK (phazite::getPlayStartBeat (song) == phazite::BeatPosition());
     CHECK (phazite::doPatternsFollowTempo (song));
-    CHECK_FALSE (song.getState().hasProperty (schema::patternsKeepTheirSpeed));
+    CHECK_FALSE (phazite::test::copyWholeSong (song).hasProperty (schema::patternsKeepTheirSpeed));
     CHECK (phazite::getProjectNotes (s.context).isEmpty());
-    CHECK_FALSE (song.getState().hasProperty (schema::notes));
+    CHECK_FALSE (phazite::test::copyWholeSong (song).hasProperty (schema::notes));
     CHECK (phazite::getSongOwn (song).merging == std::optional (unchosen));
-    CHECK_FALSE (song.getState().getChildWithName (schema::MERGING).hasProperty (schema::mergingChosen));
+    CHECK_FALSE (phazite::test::copyWholeSong (song).getChildWithName (schema::MERGING).hasProperty (schema::mergingChosen));
     phazite::test::checkSong (song);
     checkRoundTrip (phazite::test::copyWholeSong (song));
-    checkRoundTrip (song.getState());
 }
 
 TEST_CASE ("Song's own: a file's input chosen last, numbering and versions' names are read by the song's readers as it holds them")
@@ -314,7 +311,6 @@ TEST_CASE ("Song's own: a file's input chosen last, numbering and versions' name
     const auto names = phazite::VersionHistory::readNames (phazite::getSongStanding (song));
     CHECK (names.branch == repeat ('d', schema::versionsBranchDigits));
     CHECK (names.base == repeat ('e', schema::versionsBaseDigits));
-    checkRoundTrip (song.getState());
 }
 
 TEST_CASE ("Song's own: values at each field's bounds and defaults are read back as they were written")
@@ -426,9 +422,8 @@ TEST_CASE ("Song's own: a damaged root read as the song holds it is what the loa
     key.setProperty (schema::keyScale, "bogus", nullptr);
     damaged.appendChild (key, nullptr);
 
-    const phazite::Song::Ptr loaded (new phazite::Song (damaged.createCopy()));
-    phazite::makeConsistent (*loaded);
-    const auto consistent = loaded->getState();
+    auto consistent = damaged.createCopy();
+    phazite::makeConsistent (consistent);
 
     CHECK (phazite::readSongOwnValue (consistent) == phazite::readHeldSongOwn (damaged));
     CHECK (phazite::readSongStanding (consistent) == phazite::readHeldSongStanding (damaged));
@@ -482,9 +477,8 @@ TEST_CASE ("Song's own: where playback starts is held within its range, past 0 o
         CHECK (juce::exactlyEqual (phazite::readHeldSongOutside (file).playStart, held));
 
         // The loader keeps it so (Schema.h: its range; written only past 0), and both readers then read it alike.
-        phazite::Song loaded (file.createCopy());
-        phazite::makeConsistent (loaded);
-        const auto root = loaded.getState();
+        auto root = file.createCopy();
+        phazite::makeConsistent (root);
         CHECK (root.hasProperty (schema::playStart) == (held > 0.0));
         CHECK (phazite::readSongOutside (root) == phazite::readHeldSongOutside (file));
         checkRoundTrip (root);
@@ -516,9 +510,8 @@ Opened openDamaged (const std::function<void (juce::XmlElement&)>& damage)
     const auto file = juce::ValueTree::fromXml (*xml);
 
     Opened opened;
-    phazite::Song loaded (file.createCopy());
-    phazite::makeConsistent (loaded);
-    opened.byLoader = loaded.getState().createCopy();
+    opened.byLoader = file.createCopy();
+    phazite::makeConsistent (opened.byLoader);
     opened.song = phazite::makeSong (file.createCopy());
     REQUIRE (opened.song != nullptr);
     phazite::test::checkSong (*opened.song);

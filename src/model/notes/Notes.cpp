@@ -193,7 +193,7 @@ namespace
     public:
         explicit MidiClips (const Song& s)
             : song (s),
-              held (s.getValues() != nullptr ? s.getValues()->clips.get() : SongClips())
+              held (s.getValues()->clips.get())
         {
         }
 
@@ -562,16 +562,15 @@ ClipNotes getClipNotesValue (const Song& song, ClipID clip)
     // None of a song that keeps everything in its tree (one made to be read or checked: Song::getValues()), whose clips are no
     // clips of the song's (Clips.h).
     const auto* values = song.getValues();
-    const auto* value = values != nullptr ? values->findClipNotes (clip) : nullptr;
+    const auto* value = values->findClipNotes (clip);
     return value != nullptr ? *value : ClipNotes();
 }
 
 void setClipNotesValue (Song& song, ClipID clip, const ClipNotes& value)
 {
     auto* values = song.getValues();
-    jassert (values != nullptr); // a song made to be read or checked isn't edited
 
-    if (values != nullptr && isMidiClip (song, clip))
+    if (isMidiClip (song, clip))
         values->setClipNotes (song, clip, keepBeatsDescribed (value));
 }
 

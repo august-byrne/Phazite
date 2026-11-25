@@ -13,6 +13,7 @@
 #include "model/base/internal/IDsHeld.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongOwnValue.h"
+#include "model/base/internal/SongState.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/SongValues.h"
 #include "model/base/internal/TrackSwitchesValue.h"
@@ -34,7 +35,7 @@
 
 TEST_CASE ("A song numbers its items from its own count, which goes past every ID it holds")
 {
-    phazite::Song song { juce::ValueTree (phazite::schema::PHAZITE) };
+    phazite::Song song { phazite::SongState {} };
     CHECK (song.makeID() == 1);
     CHECK (song.makeID() == 2);
     CHECK (phazite::getNextID (song) == 3);
@@ -123,10 +124,9 @@ TEST_CASE ("A live song's next ID is past every ID its values hold beside its tr
             phazite::setClipLink (song, alias, largest);
         }
 
-        // The count behind them all, as a song's whose count was worked out from its tree alone.
+        // The count behind them all.
         phazite::countIDsFrom (song, 1, phazite::IDCount::mayBeBehind);
         REQUIRE (phazite::findLargestIDHeld (song) == largest);
-        CHECK (phazite::findNextID (song.getState()) <= largest);
         CHECK (phazite::findNextID (song) == largest + 1);
 
         // Counted as the project saves: the file's count is past it; and opened again, so is the song's.
@@ -353,15 +353,14 @@ bool isSameSavedFloat (const juce::var& a, const juce::var& b)
 }
 
 // A song of the representative project with one value changed, checked as it is and after the loader; and what the
-// loader made of it, or none if it took it out (or the element it was on). For a clip, its warp marker, its note or its
-// controller's value, also the song opened as a project opens it (makeSong()), which holds its clips and their notes as
-// values beside its tree.
+// loader made of it, or none if it took it out (or the element it was on); for what the song holds as values, also the song
+// opened as a project opens it (makeSong()).
 struct Changed
 {
     juce::ValueTree element, original;
     std::vector<std::string> problemsBefore;
     phazite::Song::Ptr loaded, opened;
-    juce::ValueTree loadedElement;
+    juce::ValueTree loadedElement, loadedTree; // the element in the tree the loader made consistent, and that tree, kept
     phazite::ClipID clip;
     juce::String curveKey; // of a curve changed, or of the one a point changed is in
     juce::Identifier changedProperty;
@@ -382,15 +381,11 @@ struct Changed
         parentKey = schema::getElementKey (element.getParent());
         element.setProperty (property, value, nullptr);
 
-        const phazite::Song rawSong { raw.createCopy() };
-        problemsBefore = findSongProblems (rawSong, tables);
+        problemsBefore = findFileProblems (raw, tables);
 
         // A clip, its warp marker, its note or its controller's value, a tempo or a time signature, a chord or a key change, a
-        // MIDI link, a curve or its point, a section, a modulator, a macro or a modulation, a send, or a plug-in's value set by
-        // hand: the loader's part alone (makeConsistent()), on a song that keeps everything in its tree, since a song made by
-        // makeSong() holds its clips, their notes, its tempo map, its chord lane, its MIDI links, its curves, its sections, its
-        // modulation, its sends, its devices' store and its devices as values beside it (Song::holdValues()); and the song
-        // opened, whose values findOpened() reads back through whole state.
+        // MIDI link, a curve or its point, a section, a modulator, a macro or a modulation, a send, a plug-in's value set by
+        // hand, a device or a track's leaf: also the song opened, whose values findOpened() reads back through whole state.
         if (isCurveElement (element))
             curveKey = schema::getElementKey (element.hasType (schema::CURVE) ? element : element.getParent());
 
@@ -419,24 +414,19 @@ struct Changed
                 opened = phazite::makeSong (raw.createCopy());
                 REQUIRE (opened != nullptr);
             }
-
-            loaded = new phazite::Song (raw);
-            phazite::makeConsistent (*loaded, phazite::ReadAs::whole, tables);
-        }
-        else
-        {
-            loaded = phazite::makeSong (raw);
-            REQUIRE (loaded != nullptr);
-
-            if (&tables != &schema::getTables())
-                phazite::makeConsistent (*loaded, phazite::ReadAs::whole, tables);
         }
 
+        // The loader's part alone (makeConsistent()), on the file's tree, with the tables given; and the song made of what it
+        // left.
+        phazite::makeConsistent (raw, {}, phazite::ReadAs::whole, tables);
+        loadedTree = raw;
+        loaded = phazite::makeSong (raw.createCopy());
+        REQUIRE (loaded != nullptr);
         loadedElement = isInSong (element) ? element : juce::ValueTree();
 
-        // The song's own (its root's properties, its LASTKEY, PIANOROLL and MERGING), which the song opened holds beside its
-        // tree (SongOwnArea.h), its tree holding none of it: read back from the song's whole copy, as its file holds it.
-        if (isSongOwn (original) && opened == nullptr)
+        // The song's own (its root's properties, its LASTKEY, PIANOROLL and MERGING), which the song holds as values: read back
+        // from the song's whole copy, as its file holds it.
+        if (isSongOwn (original))
         {
             const auto whole = phazite::copyWholeSong (*loaded);
             loadedElement = original.hasType (schema::PHAZITE) ? whole : whole.getChildWithName (original.getType());
@@ -1003,10 +993,12 @@ TEST_CASE ("The description holds together")
 
     // The representative golden project, which the cases above change one value of, holds together as it is.
     {
-        const phazite::Song representative { readRepresentative() };
-        const auto problems = findSongProblems (representative);
+        const auto problems = findFileProblems (readRepresentative());
         INFO (describeProblems (problems));
         CHECK (problems.empty());
+        const auto opened = phazite::makeSong (readRepresentative());
+        REQUIRE (opened != nullptr);
+        checkSong (*opened);
     }
 
     // Every element and property the representative golden project holds described (a device's values set by hand are

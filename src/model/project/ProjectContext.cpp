@@ -38,8 +38,7 @@ namespace
     //==============================================================================
     // Listens to the open song and tells the context's listeners which groups changed, once per turn of the message loop. A
     // plug-in whose helper went, or that was reloaded, changes what its device shows (model/plugins/internal/PluginHost.h).
-    struct SongWatcher : private juce::ValueTree::Listener,
-                         private SongValues::Listener,
+    struct SongWatcher : private SongValues::Listener,
                          private juce::ChangeListener,
                          private juce::AsyncUpdater
     {
@@ -59,22 +58,17 @@ namespace
         void setSong (Song* newSong)
         {
             if (song != nullptr)
-                if (auto* values = song->getValues())
-                    values->removeListener (this);
+                song->getValues()->removeListener (this);
 
-            state.removeListener (this);
             cancelPendingUpdate();
             pending = {};
             notesChanged.clear();
             masterDevices = false;
             ++version;
             song = newSong;
-            state = song != nullptr ? song->getState() : juce::ValueTree();
-            state.addListener (this);
 
             if (song != nullptr)
-                if (auto* values = song->getValues())
-                    values->addListener (this);
+                song->getValues()->addListener (this);
         }
 
         int getVersion() const noexcept { return version; }
@@ -83,7 +77,6 @@ namespace
         juce::ListenerList<ProjectContext::Listener>& listeners;
         PluginHost& plugins;
         juce::WeakReference<Song> song; // which may go before it lets go of it
-        juce::ValueTree state;
         SongChanges pending;
         std::vector<ClipID> notesChanged; // named as the changes are delivered, with their tracks
         bool masterDevices = false;       // the master's devices changed: its channel named as the changes are delivered
@@ -117,25 +110,19 @@ namespace
             add (pending.clips);
         }
 
-        // The tempo map (SongValues.h): its group. Its tree callbacks below leave its elements alone (isHeardAsKept()).
+        // The tempo map (SongValues.h): its group.
         void tempoMapChanged() override { add (pending.tempo); }
 
-        // The chord lane (SongValues.h): its group, as a change in its element always was. Its tree callbacks below leave what
-        // is in its element alone (isHeardAsKept()); the element's own coming and going they mark as before (mark()).
+        // The chord lane (SongValues.h): its group, a lane placed or taken away too.
         void chordLaneChanged() override { add (pending.chords); }
 
-        // The curves (SongValues.h): the automation's group. Its tree callbacks below leave the curves' elements alone
-        // (isHeardAsKept()); the song's AUTOMATION itself is theirs (mark()).
+        // The curves (SongValues.h): the automation's group.
         void curvesChanged (const std::vector<ParameterRef>&) override { add (pending.automation); }
 
-        // The MIDI links (SongValues.h): their group, as a change in their element always was. Its tree callbacks below leave
-        // what is in the song's MIDILINKS alone (isHeardAsKept()); the element's own coming and going they mark as before
-        // (mark(), markRemoved()).
+        // The MIDI links (SongValues.h): their group.
         void midiLinksChanged() override { add (pending.midiLinks); }
 
-        // The sections (SongValues.h): their group, as a change in their element always was. Its tree callbacks below leave what
-        // is in the song's SECTIONS alone (isHeardAsKept()); the element's own coming and going they mark as before (mark(),
-        // markRemoved()).
+        // The sections (SongValues.h): their group.
         void sectionsChanged (const std::vector<SectionID>&) override { add (pending.sections); }
 
         // The modulators and macros (SongValues.h): their group, for one added, taken out or come to another place, and for
@@ -198,7 +185,7 @@ namespace
         }
 
         // The devices, containers and chains (SongValues.h): the devices' group, naming the channel each was on and is on, as a
-        // change in a DEVICE's or a CONTAINER's element was (mark()), and as one added, taken out or moved past another was
+        // change in a DEVICE's or a CONTAINER's element was, and as one added, taken out or moved past another was
         // (markRemoved()); and any channel where what sound can reach changed (every strip's send knobs follow
         // the whole routing, a send that would make a loop has none): a sidechain set or cleared, or carried by one that came,
         // went or moved (as the tree's callbacks said of an element added or taken out), and a value that switches what a
@@ -279,7 +266,7 @@ namespace
         }
 
         // The devices' store (SongValues.h; the song's tree holds none of it): the devices' group, naming the channel of the
-        // item, as a change of a DEVICE's or a CHAIN's property was (mark()), for a plug-in's state, program, format ID or
+        // item, as a change of a DEVICE's or a CHAIN's property was, for a plug-in's state, program, format ID or
         // version and a chain's mute or solo; nothing for a plug-in's value set by hand, its first or its last, as no VALUE
         // was (a parameter's value is no change that views show), nor for an item the song doesn't hold (an answer of a
         // plug-in a step took away).
@@ -323,7 +310,7 @@ namespace
 
         void changeListenerCallback (juce::ChangeBroadcaster*) override
         {
-            if (state.isValid())
+            if (song != nullptr)
             {
                 pending.deviceChannels.any = true; // which plug-ins' channels isn't said
                 add (pending.devices);
@@ -349,27 +336,6 @@ namespace
             items.named.erase (std::unique (items.named.begin(), items.named.end()), items.named.end());
         }
 
-        // The group a change to this element, or to something in it, belongs to (the song's tree holds no device, container
-        // or chain: devicesChanged(), deviceStoreChanged()).
-        void mark (const juce::ValueTree& changed)
-        {
-            for (auto element = changed; element.isValid(); element = element.getParent())
-            {
-                if (element.hasType (schema::MIDILINKS))
-                    return add (pending.midiLinks);
-
-                // The master's own element: an element a safety net refused in a step, left there until the step's Undo.
-                if (element.hasType (schema::MASTER))
-                    return add (pending.tracks);
-
-                if (element.hasType (schema::SECTIONS))
-                    return add (pending.sections);
-
-                if (element.hasType (schema::CHORDLANE))
-                    return add (pending.chords);
-            }
-        }
-
         void add (bool& group)
         {
             group = true;
@@ -392,31 +358,16 @@ namespace
             listeners.call ([&changes] (ProjectContext::Listener& l) { l.songChanged (changes); });
         }
 
-        // A child that is gone has no parent to say where it was: its own type does, or else its old parent's. (A track and a
-        // channel's LANES taken out: tracksChanged(), tracksViewChanged().)
-        void markRemoved (const juce::ValueTree& parent, const juce::ValueTree& child)
-        {
-            if (child.hasType (schema::MIDILINKS))
-                add (pending.midiLinks);
-            else if (child.hasType (schema::SECTIONS))
-                add (pending.sections);
-            else if (child.hasType (schema::CHORDLANE))
-                add (pending.chords);
-            else
-                mark (parent);
-        }
-
-        // What the song holds of its own (SongValues.h; the tree callbacks here leave the root's own properties and its
-        // LASTKEY, PIANOROLL and MERGING alone, isHeardAsKept()): the notes' group, for the project's notes. Nothing else of
-        // it names a group, as none did while the tree told it (mark() of the song's element): the views poll the loop,
-        // punch and the grids, and ask the outline, the key set last and a merge waiting as they show them.
+        // What the song holds of its own (SongValues.h): the notes' group, for the project's notes. Nothing else of it names a
+        // group: the views poll the loop, punch and the grids, and ask the outline, the key set last and a merge waiting as they
+        // show them.
         void songOwnChanged (const SongOwnChange& change) override
         {
             if (change.has (SongOwnChange::notes))
                 add (pending.notes);
         }
 
-        // The tracks (SongValues.h; the tree callbacks here leave what their values cover alone, isHeardAsKept()): their group,
+        // The tracks (SongValues.h): their group,
         // as a change of a TRACK's or the MASTER's own property, a TRACK added, taken out or moved past another were; nothing
         // for a channel's volume and pan alone, which no view shows as a change (controls read values as they show them). A
         // track given another ID in place is told as one taken out and another added, its group's alike.
@@ -451,27 +402,7 @@ namespace
         // MASTER's view property raised the tracks' group while the tree told it). None for a write of the view that changes
         // nothing of it (an empty LANES added), which the tree's callbacks raised the view's group for.
         void tracksViewChanged (const std::vector<TrackID>&, bool) override { add (pending.view); }
-
-        void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override
-        {
-            // The areas' (isHeardAsKept()): tempoMapChanged(), chordLaneChanged(), curvesChanged(), midiLinksChanged(),
-            // devicesChanged(), deviceStoreChanged().
-            if (isHeardAsKept (parent, child))
-                return;
-
-            mark (child);
-        }
-        void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override
-        {
-            if (! isHeardAsKept (parent, child))
-                markRemoved (parent, child);
-        }
-
-        // Children in another order: nothing views show as a change but tracks' (tracksChanged(), told the lists reordered)
-        // and devices' (devicesChanged(), told the owners reordered); clips, sections and the tempo's changes have their places
-        // in time, which no order changes.
     };
-
 } // namespace
 
 //==============================================================================

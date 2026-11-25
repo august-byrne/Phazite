@@ -87,8 +87,7 @@ void purgeClipRenders (const Song&);
 // whose folder couldn't be written, until the folder can be (both looked at every two seconds while any failed:
 // checkFailedAgain()), or the clip needs another render (other settings, or another cache folder) or needs it again after
 // no clip did: its clips stay silent and say so (hasFailed(), getFailedClips()).
-class ClipRenders : private juce::ValueTree::Listener,
-                    private SongValues::Listener,
+class ClipRenders : private SongValues::Listener,
                     private FileIdentityListener,
                     private juce::Timer,
                     private juce::AsyncUpdater
@@ -142,7 +141,6 @@ private:
     static_assert (std::atomic<juce::int64>::is_always_lock_free);
 
     const Song& song;
-    juce::ValueTree state; // the song's
     BackgroundJobs jobs;
 
     // The renders being made: never the jobs themselves, which go as they end, between any two calls here.
@@ -187,44 +185,19 @@ private:
     void handleAsyncUpdate() override;
     void fileIdentityChanged (const juce::File&) override; // a source may be written again: another render to make
 
-    void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override;
-    void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override;
     void clipsChanged (const std::vector<SongValues::ClipChange>&, const std::vector<TrackID>&) override; // SongValues.h
     void tempoMapChanged() override;                                                                      // SongValues.h
 
-    // The tracks (SongValues.h; the tree callbacks above leave what their values cover alone, isHeardAsKept()): a track added
-    // or taken out, the renders found again in a while, as a TRACK added or taken out made them; nothing else of a track (no
-    // render is made of a track's fields), nor its switches, nor its view (a track's lanes, which made them look again for
-    // nothing while the tree told them).
+    // The tracks (SongValues.h): a track added or taken out, the renders found again in a while; nothing else of a track (no
+    // render is made of a track's fields), nor its switches, nor its view.
     void tracksChanged (const std::vector<TrackChange>&, const std::vector<TrackID>&, const SongTracks&) override;
 
-    // The song's own (SongValues.h: songOwnChanged(), songStandingChanged(), songOutsideChanged()): nothing, as no render is
-    // made of it. The tree callbacks above leave its LASTKEY, PIANOROLL and MERGING alone (isHeardAsKept()), whose coming and
-    // going, as a child of the song's element, looked for renders again for nothing while the tree told it.
-
-    // The chord lane (SongValues.h: chordLaneChanged()): nothing, as no clip's render is made of chords or keys; the tree
-    // callbacks above leave what is in the song's CHORDLANE alone (isHeardAsKept(), as every listener of the song's root does)
-    // and, unlike the other listeners, the CHORDLANE's own coming and going too (isChordLanePlaceholder()).
-    static bool isChordLanePlaceholder (const juce::ValueTree& parent, const juce::ValueTree& child);
-
-    // The sections (SongValues.h: sectionsChanged()): nothing, as no clip's render is made of them; the tree callbacks above
-    // leave what is in the song's SECTIONS alone (isHeardAsKept()) and, as the chord lane's, the SECTIONS's own coming and
-    // going too (isSectionsPlaceholder()), so that a section edit makes the renders look again at nothing.
-    static bool isSectionsPlaceholder (const juce::ValueTree& parent, const juce::ValueTree& child);
-
-    // Not the curves (SongValues.h: curvesChanged()): no render holds automation, and the tree's callbacks above leave the
-    // curves' elements alone (isHeardAsKept(), through isHeardAsCurves()). Nor the MIDI links (midiLinksChanged()): no render
-    // is made of them, and the tree's callbacks above leave what is in the song's MIDILINKS alone (isHeardAsMidiLinks()).
-    // Nor modulation (modulationChanged()): a render is a clip's file, stretched by its own settings along the tempo map, and
-    // no modulator or macro moves any of it; the song's tree holds none of them (roadmap step S5.20). A track or a container
-    // added or taken out with modulators in it is the tree's, looked at as before. Nor the sends (sendsChanged()): a send
-    // plays a track's sound after its clips, and no render is made of one; the song's tree holds none of them (roadmap step
-    // S5.20). A track added or taken out with sends on it is the tree's, looked at as before. Nor the devices
-    // (devicesChanged()): a render is a clip's file, which no device, container or chain plays, and the tree's callbacks above
-    // leave a device, a container, a chain or what is in one, added or taken out, alone (isHeardAsKept(), through
-    // isHeardAsDevices()), where each made the renders look again for nothing (roadmap step S5.20, the devices' listener; a
-    // plug-in's VALUE added or taken out still does, the store's). A track added or taken out with devices in it is the
-    // tree's, looked at as before.
+    // Nothing else of the song's values: no render is made of the song's own (songOwnChanged(), songStandingChanged(),
+    // songOutsideChanged()), nor of chords or keys (chordLaneChanged(), a lane placed or taken away among them), nor of the
+    // sections (sectionsChanged()); none holds automation (curvesChanged()) nor is made of the MIDI links
+    // (midiLinksChanged()); and a render is a clip's file, stretched by its own settings along the tempo map, which no
+    // modulator or macro moves (modulationChanged()), no send plays (sendsChanged(): a send plays a track's sound after its
+    // clips) and no device, container or chain plays (devicesChanged(), deviceStoreChanged()).
 
     JUCE_DECLARE_NON_COPYABLE (ClipRenders)
 };

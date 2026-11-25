@@ -11,6 +11,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SectionsValue.h"
 #include "model/base/internal/Selection.h"
+#include "model/base/internal/SongState.h"
 #include "model/commands/internal/Undo.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -201,18 +202,9 @@ TEST_CASE ("Sections value: damaged sections read as the sections' code read the
     CHECK (written.getChild (0).hasProperty (schema::sectionName));
     CHECK (phazite::readSectionsValue ({}) == SectionsValue {});
 
-    // The readers on a song that keeps everything in its tree (one made to be read or checked, without values: as a file from
-    // others would be before the loader makes it consistent), the same as the sections' code read them before.
-    auto raw = phazite::makeNewSong();
-    raw.appendChild (sections.createCopy(), nullptr);
-    const phazite::Song rawSong { raw };
-    REQUIRE (rawSong.getValues() == nullptr);
-    CHECK (phazite::getSectionsValue (rawSong) == value);
-    checkReadersAsBefore (rawSong, sections);
-
-    // And on a song opened with them (a file from others, which the loader makes consistent and the song takes into its
+    // The readers on a song opened with them (a file from others, which the loader makes consistent and the song takes into its
     // values: SectionsValue.h, readHeldSections()), the same as the sections' code read the sections the loader left.
-    auto state = phazite::makeNewSong();
+    auto state = phazite::writeSongTree (phazite::makeNewSong());
     state.appendChild (sections.createCopy(), nullptr);
     const auto song = phazite::makeSong (state);
     REQUIRE (song != nullptr);
@@ -256,16 +248,6 @@ TEST_CASE ("Sections value: sections read as the song holds them keep what their
     CHECK_FALSE (phazite::holdsSectionsHeld ({ value.sections.push_back (damaged) }));
     CHECK_FALSE (phazite::readHeldSection (sections.getChild (0)).has_value());
     CHECK_FALSE (phazite::readHeldSection (sections.getChild (3)).has_value()); // not a section
-
-    // A section taken in after the others: kept where it is the first of its ID.
-    SectionValue bridge;
-    bridge.id = phazite::SectionID::fromRaw (12);
-    bridge.name = "Bridge";
-    const auto taken = phazite::withSectionTaken (value, phazite::writeSectionElement (bridge));
-    REQUIRE (taken.sections.size() == 3);
-    CHECK (taken.sections[2] == bridge);
-    CHECK (phazite::withSectionTaken (value, phazite::writeSectionElement (damaged)) == value);
-    CHECK (phazite::withSectionTaken (value, juce::ValueTree ("OTHER")).isSameAs (value));
 }
 
 TEST_CASE ("Sections value: a colour written empty and none round-trip as they were, and show as they did")
@@ -292,7 +274,7 @@ TEST_CASE ("Sections value: a colour written empty and none round-trip as they w
 
     // A song opened with them (the loader leaves both colours as they are, and may give the sections other IDs, which the
     // song's own items have).
-    auto state = phazite::makeNewSong();
+    auto state = phazite::writeSongTree (phazite::makeNewSong());
     state.appendChild (sections.createCopy(), nullptr);
     const auto song = phazite::makeSong (state);
     REQUIRE (song != nullptr);

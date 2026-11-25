@@ -793,9 +793,10 @@ TEST_CASE ("Song values' own: a song made the same as another, and as a copy tak
     // A copy taken, then the key and the loop changed outside the history (Back to Now's makeSongAsCopied()): the standing and
     // the outside value told once each; the song's own value, which only a step writes, never.
     const auto copy = phazite::test::copyWholeSong (w.song);
+    const auto copyState = phazite::getSongState (w.song);
     phazite::setLastKey (w.song, { .root = 3 });
     phazite::toggleLoop (w.song);
-    const auto asCopied = w.hear ([&] { phazite::makeSongAsCopied (w.song, copy); });
+    const auto asCopied = w.hear ([&] { phazite::makeSongAsCopied (w.song, copyState); });
     CHECK (asCopied.told.own == 0);
     CHECK (asCopied.told.standing == 1);
     CHECK (asCopied.told.lastKey);
@@ -804,6 +805,6 @@ TEST_CASE ("Song values' own: a song made the same as another, and as a copy tak
     CHECK (phazite::isLoopOn (w.song));
 
     // A second pass of each: nothing told.
-    const auto again = w.hear ([&] { phazite::makeSongAsCopied (w.song, copy); });
+    const auto again = w.hear ([&] { phazite::makeSongAsCopied (w.song, copyState); });
     CHECK (again.told.own + again.told.standing + again.told.outside == 0);
 }

@@ -37,7 +37,7 @@ SidechainChoice describeSidechainSource (const Song&, DeviceID);
 // link to its channel): one that has a source does, but Phazite's compressor only while it compresses or ducks; shaping
 // transients (its Transient mode), it hears its own sound, its key kept for when it compresses or ducks again. And whether
 // a change of a value set by hand of one of Phazite's own devices, by its type and its parameter's index among its
-// description's, turns that on or off, as the compressor's mode does: what the devices' part of the keeper asks of each value
+// description's, turns that on or off, as the compressor's mode does: what the devices' area asks of each value
 // that changed (model/base/internal/DevicesArea.h: DeviceChange::sidechainSwitched), so that no listener reads a device's type.
 bool hearsSidechain (const Song&, DeviceID);
 bool switchesSidechain (std::string_view typeID, int parameterIndex);
@@ -77,4 +77,9 @@ void forgetSidechainsOfBus (Song&, TrackID bus);
 // naming what it no longer hears (FL Studio refuses such a routing; deleting a track a sidechain listens to turns it off
 // alike). Joins the caller's undo step.
 void forgetSidechainLoops (Song&);
+
+// The same rule on a file's song's tree, as the loader makes it consistent (model/project/internal/Project.h:
+// makeConsistent()): its tracks, devices and sends read once, each device found taken its sidechain (deviceSidechain) off its
+// element, outside any history. The same devices as forgetSidechainLoops() finds in a song that holds the same. Any thread.
+void forgetSidechainLoopsIn (juce::ValueTree& song);
 } // namespace phazite

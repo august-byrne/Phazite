@@ -65,13 +65,11 @@ namespace
 
     std::atomic<std::uint64_t> looks { 0 }; // countModulationLooks(): a count alone, which orders nothing
 
-    // The song's modulation now: its area's value; for a song that holds no values (a check's copy, which holds everything in
-    // its tree: tests/SongCheck.cpp), read from its tree. A copy, which shares what it holds.
+    // The song's modulation now: its area's value. A copy, which shares what it holds.
     SongModulation getArea (const Song& song)
     {
         looks.fetch_add (1, std::memory_order_relaxed);
-        const auto* values = song.getValues();
-        return values != nullptr ? values->modulation.get() : readModulationValue (song.getState());
+        return song.getValues()->modulation.get();
     }
 
     //==============================================================================
@@ -172,17 +170,9 @@ SongModulation getModulationValue (const Song& song)
 
 std::optional<ModulatorValue> getModulatorValue (const Song& song, ModulatorID id)
 {
-    // A look in the area; for a song without values (one the loader makes consistent, a check's copy), its one element of
-    // the ID read from its tree, the others not (the loader's checks ask for each curve's and each link's parameter).
     looks.fetch_add (1, std::memory_order_relaxed);
-
-    if (const auto* values = song.getValues())
-    {
-        const auto* value = values->modulation.get().find (id);
-        return value != nullptr ? std::optional<ModulatorValue> (*value) : std::nullopt;
-    }
-
-    return readModulatorValueIn (song.getState(), id);
+    const auto* value = song.getValues()->modulation.get().find (id);
+    return value != nullptr ? std::optional<ModulatorValue> (*value) : std::nullopt;
 }
 
 std::uint64_t countModulationLooks() noexcept
@@ -411,7 +401,7 @@ bool setModulator (Song& song, const ModulatorValue& value, int index)
     auto* values = song.getValues();
     const auto place = findOwnerPlace (song, value.place);
 
-    if (values == nullptr || ! value.id.isValid() || ! place.has_value())
+    if (! value.id.isValid() || ! place.has_value())
         return false;
 
     auto next = value;
@@ -422,13 +412,13 @@ bool setModulator (Song& song, const ModulatorValue& value, int index)
 bool eraseModulator (Song& song, ModulatorID id)
 {
     auto* values = song.getValues();
-    return values != nullptr && values->eraseModulator (song, id);
+    return values->eraseModulator (song, id);
 }
 
 bool setModulatorOrder (Song& song, const ModulatorPlace& owner, const immer::flex_vector<ModulatorID>& order)
 {
     auto* values = song.getValues();
-    const auto* list = values != nullptr ? values->modulation.get().findList (owner) : nullptr;
+    const auto* list = values->modulation.get().findList (owner);
 
     if (list == nullptr)
         return false;
@@ -451,16 +441,12 @@ bool setModulatorOrder (Song& song, const ModulatorPlace& owner, const immer::fl
 bool setAllModulation (Song& song, SongModulation next)
 {
     auto* values = song.getValues();
-    return values != nullptr && values->setAllModulation (song, std::move (next));
+    return values->setAllModulation (song, std::move (next));
 }
 
 bool eraseModulatorsOf (Song& song, const std::vector<ModulatorPlace>& owners)
 {
     auto* values = song.getValues();
-
-    if (values == nullptr)
-        return false;
-
     std::vector<ModulatorID> gone;
 
     for (const auto& owner : owners)
@@ -472,9 +458,6 @@ bool eraseModulatorsOf (Song& song, const std::vector<ModulatorPlace>& owners)
 
 void takeModulatorsOf (Song& song, const juce::ValueTree& owner)
 {
-    if (song.getValues() == nullptr)
-        return;
-
     for (const auto& element : owner)
     {
         if (! element.hasType (schema::MODULATOR) && ! element.hasType (schema::MACRO))

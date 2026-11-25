@@ -73,7 +73,7 @@ The code is layered so that the UI can change without touching the rules of edit
 - **The UI decides nothing about the project:** it runs a command or calls a model function, and every change to a project is one named undo step.
 - **Every user action is a command**, with a stable id such as `edit.undo`, a name and a description; default shortcuts go in the keymaps in `resources/keymaps/`, not in code.
 - **Colors, sizes and fonts come from the design tokens** (`src/ui/theme/DesignTokens.h`), never literals.
-- **Whatever listens to a song listens to its root** (`Song::getState()`), never to one of its elements: the song's index, which finds what IDs name, listens to the track list so that it hears of every change there first.
+- **Whatever listens to a song listens to its values** (`SongValues::Listener`), never to one of its elements.
 
 `sh tools/check-architecture.sh` counts what these rules forbid and compares each count with its budget in `tools/architecture-budget.txt`, where every budget is 0 but one (`ui-design-literals`, the colours, font sizes and corner radii still written as literals in the UI, which only falls); CI and the pre-commit hook run it. Every count must equal its budget: when your change removes matches, run it with `--update` and commit the new budget with the change; when it adds matches, change the code instead.
 

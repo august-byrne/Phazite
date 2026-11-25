@@ -5,8 +5,7 @@
 // it (Arrangement.h): move, copy, delete and resize. Sections never overlap. The song holds its sections as a value in an
 // area of its values (model/base/internal/SongValues.h, SectionsArea.h): every edit below reads the value, works the next
 // one out and sets it once (SongValues::setSections()), in the step in progress, or outside the history while the song is
-// written outside it; the song's SECTIONS element, the place a whole copy writes them in, is added with the first section, in
-// that step, and never taken away by an edit.
+// written outside it. A song without sections has none: whole state writes no empty SECTIONS (SongState.h).
 #pragma once
 
 #include "model/base/Beats.h"
@@ -159,9 +158,8 @@ SectionsCopy copySections (const Song&, BeatRange);
 void pasteSections (Song&, const SectionsCopy&, BeatPosition destination); // with IDs of their own
 
 // The song's sections made the ones an element holds (a SECTIONS, read as the song holds them: SectionsValue.h,
-// readHeldSections()), or none for an invalid tree: its SECTIONS in the song's tree added (the element first) or taken out
-// (the value first) where it has one and the other none, and its value set, in the mode of the moment (the step in progress,
-// or outside the history while the song is written outside it). What gives the song a version's sections
+// readHeldSections()), or none for an invalid tree (an empty list is none), set in the mode of the moment (the step in
+// progress, or outside the history while the song is written outside it). What gives the song a version's sections
 // (model/versions/ApplySong.cpp). Whether it wrote anything.
 bool makeSectionsAs (Song&, const juce::ValueTree& sectionsOrNone);
 

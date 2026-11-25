@@ -328,32 +328,18 @@ TEST_CASE ("A container is the song's, with its name, mix, devices and macros")
     CHECK (devicesIn() == std::vector<DeviceID> { eq, reverb });
     CHECK (tracks.namesOf (phazite::getContainerDevices (context, container)) == std::vector<juce::String> { "EQ", "Reverb" });
 
-    // A container the song gains shows on its channel, with its chain's devices and its macros: written outside the song's
-    // history, as what isn't an undo step is (Song::OutsideHistory), whose keeper takes its macros in (SongValues.h). On the
-    // master, the one channel whose element the song's tree still holds (a place: the tracks are values, SongValues.h).
-    const phazite::Song::OutsideHistory outside (song);
-    juce::ValueTree made (schema::CONTAINER), chain (schema::CHAIN), delay (schema::DEVICE), macro (schema::MACRO);
-    const auto madeID = DeviceID::fromRaw (song.makeID());
-    made.setProperty (schema::deviceID, (juce::int64) madeID.getRaw(), nullptr);
-    made.setProperty (schema::containerName, "Echoes", nullptr);
-    chain.setProperty (schema::chainID, (juce::int64) song.makeID(), nullptr);
-    delay.setProperty (schema::deviceID, (juce::int64) song.makeID(), nullptr);
-    delay.setProperty (schema::deviceType, "phaziteDelay", nullptr);
-    chain.appendChild (delay, nullptr);
-    made.appendChild (chain, nullptr);
-    macro.setProperty (schema::modulatorID, (juce::int64) song.makeID(), nullptr);
-    macro.setProperty (schema::macroName, "Space", nullptr);
-    made.appendChild (macro, nullptr);
+    // A container the song gains shows on its channel, with its chain's devices and its macros: one added to the master,
+    // named, with a delay put in its chain.
     const auto masterBefore = tracks.effectNamesOf ({});
-    song.getState().getChildWithName (schema::MASTER).appendChild (made, nullptr);
+    const auto madeID = phazite::addContainer (context, {});
+    REQUIRE (madeID.isValid());
+    phazite::renameContainer (context, madeID, "Echoes");
+    REQUIRE (phazite::test::addOwnDeviceToChain (song, phazite::getChains (song, madeID).front(), "phaziteDelay").isValid());
     auto masterAfter = masterBefore;
     masterAfter.push_back ("Echoes");
     CHECK (tracks.effectNamesOf ({}) == masterAfter);
     CHECK (tracks.namesOf (phazite::getContainerDevices (context, madeID)) == std::vector<juce::String> { "Delay" });
-    const auto macros = phazite::getContainerMacros (context, madeID);
-    REQUIRE (macros.size() == 1);
-    CHECK (macros[0].name == juce::String ("Space"));
-    CHECK_FALSE (made.getChildWithName (schema::MACRO).isValid()); // taken out of the tree: the song's macros are values
+    CHECK (phazite::getContainerMacros (context, madeID).size() == 8);
 }
 
 TEST_CASE ("A container's macros modulate its devices; its track's modulators reach them too")

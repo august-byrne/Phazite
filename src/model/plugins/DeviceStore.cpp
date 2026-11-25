@@ -22,16 +22,15 @@ namespace
 
     const DeviceStore& getStore (const Song& song)
     {
-        static const DeviceStore none;
         const auto* values = song.getValues();
-        return values != nullptr ? values->deviceStore.get() : none;
+        return values->deviceStore.get();
     }
 
     // An item the song holds by its ID, as the devices' area holds it (a look in a map: no walk), nullptr for none.
     const DeviceValue* findHeld (const Song& song, DeviceID id)
     {
         const auto* values = song.getValues();
-        return values != nullptr && id.isValid() ? values->devices.get().find (id) : nullptr;
+        return id.isValid() ? values->devices.get().find (id) : nullptr;
     }
 
     bool holdsForm (const Song& song, DeviceID id, DeviceValue::Form form)
@@ -89,11 +88,6 @@ namespace
         auto next = store;
         next.pluginValues = next.pluginValues.set (key, entry);
         return next;
-    }
-
-    SongValues* findValues (Song& song)
-    {
-        return song.getValues();
     }
 } // namespace
 
@@ -157,9 +151,9 @@ std::optional<float> findPluginValue (const Song& song, DeviceID id, const juce:
 //==============================================================================
 void storePluginOutsideHistory (Song& song, DeviceID id, const StoredPlugin& stored)
 {
-    auto* values = findValues (song);
+    auto* values = song.getValues();
 
-    if (values == nullptr || ! id.isValid())
+    if (! id.isValid())
         return;
 
     auto next = values->deviceStore.get();
@@ -190,9 +184,9 @@ void storePluginOutsideHistory (Song& song, DeviceID id, const StoredPlugin& sto
 
 void setPluginValueOutsideHistory (Song& song, DeviceID id, const juce::String& parameter, float value)
 {
-    auto* values = findValues (song);
+    auto* values = song.getValues();
 
-    if (values == nullptr || ! holdsPlugin (song, id) || ! findPluginValue (values->deviceStore.get(), id, parameter).has_value())
+    if (! holdsPlugin (song, id) || ! findPluginValue (values->deviceStore.get(), id, parameter).has_value())
         return;
 
     values->storeOutsideHistory (song, withSongsValue (values->deviceStore.get(), id, parameter, value));
@@ -206,9 +200,9 @@ void setPluginStateInStep (Song& song, DeviceID id, const juce::String& base64)
 
 void setPluginStateInStep (Song& song, DeviceID id, const juce::MemoryBlock& state)
 {
-    auto* values = findValues (song);
+    auto* values = song.getValues();
 
-    if (values == nullptr || ! holdsPlugin (song, id))
+    if (! holdsPlugin (song, id))
         return;
 
     auto next = values->deviceStore.get();
@@ -224,7 +218,7 @@ void setPluginStateInStep (Song& song, DeviceID id, const juce::MemoryBlock& sta
 
 void setPluginProgramInStep (Song& song, DeviceID id, int program)
 {
-    if (auto* values = findValues (song); values != nullptr && holdsPlugin (song, id))
+    if (auto* values = song.getValues(); holdsPlugin (song, id))
     {
         auto next = values->deviceStore.get();
         next.programs = withEntry (next.programs, id.getRaw(), program);
@@ -234,9 +228,9 @@ void setPluginProgramInStep (Song& song, DeviceID id, int program)
 
 void setPluginValueSetByHand (Song& song, DeviceID id, const juce::String& parameter, float value, float held)
 {
-    auto* values = findValues (song);
+    auto* values = song.getValues();
 
-    if (values == nullptr || ! holdsPlugin (song, id))
+    if (! holdsPlugin (song, id))
         return;
 
     // The song's first of it: what the plug-in holds written first as a held value, outside the history, so that the step's
@@ -253,9 +247,9 @@ void setPluginValueSetByHand (Song& song, DeviceID id, const juce::String& param
 
 void removePluginValueSetByHand (Song& song, DeviceID id, const juce::String& parameter)
 {
-    auto* values = findValues (song);
+    auto* values = song.getValues();
 
-    if (values == nullptr || ! holdsPlugin (song, id))
+    if (! holdsPlugin (song, id))
         return;
 
     // The value it had left as a held value, in the step, so that a Redo of the step gives the plug-in that value.
@@ -280,9 +274,9 @@ bool isChainSoloed (const Song& song, DeviceID chain)
 
 void setChainSwitch (Song& song, DeviceID chain, ChainFlag flag, bool on)
 {
-    auto* values = findValues (song);
+    auto* values = song.getValues();
 
-    if (values == nullptr || ! holdsChain (song, chain))
+    if (! holdsChain (song, chain))
         return;
 
     auto next = values->deviceStore.get();
@@ -293,9 +287,9 @@ void setChainSwitch (Song& song, DeviceID chain, ChainFlag flag, bool on)
 
 void clearChainSwitchesInStep (Song& song, DeviceID chain)
 {
-    auto* values = findValues (song);
+    auto* values = song.getValues();
 
-    if (values == nullptr || ! holdsChain (song, chain))
+    if (! holdsChain (song, chain))
         return;
 
     auto next = values->deviceStore.get();
@@ -312,10 +306,7 @@ DeviceStore copyStoreOf (const Song& song, const std::map<std::uint64_t, std::ui
 
 void copyWindowPlaces (Song& song, const std::map<std::uint64_t, std::uint64_t>& copied)
 {
-    auto* values = findValues (song);
-
-    if (values == nullptr)
-        return;
+    auto* values = song.getValues();
 
     for (const auto& [original, copy] : copied)
         if (const auto window = values->devicesOutside.get().findWindow (DeviceID::fromRaw (original)))
@@ -325,10 +316,7 @@ void copyWindowPlaces (Song& song, const std::map<std::uint64_t, std::uint64_t>&
 
 void setMadeStore (Song& song, const std::vector<DeviceID>& made, const DeviceStore& store)
 {
-    auto* values = findValues (song);
-
-    if (values == nullptr)
-        return;
+    auto* values = song.getValues();
 
     // Which of the made the store holds entries of already, of any kind (a held value too): one walk of the plug-ins' values,
     // only where a look in the other maps found none.
@@ -383,9 +371,9 @@ DeviceStore getStoreOf (const Song& song, DeviceID id)
 
 bool setStoreEntries (Song& song, DeviceID id, const DeviceStore& entries)
 {
-    auto* values = findValues (song);
+    auto* values = song.getValues();
 
-    if (values == nullptr || ! (holdsPlugin (song, id) || holdsChain (song, id)))
+    if (! (holdsPlugin (song, id) || holdsChain (song, id)))
         return false;
 
     const auto& now = values->deviceStore.get();
@@ -407,7 +395,7 @@ std::uint64_t countPluginValuePlacesBuilt() noexcept
 
 void forgetWindowPlace (Song& song, DeviceID id)
 {
-    if (auto* values = findValues (song))
+    if (auto* values = song.getValues())
         values->setWindowPlace (id, std::nullopt);
 }
 
@@ -415,12 +403,12 @@ void forgetWindowPlace (Song& song, DeviceID id)
 std::optional<WindowPlace> getWindowPlace (const Song& song, DeviceID id)
 {
     const auto* values = song.getValues();
-    return values != nullptr && findHeld (song, id) != nullptr ? values->devicesOutside.get().findWindow (id) : std::nullopt;
+    return findHeld (song, id) != nullptr ? values->devicesOutside.get().findWindow (id) : std::nullopt;
 }
 
 void setWindowPlace (Song& song, DeviceID id, WindowPlace place)
 {
-    if (auto* values = findValues (song); values != nullptr && findHeld (song, id) != nullptr)
+    if (auto* values = song.getValues(); findHeld (song, id) != nullptr)
         values->setWindowPlace (id, place);
 }
 } // namespace phazite

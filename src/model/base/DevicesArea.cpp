@@ -20,18 +20,6 @@ namespace
     using Form = DeviceValue::Form;
     using IDList = immer::flex_vector<DeviceID>;
 
-    bool isDeviceElement (const juce::ValueTree& element)
-    {
-        return element.hasType (schema::DEVICE) || element.hasType (schema::CONTAINER) || element.hasType (schema::CHAIN);
-    }
-
-    // What is the devices' in a file and none of the song's tree's: a DEVICE, a CONTAINER, a CHAIN, and a device's VALUES and
-    // SOUNDS (a modulator's VALUES are modulation's, and the song's tree holds no modulator either).
-    bool isDevicesElement (const juce::ValueTree& element)
-    {
-        return isDeviceElement (element) || element.hasType (schema::VALUES) || element.hasType (schema::SOUNDS);
-    }
-
     bool isFolder (const juce::ValueTree& track)
     {
         return track[schema::trackKind].toString() == schema::trackIsFolder;
@@ -68,12 +56,10 @@ namespace
 
     // A channel's element's devices and containers, each container's chains and each chain's devices, read as the song holds
     // them (readHeldDevice()) at their places into a value, in their order, after what it holds: one of an ID it holds
-    // already, or that readHeldDevice() reads none of, left out with what it holds. Each element read counted in `taken`, and
-    // each DEVICE and CONTAINER of the channel's put in `elements`, for the caller to take out of the tree.
-    void readChannelInto (const juce::ValueTree& channel, const DevicePlace& place, SongDevices& devices,
-                          std::vector<juce::ValueTree>* elements, int& taken)
+    // already, or that readHeldDevice() reads none of, left out with what it holds.
+    void readChannelInto (const juce::ValueTree& channel, const DevicePlace& place, SongDevices& devices)
     {
-        const auto add = [&devices, &taken] (const juce::ValueTree& element, const DevicePlace& at)
+        const auto add = [&devices] (const juce::ValueTree& element, const DevicePlace& at)
         {
             auto value = readHeldDevice (element, at);
 
@@ -82,7 +68,6 @@ namespace
 
             const auto id = value->id;
             devices = withDevice (devices, std::move (*value));
-            ++taken;
             return id;
         };
 
@@ -90,9 +75,6 @@ namespace
         {
             if (! (child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER)))
                 continue;
-
-            if (elements != nullptr)
-                elements->push_back (child);
 
             const auto id = add (child, place);
 
@@ -109,19 +91,6 @@ namespace
                         if (device.hasType (schema::DEVICE))
                             add (device, makeContainerPlace (place, id, chainID));
             }
-        }
-    }
-
-    // Every DEVICE, CONTAINER and CHAIN element in an element and what it holds, taken out: what the adoption leaves of a
-    // file's anywhere in the song's tree once those of the song's channels are the area's. So the song's tree holds none.
-    void dropDeviceElements (juce::ValueTree element)
-    {
-        for (auto i = element.getNumChildren(); --i >= 0;)
-        {
-            if (auto child = element.getChild (i); isDeviceElement (child))
-                element.removeChild (i, nullptr);
-            else
-                dropDeviceElements (child);
         }
     }
 
@@ -395,58 +364,6 @@ void SongValues::DevicesTeller::valueAreaChanged (const SongDevices& before, con
 }
 
 //==============================================================================
-SongValues::DevicesKeeper::DevicesKeeper (SongValues& v, Song& s)
-    : values (v),
-      song (s),
-      state (s.getState())
-{
-}
-
-bool SongValues::DevicesKeeper::isInSong (const juce::ValueTree& element) const
-{
-    return element == state || element.isAChildOf (state);
-}
-
-void SongValues::DevicesKeeper::childAdded (juce::ValueTree& parent, juce::ValueTree& child)
-{
-    // A lone one, added to an element of the song's: refused in a step; outside the history, a device or a container on the
-    // master (the one channel in the song's tree) read in, and taken out.
-    if (! isDevicesElement (child) || ! isInSong (parent))
-        return;
-
-    if (! song.isWritingOutsideHistory())
-    {
-        jassertfalse; // a device's element in the song's tree: the devices' setters set one (model/mixer/internal/Mixer.h)
-        return;
-    }
-
-    if ((child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER)) && parent.hasType (schema::MASTER))
-    {
-        auto next = values.devices.get();
-        auto taken = 0;
-        juce::ValueTree alone (parent.getType());
-        alone.copyPropertiesFrom (parent, nullptr);
-        alone.appendChild (child.createCopy(), nullptr);
-        readChannelInto (alone, makeChannelPlace ({}, true), next, nullptr, taken);
-
-        if (taken > 0)
-        {
-            values.devicesAdopted += taken;
-            values.devices.setOutsideHistory (std::move (next));
-        }
-    }
-
-    parent.removeChild (child, nullptr);
-}
-
-void SongValues::DevicesKeeper::adopt (SongValues&, Song& loaded)
-{
-    // Every DEVICE, CONTAINER and CHAIN element out of the tree, those anywhere else too, which are no devices of the song's,
-    // its reader having read the song's into the area before (readHeldDevicesIn(): SongValues.cpp, adopt()), and what the store
-    // holds of each (DeviceStoreArea.h) and a container's macros (ModulationArea.h) taken out of them before.
-    dropDeviceElements (loaded.getState());
-}
-
 void readHeldDevicesIn (const juce::ValueTree& song, SongState& into)
 {
     // Every device, container and chain the loader made consistent, each read once as the song holds it, in the elements'
@@ -455,10 +372,8 @@ void readHeldDevicesIn (const juce::ValueTree& song, SongState& into)
     // (DevicesValue.h: keepDeviceAsHeld()), so reading it changes nothing of what the file held. What the store holds of each
     // and a container's macros are no part of a device's value: their areas' (readHeldDeviceStoreIn(), readHeldModulationIn()).
     auto held = into.devices;
-    auto read = 0;
 
-    forEachChannel (song, [&held, &read] (const juce::ValueTree& channel, const DevicePlace& place)
-                    { readChannelInto (channel, place, held, nullptr, read); });
+    forEachChannel (song, [&held] (const juce::ValueTree& channel, const DevicePlace& place) { readChannelInto (channel, place, held); });
 
     jassert (holdsItsLists (held));
     into.devices = std::move (held);
@@ -516,7 +431,7 @@ bool SongValues::setAllDevices (Song& song, SongDevices next)
     JUCE_ASSERT_MESSAGE_THREAD
     jassert (song.getValues() == this);
 
-    // A pass's, an edit's of several and the keeper's, each held together as it was worked out: holdsItsLists() is the check's
+    // A pass's and an edit's of several, each held together as it was worked out: holdsItsLists() is the check's
     // (tests/SongCheck.cpp), not an assertion here, which would walk every device of the song at every add.
     if (next.isSameAs (devices.get()) || next == devices.get())
         return false;
@@ -544,13 +459,6 @@ juce::ValueTree writeDeviceWhole (const SongDevices& devices, DeviceID id)
                 element.appendChild (child, nullptr);
 
     return element;
-}
-
-int takeChannelDevicesIn (SongDevices& devices, const juce::ValueTree& channel, const DevicePlace& place)
-{
-    auto taken = 0;
-    readChannelInto (channel, place, devices, nullptr, taken);
-    return taken;
 }
 
 bool leadsToDevices (const juce::ValueTree& parent, const juce::ValueTree& child)
@@ -615,26 +523,5 @@ bool holdSameChannelDevices (const SongState& kept, const SongState& otherKept, 
         return false;
 
     return std::all_of (list->begin(), list->end(), [&kept, &otherKept] (DeviceID id) { return holdSameItem (kept, otherKept, id); });
-}
-
-//==============================================================================
-bool isHeardAsDevices (const juce::ValueTree& element)
-{
-    // What the keeper takes out of a channel that came in with it (its safety net), and what is in one.
-    for (auto each = element; each.isValid(); each = each.getParent())
-        if (isDeviceElement (each))
-            return true;
-
-    return false;
-}
-
-bool isHeardAsDevices (const juce::ValueTree& element, const juce::Identifier&)
-{
-    return isHeardAsDevices (element);
-}
-
-bool isHeardAsDevices (const juce::ValueTree& parent, const juce::ValueTree& child)
-{
-    return isDevicesElement (child) || isHeardAsDevices (parent);
 }
 } // namespace phazite

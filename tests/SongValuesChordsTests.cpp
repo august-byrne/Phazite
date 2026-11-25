@@ -2,9 +2,7 @@
 // The song's chord lane as an area of its values (model/base/internal/SongValues.h, ChordLaneArea.h; roadmap step S5.20, the
 // chord lane's switch). What hears the lane change hears it from one place (Listener::chordLaneChanged()), which the lane's
 // area tells: for each edit made through the model, its Undo and its Redo, once for each change of the value, and nothing of
-// the clips or the tempo map; another area's change tells it nothing. What listens to the song's root hears what is in the
-// lane's CHORDLANE from the area alone, and the CHORDLANE's own coming and going (whether the song has a lane) from the tree.
-// The keeper takes in a CHORDLANE that comes with chords and keys, and refuses a lone CHORD added in an undo step; a set equal
+// the clips or the tempo map, a lane placed or taken away among them; another area's change tells it nothing. A set equal
 // to the lane held makes no step; every edit is one exact undo step; a lane made by the first chord goes with its Undo; and
 // the versions give the song another lane, or none, through the lane's code, and a merge's clash on the lane is chosen
 // either way.
@@ -54,54 +52,7 @@ struct Told final : phazite::SongValues::Listener
     int notes = 0, clips = 0, tempo = 0, chords = 0;
 };
 
-// What a listener of the song's root is told: inside the chord lane's element, of the element itself (added or taken out),
-// and all else.
-struct TreeHeard final : juce::ValueTree::Listener
-{
-    explicit TreeHeard (const juce::ValueTree& rootToHear)
-        : root (rootToHear)
-    {
-        root.addListener (this);
-    }
-
-    ~TreeHeard() override { root.removeListener (this); }
-
-    static bool isInChordLane (juce::ValueTree element)
-    {
-        for (; element.isValid(); element = element.getParent())
-            if (element.hasType (schema::CHORDLANE))
-                return true;
-
-        return false;
-    }
-
-    void hear (const juce::ValueTree& element)
-    {
-        if (isInChordLane (element))
-            ++inLane;
-        else
-            ++other;
-    }
-
-    void hearChild (const juce::ValueTree& parent, const juce::ValueTree& child)
-    {
-        if (child.hasType (schema::CHORDLANE))
-            ++lane;
-        else
-            hear (parent);
-    }
-
-    void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&) override { hear (tree); }
-    void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override { hearChild (parent, child); }
-    void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override { hearChild (parent, child); }
-    void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override { hear (parent); }
-
-    juce::ValueTree root;
-    int inLane = 0, lane = 0, other = 0;
-};
-
-// A song in a project of its own, with its versions, the values' listener and a listener of its root recording what they
-// are told.
+// A song in a project of its own, with its versions and the values' listener recording what it is told.
 struct Watched
 {
     Watched()
@@ -112,13 +63,11 @@ struct Watched
 
     ~Watched() { song.getValues()->removeListener (&told); }
 
-    // What a change told: the values' listener, and the root's listener (inside the lane's element, of the element itself,
-    // and of everything else); and how far the project's count of changes and the versions' count of the song's changes
-    // went up meanwhile.
+    // What a change told: the values' listener; and how far the project's count of changes and the versions' count of the
+    // song's changes went up meanwhile.
     struct Heard
     {
         Told told;
-        int inLane = 0, lane = 0, other = 0;
         juce::int64 project = 0, versions = 0;
     };
 
@@ -127,16 +76,10 @@ struct Watched
         auto* versions = phazite::getVersionHistory (s.context);
         REQUIRE (versions != nullptr);
         told = {};
-        tree.inLane = tree.lane = tree.other = 0;
         const auto projectBefore = s.getProject().getChangeCount();
         const auto versionsBefore = versions->countSongChanges();
         change();
-        return { told,
-                 tree.inLane,
-                 tree.lane,
-                 tree.other,
-                 s.getProject().getChangeCount() - projectBefore,
-                 versions->countSongChanges() - versionsBefore };
+        return { told, s.getProject().getChangeCount() - projectBefore, versions->countSongChanges() - versionsBefore };
     }
 
     // A change as one undo step, then its Undo, then its Redo: what each told.
@@ -154,7 +97,6 @@ struct Watched
     phazite::test::TestSong s;
     phazite::Song& song = *phazite::findSong (s.context);
     Told told;
-    TreeHeard tree { song.getState() };
 };
 
 const phazite::Progression& getCanon()
@@ -168,27 +110,6 @@ phazite::ChordLaneValue getLane (const phazite::Song& song)
 {
     return phazite::getChordLaneValue (song);
 }
-
-// A CHORDLANE element with these chords (start, length, degree) and key changes (start, root), as a file holds one.
-juce::ValueTree makeLaneElement (std::initializer_list<std::array<double, 3>> chords, std::initializer_list<std::array<double, 2>> keys)
-{
-    juce::ValueTree lane (schema::CHORDLANE);
-
-    for (const auto& chord : chords)
-        lane.appendChild (juce::ValueTree (schema::CHORD, { { schema::chordStart, chord[0] },
-                                                            { schema::chordLength, chord[1] },
-                                                            { schema::chordDegree, (int) chord[2] },
-                                                            { schema::chordType, "major" } }),
-                          nullptr);
-
-    for (const auto& key : keys)
-        lane.appendChild (
-            juce::ValueTree (schema::CHORDKEY,
-                             { { schema::chordStart, key[0] }, { schema::keyRoot, (int) key[1] }, { schema::keyScale, "minor" } }),
-            nullptr);
-
-    return lane;
-}
 } // namespace
 
 TEST_CASE ("Song values' chord lane: each edit through the model tells the lane changed once, its Undo and its Redo too, and "
@@ -198,8 +119,8 @@ TEST_CASE ("Song values' chord lane: each edit through the model tells the lane 
     auto& song = w.song;
     REQUIRE_FALSE (phazite::hasChordLane (song));
 
-    // The edit that makes the lane (its first key) is heard twice by what counts: its CHORDLANE added by the tree, its first
-    // key by the area. Every other edit only by the area, the tree telling nothing inside the lane's element.
+    // The edit that makes the lane (its first key) is heard twice by what counts: the lane placed, then its first key, by the
+    // area (Chords.h); its Undo and its Redo, each the area's whole value put back, once. Every other edit once.
     const auto check = [&w] (const juce::String& name, const std::function<void()>& change, bool makesTheLane = false)
     {
         INFO (name.toStdString());
@@ -210,15 +131,12 @@ TEST_CASE ("Song values' chord lane: each edit through the model tells the lane 
         for (size_t i = 0; i < heard.size(); ++i)
         {
             INFO (moments[i]);
-            CHECK (heard[i].told.chords == 1); // one write of the lane's value, whatever the edit
+            CHECK (heard[i].told.chords == (makesTheLane && i == 0 ? 2 : 1)); // two writes where it is placed; its Undo and Redo one
             CHECK (heard[i].told.clips == 0);
             CHECK (heard[i].told.notes == 0);
             CHECK (heard[i].told.tempo == 0);
-            CHECK (heard[i].other == 0);
-            CHECK (heard[i].inLane == 0);
-            CHECK (heard[i].lane == (makesTheLane ? 1 : 0));
-            CHECK (heard[i].project == heard[i].told.chords + heard[i].lane);
-            CHECK (heard[i].versions == heard[i].told.chords + heard[i].lane);
+            CHECK (heard[i].project == heard[i].told.chords);
+            CHECK (heard[i].versions == heard[i].told.chords);
         }
     };
 
@@ -279,10 +197,7 @@ TEST_CASE ("Song values' chord lane: another area's change tells nothing of the 
         INFO (name.toStdString());
 
         for (const auto& heard : w.hearEach (name, change))
-        {
             CHECK (heard.told.chords == 0);
-            CHECK (heard.inLane == 0);
-        }
     };
 
     check ("Add Clip", [&] { CHECK (phazite::insertMidiClip (song, track, { at (8.0), at (12.0) }, nullptr).isValid()); });
@@ -291,90 +206,6 @@ TEST_CASE ("Song values' chord lane: another area's change tells nothing of the 
     check ("Rename Track", [&] { phazite::setTrackName (song, track, "Renamed"); });
     check ("Add Effect", [&] { w.s.addEffect (track, phazite::devices::Equalizer::typeID); });
     check ("Add Track", [&] { CHECK (phazite::insertTrack (song, track, nullptr).isValid()); });
-}
-
-TEST_CASE ("Song values' chord lane: the keeper takes in a CHORDLANE that comes into the song with chords and keys, and one added "
-           "outside the history, and refuses a lone chord added in a step")
-{
-    // Its safety net (SongValues.h), which the versions never leave anything to (ApplySong.cpp, Chords.cpp).
-    const auto songPtr = phazite::createSong();
-    auto& song = *songPtr;
-    auto& values = *song.getValues();
-    song.getUndoManager().clearUndoHistory();
-    REQUIRE_FALSE (phazite::hasChordLane (song));
-    phazite::test::UndoCheck undo (song);
-    const auto adoptedBefore = values.countChordLaneAdopted();
-
-    // A CHORDLANE with chords and a key, in a step: its entries the song's lane, its element empty.
-    undo.check ("Take In a Chord Lane",
-                [&]
-                {
-                    const phazite::UndoStep step (song, "Take In a Chord Lane");
-                    auto lane = makeLaneElement ({ { 4.0, 4.0, 5.0 }, { 0.0, 4.0, 1.0 } }, { { 0.0, 9.0 } });
-
-                    // What Phazite doesn't know of a lane goes with its entries, as holdValues() takes it out of the song's own.
-                    lane.setProperty ("unknownToPhazite", 1, nullptr);
-                    lane.appendChild (juce::ValueTree ("UNKNOWNTOPHAZITE"), nullptr);
-                    song.getState().appendChild (lane, &song.getUndoManager());
-                });
-
-    REQUIRE (phazite::hasChordLane (song));
-    const auto chords = phazite::getLaneChords (song);
-    REQUIRE (chords.size() == 2);
-    CHECK (chords[0].range.getStart() == at (0.0));
-    CHECK (chords[1].numeral.degree == 5);
-    CHECK (phazite::getLaneKeyAt (song, at (2.0)) == phazite::Key { 9, phazite::Scale::minor });
-    CHECK (song.getState().getChildWithName (schema::CHORDLANE).getNumChildren() == 0);
-    CHECK (song.getState().getChildWithName (schema::CHORDLANE).getNumProperties() == 0);
-    CHECK (values.countChordLaneAdopted() == adoptedBefore + 3);
-    phazite::test::checkSong (song);
-
-    // Undone and redone: the area's own action, nothing taken in again; undone, no lane.
-    phazite::undo (song);
-    CHECK_FALSE (phazite::hasChordLane (song));
-    CHECK (getLane (song) == phazite::ChordLaneValue {});
-    phazite::redo (song);
-    CHECK (phazite::getLaneChords (song).size() == 2);
-    CHECK (values.countChordLaneAdopted() == adoptedBefore + 3);
-    phazite::test::checkSong (song);
-
-    // A key change added to the song's CHORDLANE outside the history: after the others, taken out again.
-    {
-        const phazite::Song::OutsideHistory outside (song);
-        song.getState()
-            .getChildWithName (schema::CHORDLANE)
-            .appendChild (
-                juce::ValueTree (schema::CHORDKEY, { { schema::chordStart, 8.0 }, { schema::keyRoot, 4 }, { schema::keyScale, "major" } }),
-                nullptr);
-    }
-
-    CHECK (getLane (song).keys.size() == 2);
-    CHECK (getLane (song).keys.back() == phazite::KeyEntry { at (8.0), 4, "major" });
-    CHECK (song.getState().getChildWithName (schema::CHORDLANE).getNumChildren() == 0);
-    CHECK (values.countChordLaneAdopted() == adoptedBefore + 4);
-    phazite::test::checkSong (song);
-
-    // A chord added to the song's CHORDLANE by itself in a step: refused (the lane's functions change the lane), the lane as
-    // it was; the step undone takes it out again.
-    const auto held = getLane (song);
-
-    {
-        const phazite::test::ExpectedAssertion refused ("ChordLaneArea.cpp");
-        const phazite::UndoStep step (song, "A Lone Chord");
-        song.getState()
-            .getChildWithName (schema::CHORDLANE)
-            .appendChild (juce::ValueTree (schema::CHORD, { { schema::chordStart, 12.0 }, { schema::chordLength, 4.0 } }),
-                          &song.getUndoManager());
-#if JUCE_DEBUG
-        CHECK (refused.getCount() == 1);
-#endif
-    }
-
-    CHECK (getLane (song).isSameAs (held));
-    CHECK (values.countChordLaneAdopted() == adoptedBefore + 4);
-    phazite::undo (song);
-    CHECK (song.getState().getChildWithName (schema::CHORDLANE).getNumChildren() == 0);
-    phazite::test::checkSong (song);
 }
 
 TEST_CASE ("Song values' chord lane: a lane set equal to the one the song holds makes no undo step, tells nothing and keeps the value "
@@ -431,7 +262,7 @@ TEST_CASE ("Song values' chord lane: the lane its first chord makes goes with it
                     });
     };
 
-    // The first chord: the lane's element added in the step (the tree's action), its value with a key from the key set last
+    // The first chord: the lane placed in the step (an action of the area's), its value with a key from the key set last
     // and the chord (the area's action); its Undo takes both back.
     edit ("Add Chord", [&] { phazite::putLaneChord (song, { at (4.0), at (8.0) }, { 2, 0, phazite::ChordType::minor, 0 }); });
     REQUIRE (phazite::hasChordLane (song));
@@ -492,7 +323,6 @@ TEST_CASE ("Song values' chord lane: a version's lane, and a version without one
 
     const auto other = phazite::test::copyWholeSong (*withLane);
     const auto without = phazite::test::copyWholeSong (song);
-    const auto adopted = song.getValues()->countChordLaneAdopted();
 
     const auto apply = [&] (const juce::String& name, const juce::ValueTree& from, const std::function<void (const juce::ValueTree&)>& make)
     {
@@ -528,7 +358,6 @@ TEST_CASE ("Song values' chord lane: a version's lane, and a version without one
     apply ("A Stand-in", standIn, songLike);
     CHECK_FALSE (phazite::hasChordLane (song));
 
-    CHECK (song.getValues()->countChordLaneAdopted() == adopted);
     phazite::test::checkSong (song);
     undo.walkBackAndForth();
 }

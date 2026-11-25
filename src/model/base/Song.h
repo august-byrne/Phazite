@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song: Phazite's record of a project, the PHAZITE element whose every name model/base/internal/Schema.h defines, with
-// its undo history and its count of IDs. Every change to it is an undo step in its history (model/commands/internal/Undo.h).
-// Its project owns it (model/project/internal/Project.h), and what plays it, its playback session, listens to it
-// (model/playback/internal/PlaybackSession.h).
+// The song: Phazite's record of a project, held as values (model/base/internal/SongValues.h) whose file's form is the PHAZITE
+// element every name of which model/base/internal/Schema.h defines, with its undo history and its count of IDs. Every change
+// to it is an undo step in its history (model/commands/internal/Undo.h). Its project owns it (model/project/internal/
+// Project.h), and what plays it, its playback session, listens to it (model/playback/internal/PlaybackSession.h).
 #pragma once
 
 #include <juce_data_structures/juce_data_structures.h>
@@ -15,6 +15,7 @@
 namespace phazite
 {
 struct ParameterRef;
+struct SongState;
 class SongValues;
 
 class Song final : public juce::ReferenceCountedObject
@@ -22,22 +23,17 @@ class Song final : public juce::ReferenceCountedObject
 public:
     using Ptr = juce::ReferenceCountedObjectPtr<Song>;
 
-    explicit Song (juce::ValueTree state); // a PHAZITE element
+    // A song made of a state (model/base/internal/SongState.h: the song whole as values, as a file's tree read by
+    // readSongTree() once the loader made it consistent, or another song's getSongState()), each area set to it with no undo
+    // step, its curves' points' keys counted on from the largest it holds. Message thread: a song is made and destroyed there
+    // alone (model/project/internal/Project.h: makeSong()). In model/base/SongValues.cpp.
+    explicit Song (SongState);
     ~Song() override;
 
-    // Whatever listens to the song listens to this, its root (a juce::ValueTree::Listener added to what this returns), and
-    // finds the element a change was made to from what the callback names: never to one of its elements' handles, nor
-    // through a juce::Value or CachedValue of an element's property (tools/check-architecture.sh counts: song-listeners). What
-    // it holds is values beside it (getValues()), which tell their own listeners.
-    juce::ValueTree getState() const noexcept { return state; }
-
-    // What it holds beside its tree as values (model/base/internal/SongValues.h): its clips, and its MIDI clips' notes and
-    // controllers' values, which its tree then doesn't hold. None until holdValues(), which makeSong() calls once the song
-    // read is consistent (model/project/internal/Project.h), on the message thread: never as a Song is made, as one made on
-    // another thread to be read or checked (model/versions/SongPieces.cpp) keeps everything in its tree. Message thread.
+    // What it holds, as values (model/base/internal/SongValues.h): every area of it, which tell their own listeners. Never
+    // null: a song holds its values from its making. Message thread.
     SongValues* getValues() noexcept { return values.get(); }
     const SongValues* getValues() const noexcept { return values.get(); }
-    void holdValues(); // once; in model/base/SongValues.cpp
 
     // Its undo history, which keeps the last steps up to the number set for songs made from then on (as the app starts, from
     // its settings: services/Settings.h, undoSteps), however much each step holds. What Phazite keeps of it beside JUCE's
@@ -53,7 +49,7 @@ public:
     // What follows its history as it moves by hand, told once each move is whole, after JUCE's undo or redo has returned: an
     // undo or a redo (model/commands/internal/Undo.h: undo(), redo()), a step taken back alone (a drag's Escape, a trial put
     // back or tried again from its start) and each of a version's held steps done again or undone (Trial::holdHistory(),
-    // putBackHeld()). Told by the undo code alone, never as the tree or the song's values tell (during an undo the rest of
+    // putBackHeld()). Told by the undo code alone, never as the song's values tell (during an undo the rest of
     // the step may not be back yet): what reads the song for what a move set reads it here (model/playback/internal/
     // PlaybackSession.h: what a pass writing automation writes from then). Message thread.
     // So only phazite::undo(), redo() and the undo code (Undo.h: a gesture's roll-back, a trial, the held steps) move a song's
@@ -141,13 +137,11 @@ public:
 
     // A new ID for an item of the song (a track, a channel's fader or VCA, a clip, a note, an alias group, a device, a
     // container, a send, a modulator, a macro, a section): the song's next (Schema.h: nextID), never given twice, nor
-    // taken back by an undo. A count of the song's own, never told to anyone (no tree notification, no value's listener): a
-    // song that holds its values (holdValues(), which takes the count from its tree) counts on its member; one that holds
-    // none (a song being made or read: makeNewSong(), the loader) keeps it in its tree, which is then everything it holds.
-    // What a whole copy writes as nextID (model/base/internal/WholeState.h). In Schema.cpp, with the name of the count and
-    // the functions that read and set it (Schema.h: getNextID(), countIDsFrom(), countIDs()).
+    // taken back by an undo. A count of the song's own, never told to anyone (no value's listener), taken from the state the
+    // song is made of. What a whole copy writes as nextID (model/base/internal/WholeState.h). In Schema.cpp, with the name of
+    // the count and the functions that read and set it (Schema.h: getNextID(), countIDsFrom(), countIDs()).
     std::uint64_t makeID();
-    std::uint64_t getIDCount() const;     // the count as the song holds it now: its member, or its tree's (from 1)
+    std::uint64_t getIDCount() const;     // the count as the song holds it now (from 1)
     void setIDCount (std::uint64_t next); // the count set, unchecked (Schema.h: countIDsFrom() checks it)
 
     // A change to the project made outside the song's history: a plug-in's own settings, changed in its window, which the
@@ -228,11 +222,10 @@ public:
     bool isShowingOther() const noexcept { return showingOther; }
     void setShowingHeard (std::function<void (bool showing)> heard) { showingHeard = std::move (heard); }
 
-    // While one is alive, what is written of the song is written outside its undo history, as a write of its tree with no
-    // undo manager is: what makes the song another one whole without a step (model/versions/internal/ApplySong.h:
-    // makeSongTheSame(), makeSongAsCopied()). For what the song is to keep beside its tree (model/base/internal/
-    // ValueArea.h), which can't tell from a notification of its tree whether the write that made it went into the history.
-    // Scopes nest. Message thread.
+    // While one is alive, what is written of the song is written outside its undo history: what makes the song another one
+    // whole without a step (model/versions/internal/ApplySong.h: makeSongTheSame(), makeSongAsCopied()), and what a maker
+    // gives an item before the song holds it. The mode of the moment, which the areas' setters read (model/base/internal/
+    // SongValues.h). Scopes nest. Message thread.
     class OutsideHistory final
     {
     public:
@@ -249,7 +242,6 @@ public:
     bool isWritingOutsideHistory() const noexcept { return writingOutsideHistory > 0; }
 
 private:
-    juce::ValueTree state;
     History undoManager;
     juce::File file, cacheFolder;
     mutable juce::File ownCacheFolder; // in the temporary folder, while no other is given
@@ -261,8 +253,8 @@ private:
     std::function<void (bool)> showingHeard;
     bool showingOther = false;
     int writingOutsideHistory = 0;      // OutsideHistory scopes alive
-    std::uint64_t nextID = 1;           // the count of IDs once the song holds its values (makeID())
-    std::unique_ptr<SongValues> values; // after the history, so that it goes first (holdValues())
+    std::uint64_t nextID = 1;           // the count of IDs (makeID())
+    std::unique_ptr<SongValues> values; // after the history, so that it goes first
 
     JUCE_DECLARE_WEAK_REFERENCEABLE (Song)
     JUCE_DECLARE_NON_COPYABLE (Song)

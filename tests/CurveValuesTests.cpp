@@ -573,11 +573,6 @@ TEST_CASE ("Curve values: a song opened holds its curves in its values, each poi
     CHECK (keys.back() < song.getValues()->getNextPointKey());
     CHECK (std::adjacent_find (keys.begin(), keys.end()) == keys.end());
 
-    const auto automation = song.getState().getChildWithName (schema::AUTOMATION);
-    REQUIRE (automation.isValid());
-    CHECK (automation.getNumChildren() == 0);
-    CHECK (automation.getNumProperties() == 0);
-
     // Written as before: beat, value, and a bend that isn't 0, no key.
     for (const auto& curve : phazite::test::copyWholeSong (song).getChildWithName (schema::AUTOMATION))
         for (const auto& point : curve)

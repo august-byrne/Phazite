@@ -26,7 +26,7 @@
 #include <vector>
 
 // The clips' own code, in two parts. The storage, the only functions that know where a clip is kept (the song's clips' area,
-// beside its tree: model/base/internal/SongValues.h): a clip's value read (getClipValue(), getClipValues(),
+// model/base/internal/SongValues.h): a clip's value read (getClipValue(), getClipValues(),
 // getClipPlacements()...), and a clip added, set, copied and taken out (addClip(), setClip(), eraseClip()...). And every edit,
 // written on the clips' values: each reads the clips it changes as values (each once, as the notes' edits do), works the
 // next values out by its rules, and sets them.
@@ -45,8 +45,7 @@ namespace
     //==============================================================================
     // The storage's own.
 
-    // The song's clips as its clips' area holds them now; none for a song that holds no values (one made to be read or checked
-    // keeps everything in its tree, which nothing reads clips of by their IDs: Song::getValues()). Each answer counts as one
+    // The song's clips as its clips' area holds them now. Each answer counts as one
     // look, and each clip of a list walked as one more, for the speed gates (countVisited(), as a walk of a
     // track's elements counted).
     const SongClips& getSongClips (const Song& song)
@@ -129,7 +128,7 @@ namespace
     {
         auto* values = song.getValues();
 
-        if (values == nullptr || values->findClip (clip.id) == nullptr || ! holdsClips (song, copy.track))
+        if (values->findClip (clip.id) == nullptr || ! holdsClips (song, copy.track))
             return {};
 
         const auto notes = copy.isMidi() ? values->findClipNotes (clip.id) : nullptr;
@@ -715,7 +714,7 @@ ClipID addClip (Song& song, ClipValue clip, const ClipNotes* notes, int index)
 {
     auto* values = song.getValues();
 
-    if (values == nullptr || ! holdsClips (song, clip.track))
+    if (! holdsClips (song, clip.track))
         return {};
 
     if (! clip.id.isValid() || values->findClip (clip.id) != nullptr)
@@ -749,7 +748,7 @@ void setClip (Song& song, const ClipValue& held, const ClipValue& next)
 
     auto* values = song.getValues();
 
-    if (values == nullptr || values->findClip (held.id) == nullptr)
+    if (values->findClip (held.id) == nullptr)
         return;
 
     // On another track only if it holds clips, at the end of its clips (one that holds none isn't one it goes on).
@@ -763,7 +762,7 @@ void setClip (Song& song, const ClipValue& held, const ClipValue& next)
 void eraseClip (Song& song, ClipID clip)
 {
     auto* values = song.getValues();
-    const auto* value = values != nullptr ? values->findClip (clip) : nullptr;
+    const auto* value = values->findClip (clip);
 
     if (value == nullptr)
         return;
@@ -781,9 +780,6 @@ void eraseTrackClips (Song& song, const std::vector<TrackID>& tracks)
 {
     auto* values = song.getValues();
 
-    if (values == nullptr)
-        return;
-
     std::vector<ClipID> gone;
 
     for (const auto track : tracks)
@@ -799,7 +795,7 @@ void takeClipsOf (Song& song, const juce::ValueTree& track)
     auto* values = song.getValues();
     const auto id = readTrackElementID (track);
 
-    if (values == nullptr || ! track.hasType (schema::TRACK) || ! holdsClips (song, id))
+    if (! track.hasType (schema::TRACK) || ! holdsClips (song, id))
         return;
 
     for (const auto& element : track)
@@ -862,7 +858,7 @@ void copyTrackClips (Song& song, TrackID from, TrackID to, const std::map<std::u
 {
     auto* values = song.getValues();
 
-    if (values == nullptr || from == to || ! holdsClips (song, to))
+    if (from == to || ! holdsClips (song, to))
         return;
 
     // Each clip of the track, as the area holds them now, in its order: its value on the copy, with its notes, shared.
@@ -903,7 +899,7 @@ void setTrackClipOrder (Song& song, TrackID track, const std::vector<ClipID>& or
         return;
     }
 
-    if (auto* values = song.getValues(); values != nullptr && order != getClips (song, track))
+    if (auto* values = song.getValues(); order != getClips (song, track))
         values->setTrackClipOrder (song, track, immer::flex_vector<ClipID> (order.begin(), order.end()));
 }
 

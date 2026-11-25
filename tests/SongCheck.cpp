@@ -10,6 +10,7 @@
 #include "model/base/internal/CurveValues.h"
 #include "model/base/internal/DevicesArea.h"
 #include "model/base/internal/DevicesValue.h"
+#include "model/base/internal/IDsHeld.h"
 #include "model/base/internal/MidiLinksValue.h"
 #include "model/base/internal/ModulationValue.h"
 #include "model/base/internal/SavedValues.h"
@@ -32,6 +33,7 @@
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/modulation/internal/Modulation.h"
+#include "model/project/internal/Project.h"
 
 #include <algorithm>
 #include <charconv>
@@ -43,6 +45,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace phazite::test
@@ -88,7 +91,7 @@ namespace
 
     struct Checker
     {
-        const Song& song;
+        const Song* song;             // for the names rule's parameters; none for a file checked alone (findFileProblems())
         juce::ValueTree state;        // the song whole (TestHelpers.h: copyWholeSong()), which the rules walk
         juce::File folder;            // the project's, or none
         const schema::Tables& tables; // what Schema.h describes, or a test's changed copy of it
@@ -317,6 +320,14 @@ namespace
             }
         }
 
+        // A text without words every element of its type holds (Schema.h: always: a lane's parameter) held, and not empty.
+        void checkAlwaysTexts (const juce::ValueTree& element)
+        {
+            for (const auto* property : tables.on (element.getType()).all)
+                if (property->isAlways() && property->getWords().empty() && element[*property].toString().isEmpty())
+                    add ("names", element, property->toString() + " is missing or empty, which every one of its elements holds");
+        }
+
         void checkValues (const juce::ValueTree& tree)
         {
             for (const auto& child : tree)
@@ -326,6 +337,7 @@ namespace
 
                 checkRanges (child);
                 checkWords (child);
+                checkAlwaysTexts (child);
 
                 if (child.hasType (schema::DEVICE))
                 {
@@ -368,9 +380,9 @@ namespace
                     // plays; a chain's crossover is kept while its container isn't split into bands or it is the first chain.
                     checkNumber (child, schema::pointValue, 0.0, 1.0, false, "value");
 
-                    if (! describeParameter (song, parameter).has_value()
+                    if (song != nullptr && ! describeParameter (*song, parameter).has_value()
                         && findDevice (state, parameter.device.getRaw())[schema::deviceType].toString() != schema::deviceIsPlugin
-                        && ! (getChainContainer (song, parameter.device).isValid() && parameter.parameter == schema::crossoverParameter))
+                        && ! (getChainContainer (*song, parameter.device).isValid() && parameter.parameter == schema::crossoverParameter))
                         add ("names", tree, "a curve of a parameter the song hasn't: " + parameter.parameter);
                 }
 
@@ -380,7 +392,7 @@ namespace
                     // value by the word "value", its ID being the macro's), one link of each parameter (one of each
                     // controller is its key's).
                     const auto device = DeviceID::fromRaw (readID (child[schema::midiLinkDevice]));
-                    const auto ofMacro = phazite::isMacro (song, ModulatorID::fromRaw (device.getRaw()));
+                    const auto ofMacro = song != nullptr && phazite::isMacro (*song, ModulatorID::fromRaw (device.getRaw()));
                     const ParameterRef parameter { device,
                                                    ofMacro ? juce::String (device.getRaw()) : child[schema::midiLinkParameter].toString() };
 
@@ -391,7 +403,7 @@ namespace
                     if (! child.hasProperty (schema::midiLinkChannel) || ! child.hasProperty (schema::midiLinkNumber))
                         add ("names", child, "a MIDI link without its controller");
 
-                    if (! describeParameter (song, parameter).has_value()
+                    if (song != nullptr && ! describeParameter (*song, parameter).has_value()
                         && findDevice (state, parameter.device.getRaw())[schema::deviceType].toString() != schema::deviceIsPlugin)
                         add ("names", child, "a MIDI link of a parameter the song hasn't: " + parameter.parameter);
 
@@ -620,6 +632,44 @@ namespace
     };
 } // namespace
 
+namespace
+{
+    // The rules that walk the song whole as its file holds it, the names rule's parameters with the song given alone.
+    std::vector<std::string> findTreeProblems (const Song* song, const juce::ValueTree& state, const juce::File& folder,
+                                               const schema::Tables& tables)
+    {
+        Checker checker { song, state, folder, tables, {} };
+
+        if (! state.hasType (schema::PHAZITE))
+            return { "place: the song isn't a PHAZITE element" };
+
+        checker.checkPlaces (state);
+
+        for (const auto& problem : findIDProblems (state))
+            checker.problems.push_back (problem);
+
+        const auto next = (std::uint64_t) (juce::int64) state.getProperty (schema::nextID, (juce::int64) 0);
+
+        if (findNextID (state) > next)
+            checker.problems.push_back ("id: the song's next ID is one it holds already");
+
+        // Room to count on (Schema.h: renumberMark): a song's next ID below the mark is kept as it loads, and one that reaches
+        // it, or an ID that does, makes the loader count on from below schema::maxCountedID; so a song's next ID is at most
+        // the mark once it has loaded, 2^60 below schema::maxID.
+        if (next > schema::renumberMark)
+            checker.problems.push_back ("id: the song's next ID leaves no room before the largest an ID can be");
+
+        checker.checkItemIDs (state);
+        checker.checkKeys (state);
+        checker.checkRanges (state);
+        checker.checkWords (state); // the song's own element's (a grid's step)
+        checker.checkValues (state);
+        checker.checkAliases();
+        checker.checkAudioAliases();
+        return checker.problems;
+    }
+} // namespace
+
 std::vector<std::string> findSongProblems (const Song& song)
 {
     return findSongProblems (song, schema::getTables());
@@ -627,41 +677,22 @@ std::vector<std::string> findSongProblems (const Song& song)
 
 std::vector<std::string> findSongProblems (const Song& song, const schema::Tables& tables)
 {
-    // The song whole, with what it keeps beside its tree: what its file would hold.
-    const auto state = test::copyWholeSong (song);
-    Checker checker { song, state, song.getFile() != juce::File() ? song.getFile().getParentDirectory() : juce::File(), tables, {} };
-
-    if (! state.hasType (schema::PHAZITE))
-        return { "place: the song isn't a PHAZITE element" };
-
-    checker.checkPlaces (state);
-
-    for (const auto& problem : findIDProblems (state))
-        checker.problems.push_back (problem);
-
-    const auto next = (std::uint64_t) (juce::int64) state.getProperty (schema::nextID, (juce::int64) 0);
-
-    if (findNextID (state) > next)
-        checker.problems.push_back ("id: the song's next ID is one it holds already");
-
-    // Room to count on (Schema.h: renumberMark): a song's next ID below the mark is kept as it loads, and one that reaches
-    // it, or an ID that does, makes the loader count on from below schema::maxCountedID; so a song's next ID is at most the
-    // mark once it has loaded, 2^60 below schema::maxID.
-    if (next > schema::renumberMark)
-        checker.problems.push_back ("id: the song's next ID leaves no room before the largest an ID can be");
-
-    checker.checkItemIDs (state);
-    checker.checkKeys (state);
-    checker.checkRanges (state);
-    checker.checkWords (state); // the song's own element's (a grid's step)
-    checker.checkValues (state);
-    checker.checkAliases();
-    checker.checkAudioAliases();
+    // The song whole, with everything it holds: what its file would hold.
+    auto problems = findTreeProblems (&song, test::copyWholeSong (song),
+                                      song.getFile() != juce::File() ? song.getFile().getParentDirectory() : juce::File(), tables);
 
     for (auto& problem : findValueProblems (song))
-        checker.problems.push_back (std::move (problem));
+        problems.push_back (std::move (problem));
 
-    return checker.problems;
+    for (auto& problem : findReopenedProblems (song)) // the song as it opens from its file
+        problems.push_back (std::move (problem));
+
+    return problems;
+}
+
+std::vector<std::string> findFileProblems (const juce::ValueTree& file, const schema::Tables& tables, const juce::File& folder)
+{
+    return findTreeProblems (nullptr, file, folder, tables);
 }
 
 namespace
@@ -688,20 +719,6 @@ namespace
     void checkClipsValue (const Song& song, const SongValues& values, std::vector<std::string>& problems)
     {
         const auto& clips = values.clips.get();
-
-        const std::function<void (const juce::ValueTree&)> visit = [&] (const juce::ValueTree& element)
-        {
-            for (const auto& child : element)
-            {
-                if (child.hasType (schema::CLIP))
-                    problems.push_back (clipText ((std::uint64_t) (juce::int64) child[schema::clipID])
-                                        + " is an element in the song's tree");
-
-                visit (child);
-            }
-        };
-
-        visit (song.getState());
 
         if (! holdsItsLists (clips))
             problems.push_back ("values: the clips' lists (each track's, each alias group's) don't hold the clips the area holds");
@@ -792,25 +809,8 @@ namespace
 
     // The tempo map's area: no entry of it in the song's tree, its TEMPOMAP there an empty place for it; each kind not empty
     // and in the order of its beats; every number within its description's range (Schema.h), read here from the description.
-    void checkTempoMapValue (const Song& song, const SongValues& values, std::vector<std::string>& problems)
+    void checkTempoMapValue (const Song&, const SongValues& values, std::vector<std::string>& problems)
     {
-        const std::function<void (const juce::ValueTree&)> findEntries = [&] (const juce::ValueTree& element)
-        {
-            for (const auto& child : element)
-            {
-                if (child.hasType (schema::TEMPO) || child.hasType (schema::TIMESIGNATURE))
-                    problems.push_back ("values: a " + child.getType().toString().toStdString() + " is an element in the song's tree");
-
-                findEntries (child);
-            }
-        };
-
-        findEntries (song.getState());
-
-        if (const auto map = song.getState().getChildWithName (schema::TEMPOMAP);
-            ! map.isValid() || map.getNumChildren() > 0 || map.getNumProperties() > 0)
-            problems.push_back ("values: the song's tree has no empty TEMPOMAP to write its tempo map in");
-
         const auto& tempoMap = values.tempoMap.get();
         const auto isWithin = [] (double number, const schema::PropertyDescription& property)
         {
@@ -863,41 +863,15 @@ namespace
                    });
     }
 
-    // The chord lane's area: no chord or key of it in the song's tree, its CHORDLANE there (where the song has a lane) an empty
-    // placeholder, and no chord or key held without one (a song without a lane takes its keys from the key set last); every
-    // number within its description's range (Schema.h), read here from the description; and what the lane's readers rely on:
-    // chords that don't overlap, and a key's root a key's (0 to 11) or none (-1).
-    void checkChordLaneValue (const Song& song, const SongValues& values, std::vector<std::string>& problems)
+    // The chord lane's area: no chord or key held without a lane placed (a song without a lane takes its keys from the key set
+    // last); every number within its description's range (Schema.h), read here from the description; and what the lane's
+    // readers rely on: chords that don't overlap, and a key's root a key's (0 to 11) or none (-1).
+    void checkChordLaneValue (const Song&, const SongValues& values, std::vector<std::string>& problems)
     {
-        const std::function<void (const juce::ValueTree&)> findEntries = [&] (const juce::ValueTree& element)
-        {
-            for (const auto& child : element)
-            {
-                if (child.hasType (schema::CHORD) || child.hasType (schema::CHORDKEY))
-                    problems.push_back ("values: a " + child.getType().toString().toStdString() + " is an element in the song's tree");
-
-                findEntries (child);
-            }
-        };
-
-        findEntries (song.getState());
         const auto& lane = values.chordLane.get();
 
-        if (const auto element = song.getState().getChildWithName (schema::CHORDLANE); ! element.isValid())
-        {
-            if (! lane.chords.empty() || ! lane.keys.empty())
-                problems.push_back ("values: the song holds chords or keys but has no CHORDLANE, the sign of a chord lane");
-        }
-        else if (element.getNumChildren() > 0 || element.getNumProperties() > 0)
-        {
-            problems.push_back ("values: the song's CHORDLANE isn't an empty placeholder for its chord lane");
-        }
-
-        // Whether the song has a lane: its value's (ChordLaneValue.h: placed) and its tree's CHORDLANE alike, until the tree
-        // goes.
-        if (lane.placed != song.getState().getChildWithName (schema::CHORDLANE).isValid())
-            problems.push_back (lane.placed ? "values: the song's chord lane is placed, and its tree holds no CHORDLANE"
-                                            : "values: the song's tree holds a CHORDLANE, and its chord lane isn't placed");
+        if (! lane.placed && (! lane.chords.empty() || ! lane.keys.empty()))
+            problems.push_back ("values: the song holds chords or keys but its chord lane isn't placed");
 
         const auto isWithin = [] (double number, const schema::PropertyDescription& property)
         {
@@ -945,31 +919,9 @@ namespace
     // range (Schema.h), read here from the description, and a parameter named (a device's ID and a text); and one link of each
     // controller and one of each parameter (MidiLinksValue.h: holdsOneLinkEach()). That each names a parameter the song has
     // is the rule above, on the song whole (checkValues()'s MIDILINK).
-    void checkMidiLinksValue (const Song& song, const SongValues& values, std::vector<std::string>& problems)
+    void checkMidiLinksValue (const Song&, const SongValues& values, std::vector<std::string>& problems)
     {
-        const std::function<void (const juce::ValueTree&)> findLinks = [&] (const juce::ValueTree& element)
-        {
-            for (const auto& child : element)
-            {
-                if (child.hasType (schema::MIDILINK))
-                    problems.push_back ("values: a MIDILINK is an element in the song's tree");
-
-                findLinks (child);
-            }
-        };
-
-        findLinks (song.getState());
         const auto& links = values.midiLinks.get();
-
-        if (const auto element = song.getState().getChildWithName (schema::MIDILINKS); ! element.isValid())
-        {
-            if (! links.links.empty())
-                problems.push_back ("values: the song holds MIDI links but has no MIDILINKS, the place of its links");
-        }
-        else if (element.getNumChildren() > 0 || element.getNumProperties() > 0)
-        {
-            problems.push_back ("values: the song's MIDILINKS isn't an empty placeholder for its MIDI links");
-        }
 
         const auto isWithin = [] (int number, const schema::PropertyDescription& property)
         {
@@ -1001,35 +953,8 @@ namespace
     // ranges (Schema.h), read here from the descriptions; and every point's key one the song gave (none is 0, each below the
     // song's next), each once in the song. Points out of time order are no problem (a file from others may hold them so, and
     // they are kept). That each names a parameter the song has is the rule above, on the song whole (checkValues()'s POINT).
-    void checkCurvesValue (const Song& song, const SongValues& values, std::vector<std::string>& problems)
+    void checkCurvesValue (const Song&, const SongValues& values, std::vector<std::string>& problems)
     {
-        const std::function<void (const juce::ValueTree&)> findCurves = [&] (const juce::ValueTree& element)
-        {
-            for (const auto& child : element)
-            {
-                if (child.hasType (schema::CURVE) || child.hasType (schema::POINT))
-                    problems.push_back ("values: a " + child.getType().toString().toStdString() + " is an element in the song's tree");
-
-                findCurves (child);
-            }
-        };
-
-        findCurves (song.getState());
-
-        if (const auto element = song.getState().getChildWithName (schema::AUTOMATION); ! element.isValid())
-            problems.push_back ("values: the song has no AUTOMATION, the place of its curves");
-        else if (element.getNumChildren() > 0 || element.getNumProperties() > 0)
-            problems.push_back ("values: the song's AUTOMATION isn't an empty place for its curves");
-
-        // One place: a second would have the curves written into it too (the keeper refuses one: CurvesArea.cpp).
-        auto numAutomations = 0;
-
-        for (const auto& child : song.getState())
-            numAutomations += child.hasType (schema::AUTOMATION) ? 1 : 0;
-
-        if (numAutomations > 1)
-            problems.push_back ("values: the song has more than one AUTOMATION");
-
         const auto& curves = values.curves.get();
 
         if (! holdsItsOrder (curves))
@@ -1083,31 +1008,9 @@ namespace
     // from, one of each (SectionsValue.h: holdsSectionsHeld()); and every number within its description's range (Schema.h),
     // read here from the description, a length more than 0. That each ID is held once across the song, and the song's next ID
     // past it, is the id rule above, on the song whole (findIDProblems(), which reads the sections written into whole state).
-    void checkSectionsValue (const Song& song, const SongValues& values, std::vector<std::string>& problems)
+    void checkSectionsValue (const Song&, const SongValues& values, std::vector<std::string>& problems)
     {
-        const std::function<void (const juce::ValueTree&)> findSections = [&] (const juce::ValueTree& element)
-        {
-            for (const auto& child : element)
-            {
-                if (child.hasType (schema::SECTION))
-                    problems.push_back ("values: a SECTION is an element in the song's tree");
-
-                findSections (child);
-            }
-        };
-
-        findSections (song.getState());
         const auto& sections = values.sections.get();
-
-        if (const auto element = song.getState().getChildWithName (schema::SECTIONS); ! element.isValid())
-        {
-            if (! sections.sections.empty())
-                problems.push_back ("values: the song holds sections but has no SECTIONS, the place of its sections");
-        }
-        else if (element.getNumChildren() > 0 || element.getNumProperties() > 0)
-        {
-            problems.push_back ("values: the song's SECTIONS isn't an empty placeholder for its sections");
-        }
 
         if (! holdsSectionsHeld (sections))
             problems.push_back ("values: the sections hold two of one ID, or one without an ID the song can count on from");
@@ -1140,18 +1043,6 @@ namespace
     // parts; each modulation's amount within -1 to 1; and the song's next ID past each modulator's and macro's.
     void checkModulationValue (const Song& song, const SongValues& values, std::vector<std::string>& problems)
     {
-        const std::function<void (const juce::ValueTree&)> findElements = [&] (const juce::ValueTree& element)
-        {
-            for (const auto& child : element)
-            {
-                if (child.hasType (schema::MODULATOR) || child.hasType (schema::MACRO) || child.hasType (schema::MODULATES))
-                    problems.push_back ("values: a " + child.getType().toString().toStdString() + " is an element in the song's tree");
-
-                findElements (child);
-            }
-        };
-
-        findElements (song.getState());
         const auto modulation = values.modulation.get();
 
         if (! holdsTogether (modulation))
@@ -1225,18 +1116,6 @@ namespace
     // and the song's next ID past each send's.
     void checkSendsValue (const Song& song, const SongValues& values, std::vector<std::string>& problems)
     {
-        const std::function<void (const juce::ValueTree&)> findElements = [&] (const juce::ValueTree& element)
-        {
-            for (const auto& child : element)
-            {
-                if (child.hasType (schema::SEND))
-                    problems.push_back ("values: a SEND is an element in the song's tree");
-
-                findElements (child);
-            }
-        };
-
-        findElements (song.getState());
         const auto sends = values.sends.get();
 
         if (! holdsItsLists (sends))
@@ -1374,19 +1253,6 @@ namespace
     void checkDevicesValue (const Song& song, const SongValues& values, std::vector<std::string>& problems)
     {
         const auto& kept = values.devices.get();
-        const std::function<void (const juce::ValueTree&)> visit = [&problems, &visit] (const juce::ValueTree& element)
-        {
-            for (const auto& child : element)
-            {
-                if (child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER) || child.hasType (schema::CHAIN)
-                    || child.hasType (schema::VALUES) || child.hasType (schema::SOUNDS))
-                    problems.push_back ("values: the song's tree holds a " + child.getType().toString().toStdString());
-
-                visit (child);
-            }
-        };
-
-        visit (song.getState());
 
         if (! holdsItsLists (kept))
             problems.push_back ("values: the devices kept don't hold their lists");
@@ -1432,12 +1298,12 @@ namespace
                     problems.push_back (text + " holds a sound of no property of its type's, or an empty one");
         }
 
-        // A copy of the tree given its devices alone, as a whole copy writes them (DevicesArea.h: writeDevicesIn()): what the
-        // other areas write is their checks', and a song whose tree holds what its keeper refused (a second AUTOMATION, which
-        // a whole copy can't write) still has its devices checked.
-        // Since the tracks' switch (roadmap step S5.20) the tree holds no TRACK: the copy is given each track's own element
-        // (TracksValue.h: writeTrackElement()), a folder's tracks in it, for the devices to be written into.
-        auto whole = song.getState().createCopy();
+        // A root given its devices alone, as a whole copy writes them (DevicesArea.h: writeDevicesIn()): what the other areas
+        // write is their checks'. The root is given each track's own element (TracksValue.h: writeTrackElement()), a folder's
+        // tracks in it, and a MASTER, for the devices to be written into.
+        juce::ValueTree whole (schema::PHAZITE);
+        whole.appendChild (juce::ValueTree (schema::TRACKS), nullptr);
+        whole.appendChild (juce::ValueTree (schema::MASTER), nullptr);
         const auto valuesKept = getSongState (song);
         const auto& tracksKept = values.tracks.get();
         const std::function<void (juce::ValueTree, TrackID)> writeTracks =
@@ -1548,24 +1414,8 @@ namespace
     // is of an item of its kind (a plug-in's values, state, program, format ID and version; a chain's mute and solo), the
     // entries of items it doesn't hold being kept for an Undo; and each is as the song holds it (a value within 0 and 1, a
     // state of some bytes, a text that isn't empty, a switch on).
-    void checkDeviceStoreValue (const Song& song, const SongValues& values, std::vector<std::string>& problems)
+    void checkDeviceStoreValue (const Song&, const SongValues& values, std::vector<std::string>& problems)
     {
-        const std::function<void (const juce::ValueTree&)> visit = [&problems, &visit] (const juce::ValueTree& element)
-        {
-            for (const auto& child : element)
-            {
-                if (holdsStoreIn (child))
-                    problems.push_back (
-                        "values: the song's " + child.getType().toString().toStdString() + " "
-                        + writeValue (child[schema::deviceID].isVoid() ? child[schema::chainID] : child[schema::deviceID]).toStdString()
-                        + " holds what the devices' store holds");
-
-                visit (child);
-            }
-        };
-
-        visit (song.getState());
-
         const auto& store = values.deviceStore.get();
         const auto* told = &values.devices.get();
 
@@ -1748,17 +1598,6 @@ namespace
     // the order made afresh of the value. (A send's track, a device's and a modulator's place: their areas' rules.)
     void checkTracksValue (const Song& song, const SongValues& values, std::vector<std::string>& problems)
     {
-        const auto state = song.getState();
-
-        for (const auto& child : state)
-        {
-            if (child.hasType (schema::TRACKS) && child.getNumChildren() > 0)
-                problems.push_back ("values: the song's tree holds a track (its TRACKS holds an element)");
-
-            if (child.hasType (schema::MASTER) && (child.getNumProperties() > 0 || child.getNumChildren() > 0))
-                problems.push_back ("values: the song's tree's MASTER holds a property or an element");
-        }
-
         const auto& tracks = values.tracks.get();
 
         if (! holdsItsLists (tracks))
@@ -1836,25 +1675,6 @@ namespace
     // getLanes(); the loader drops it as the song opens), which the song holds nothing of to compare them with.
     void checkTrackLeavesValue (const Song& song, const SongValues& values, std::vector<std::string>& problems)
     {
-        const std::function<void (const juce::ValueTree&)> visit = [&problems, &visit] (const juce::ValueTree& parent)
-        {
-            for (const auto& child : parent)
-            {
-                if (child.hasType (schema::TRACK) || child.hasType (schema::MASTER))
-                {
-                    if (holdsSwitchesIn (child) || holdsViewIn (child))
-                        problems.push_back ("values: the song's tree holds a switch, a view property or a LANES of "
-                                            + std::string (child.hasType (schema::MASTER) ? "the master" : "a track"));
-
-                    if (child.hasType (schema::TRACK))
-                        visit (child);
-                }
-            }
-        };
-
-        visit (song.getState());
-        visit (song.getState().getChildWithName (schema::TRACKS));
-
         const auto next = getNextID (song);
         const auto& switches = values.trackSwitches.get();
 
@@ -1886,13 +1706,9 @@ namespace
         checkLanes (outside.master, "the master");
     }
 
-    // The song's live root as every area's switch leaves it: no property, and nothing but its placeholders, each once and each
-    // empty (no property, no element): its TEMPOMAP, its AUTOMATION, its TRACKS and its MASTER, which every song that holds
-    // its values has, and its CHORDLANE, MIDILINKS and SECTIONS where it has them. Everything else the song holds is its
-    // areas', which whole state writes into a copy (WholeState.h), and what Phazite doesn't know there was dropped as it opened.
     // The song whole as a value (SongState.h): the state read back from its whole copy (readSongTree (copyWholeSong (song))) is
-    // the state the song holds (getSongState()), area by area (identity aside), with the places of its root a whole copy writes:
-    // so that both converters agree with each other for every song checked.
+    // the state the song holds (getSongState()), area by area (identity aside): so that both converters agree with each other
+    // for every song checked (the song as it opens: findReopenedProblems()).
     void checkSongState (const Song& song, std::vector<std::string>& problems)
     {
         const auto state = getSongState (song);
@@ -1900,31 +1716,6 @@ namespace
 
         for (const auto& difference : findStateDifferences (readSongTree (written), state))
             problems.push_back ("state: the song read back from its whole copy holds other " + difference);
-    }
-
-    // The places of a root a state's whole copy writes, in their order (SongState.h: writeSongTree(), stated again): its places
-    // but its CHORDLANE where its lane isn't placed and its AUTOMATION where it holds no curve, then its TEMPOMAP where it names
-    // none, its AUTOMATION where it holds curves and names none, its CHORDLANE where its lane is placed and it names none.
-    std::vector<RootPlace> findWrittenPlaces (const SongState& state)
-    {
-        std::vector<RootPlace> places;
-        const auto holdsCurves = ! state.curves.order.empty();
-
-        for (const auto place : state.rootPlaces)
-            if (place != RootPlace::none && (place != RootPlace::chordLane || state.chordLane.placed)
-                && (place != RootPlace::automation || holdsCurves))
-                places.push_back (place);
-
-        if (! state.holdsPlace (RootPlace::tempoMap))
-            places.push_back (RootPlace::tempoMap);
-
-        if (holdsCurves && ! state.holdsPlace (RootPlace::automation))
-            places.push_back (RootPlace::automation);
-
-        if (state.chordLane.placed && ! state.holdsPlace (RootPlace::chordLane))
-            places.push_back (RootPlace::chordLane);
-
-        return places;
     }
 
     // Whether two states hold the same switches (or the same view) of the tracks they hold and the master: the entries of a
@@ -1935,9 +1726,8 @@ namespace
         std::vector<std::uint64_t> keys { 0 };
 
         for (const auto* state : { &a, &b })
-            if (state->tracks.has_value())
-                for (const auto& entry : state->tracks->tracks)
-                    keys.push_back (entry.first);
+            for (const auto& entry : state->tracks.tracks)
+                keys.push_back (entry.first);
 
         for (const auto key : keys)
         {
@@ -2006,53 +1796,13 @@ namespace
         return true;
     }
 
-    void checkLiveRoot (const Song& song, std::vector<std::string>& problems)
-    {
-        const auto live = song.getState();
-
-        if (live.getNumProperties() > 0)
-            problems.push_back ("values: the song's live root holds a property");
-
-        for (const auto* type : { &schema::TEMPOMAP, &schema::AUTOMATION, &schema::TRACKS, &schema::MASTER })
-            if (! live.getChildWithName (*type).isValid())
-                problems.push_back ("values: the song's live root holds no " + type->toString().toStdString());
-
-        std::set<juce::String> seen;
-
-        for (const auto& child : live)
-        {
-            const auto type = child.getType();
-            const auto isPlaceholder = type == schema::TEMPOMAP.getName() || type == schema::AUTOMATION.getName()
-                                       || type == schema::TRACKS.getName() || type == schema::MASTER.getName()
-                                       || type == schema::CHORDLANE.getName() || type == schema::MIDILINKS.getName()
-                                       || type == schema::SECTIONS.getName();
-
-            if (! isPlaceholder)
-                problems.push_back ("values: the song's live root holds a " + type.toString().toStdString() + ", no placeholder");
-            else if (! seen.insert (type.toString()).second)
-                problems.push_back ("values: the song's live root holds two of " + type.toString().toStdString());
-            else if (child.getNumProperties() > 0 || child.getNumChildren() > 0)
-                problems.push_back ("values: the song's live root's " + type.toString().toStdString() + " isn't empty");
-        }
-    }
-
-    // The song's own, its areas' (SongOwnValue.h; SongValues.h: songOwn, songStanding, songOutside): the song's tree holds
-    // none of it (no property on its root, nor a LASTKEY, PIANOROLL or MERGING), its count of IDs past every ID the song holds,
+    // The song's own, its areas' (SongOwnValue.h; SongValues.h: songOwn, songStanding, songOutside): its count of IDs past
+    // every ID the song holds,
     // each field within its description (the values written into a root and read back as the song holds them are themselves),
     // and its whole copy's root read alike as Phazite's code always read it and as the song holds it (each field by its
     // description, by the loader's rule), and read as held and written back, itself: the file it writes is the one it opens.
     void checkSongOwnValue (const Song& song, const SongValues& values, std::vector<std::string>& problems)
     {
-        const auto live = song.getState();
-
-        for (int i = 0; i < live.getNumProperties(); ++i)
-            problems.push_back ("values: the song's tree holds the property " + live.getPropertyName (i).toString().toStdString()
-                                + " on its root, which the song holds beside it or drops as it opens");
-
-        for (const auto* type : { &schema::LASTKEY, &schema::PIANOROLL, &schema::MERGING })
-            if (live.getChildWithName (*type).isValid())
-                problems.push_back ("values: the song's tree holds a " + type->toString().toStdString() + ", the song's own's");
-
         if (findNextID (song) != getNextID (song))
             problems.push_back ("values: the song's count of IDs is at an ID it holds, or before one");
 
@@ -2126,9 +1876,6 @@ std::vector<std::string> findValueProblems (const Song& song)
     std::vector<std::string> problems;
     const auto* values = song.getValues();
 
-    if (values == nullptr)
-        return problems;
-
     // Each area's rule, a line each (SongValues.h's recipe), in this order: the clips, their notes, the tempo map, the chord
     // lane, the MIDI links, the curves, the sections, modulation, the sends, the devices, the tracks, the song's own.
     checkClipsValue (song, *values, problems);
@@ -2145,7 +1892,6 @@ std::vector<std::string> findValueProblems (const Song& song)
     checkTracksValue (song, *values, problems);
     checkTrackLeavesValue (song, *values, problems); // the tracks' switches and view
     checkSongOwnValue (song, *values, problems);     // the song's own
-    checkLiveRoot (song, problems);                  // what the areas' switches leave of the live root: empty placeholders
     checkSongState (song, problems);                 // the song whole as a value, written and read back
     return problems;
 }
@@ -2181,7 +1927,6 @@ std::vector<std::string> findStateDifferences (const SongState& a, const SongSta
     compare (a.trackSwitches == b.trackSwitches || holdSameLeavesOfHeld (a, b, false), "tracks' switches");
     compare (a.tracksOutside == b.tracksOutside || holdSameLeavesOfHeld (a, b, true), "tracks' view");
     compare (a.tracks == b.tracks, "tracks");
-    compare (findWrittenPlaces (a) == findWrittenPlaces (b), "places of its root (as a whole copy writes them)");
     return found;
 }
 
@@ -2232,12 +1977,87 @@ Song::Ptr copyAsOpened (const Song& song)
 
     // Its curves as they are: what takes something away takes its curves along (model/mixer/internal/Mixer.h:
     // forgetWhatNamesTheGone()), so a curve of a device the song hasn't is a fault the check finds.
-    Song::Ptr copy (new Song (whole));
+    Song::Ptr copy (new Song (readSongTree (whole)));
 
-    // A song left without curves is written without an AUTOMATION (CurvesArea.h: writeCurvesIn()), as the song opened is.
-    if (auto automation = copy->getState().getChildWithName (schema::AUTOMATION); automation.isValid() && automation.getNumChildren() == 0)
-        copy->getState().removeChild (automation, nullptr);
-    copy->getState().removeProperty (schema::playStart, nullptr);
+    // Playing from its start, as a song opened does (Project.h: makeSong()).
+    auto outside = getSongOutside (*copy);
+    outside.playStart = 0.0;
+    setSongOutside (*copy, std::move (outside));
     return copy;
+}
+} // namespace phazite::test
+
+namespace phazite::test
+{
+namespace
+{
+    juce::String writeText (const SongState& state)
+    {
+        juce::MemoryOutputStream text;
+        writeProjectText (text, writeSongTree (state));
+        return text.toString();
+    }
+
+    // A song's file's text read as a project opens it: parsed, made consistent by the loader, its state read.
+    std::optional<SongState> readAsOpened (const juce::String& text, const juce::File& projectFolder)
+    {
+        const auto xml = juce::parseXML (text);
+
+        if (xml == nullptr)
+            return std::nullopt;
+
+        auto tree = juce::ValueTree::fromXml (*xml);
+
+        if (! tree.hasType (schema::PHAZITE))
+            return std::nullopt;
+
+        makeConsistent (tree, projectFolder);
+        return readSongTree (tree);
+    }
+} // namespace
+
+std::vector<std::string> findReopenedProblems (const Song& song)
+{
+    std::vector<std::string> problems;
+
+    // A song whose IDs reach the mark is given them anew as it opens (Schema.h: renumberMark): another text by its IDs.
+    if (getNextID (song) >= schema::renumberMark || findLargestIDHeld (song) >= schema::renumberMark)
+        return problems;
+
+    // The song's file's text; the state a project opens of it; that state's text, which must be the first, word for word (so
+    // a number's digits past what a text holds are no matter, and what a writer writes that its reader reads otherwise is
+    // found); and that text opened again, the same state.
+    const auto folder = song.getFile() != juce::File() ? song.getFile().getParentDirectory() : juce::File();
+    const auto first = writeText (getSongState (song));
+    const auto opened = readAsOpened (first, folder);
+
+    if (! opened.has_value())
+    {
+        problems.push_back ("reopened: the song's file's text opens as no song");
+        return problems;
+    }
+
+    const auto second = writeText (*opened);
+
+    if (second != first)
+    {
+        const auto a = juce::StringArray::fromLines (first), b = juce::StringArray::fromLines (second);
+
+        for (int i = 0; i < juce::jmax (a.size(), b.size()); ++i)
+            if (a[i] != b[i])
+            {
+                problems.push_back ("reopened: the text of the song opened from its file differs at line " + std::to_string (i + 1) + ": \""
+                                    + a[i].trim().toStdString() + "\" against \"" + b[i].trim().toStdString() + "\"");
+                break;
+            }
+    }
+
+    if (const auto again = readAsOpened (second, folder); ! again.has_value())
+        problems.push_back ("reopened: the text of the song opened from its file opens as no song");
+    else
+        for (const auto& difference : findStateDifferences (*again, *opened))
+            problems.push_back ("reopened: the song opened from its file, opened again, holds other " + difference);
+
+    return problems;
 }
 } // namespace phazite::test

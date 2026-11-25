@@ -3,9 +3,9 @@
 // Listener::curvesChanged()), by the parameters of the curves that changed (roadmap step S5.20). For each edit of the curves
 // made through the model, its Undo and its Redo, the listener is told exactly the parameters whose curves differ before and
 // after, compared as values (independent of what tells it), and nothing of another area; another area's change tells it
-// nothing; and what listens to the song's root hears each change once: the project's count of changes and the versions'
-// count of the song's changes go up by what the listener was told, and by nothing else, where the tree told nothing but the
-// curves. And the versions give the song another song's curves by their parameters, through automation's functions
+// nothing; and what counts the song's changes hears each change once: the project's count of changes and the versions'
+// count of the song's changes go up by what the listener was told, and by nothing else, where no other area told anything.
+// And the versions give the song another song's curves by their parameters, through automation's functions
 // (model/versions/ApplySong.cpp: makeCurvesLike(), in one set of the curves' area; Automation.h: setCurveValue(),
 // eraseCurve()): the whole song's, each one exact undo step, in the version's order, and a line's, its devices' alone;
 // a song made as it was copied writes nothing of its curves; and a merge's clash on a curve is chosen either way.
@@ -80,14 +80,13 @@ struct Told final : phazite::SongValues::Listener
     void clipsChanged (const std::vector<phazite::SongValues::ClipChange>&, const std::vector<phazite::TrackID>&) override { ++clips; }
     void tempoMapChanged() override { ++tempo; }
 
-    // The tracks', which a track removed, duplicated or moved comes and goes with since the tracks' switch (no TRACK element
-    // in the tree).
+    // The tracks', which a track removed, duplicated or moved comes and goes with since the tracks' switch.
     void tracksChanged (const std::vector<phazite::TrackChange>&, const std::vector<phazite::TrackID>&, const phazite::SongTracks&) override
     {
         ++tracksTold;
     }
 
-    // The devices', which a device removed comes and goes with since the devices' switch (no DEVICE element in the tree).
+    // The devices', which a device removed comes and goes with since the devices' switch.
     void devicesChanged (const std::vector<phazite::SongValues::DeviceChange>&, const std::vector<phazite::DevicePlace>&,
                          const phazite::SongDevices&) override
     {
@@ -109,47 +108,6 @@ struct Told final : phazite::SongValues::Listener
 
     int notes = 0, clips = 0, tempo = 0, curves = 0, tracksTold = 0, devices = 0;
     std::vector<phazite::ParameterRef> parameters;
-};
-
-// What a listener of the song's root is told, sorted as the test sees it, without asking the song: under a curve (a CURVE
-// of the song's AUTOMATION, or what is in one; a CURVE added to it or taken out), the song's AUTOMATION added or taken out
-// with curves in it, and all else.
-struct TreeHeard final : juce::ValueTree::Listener
-{
-    explicit TreeHeard (const juce::ValueTree& rootToHear)
-        : root (rootToHear)
-    {
-        root.addListener (this);
-    }
-
-    ~TreeHeard() override { root.removeListener (this); }
-
-    static bool isUnderCurve (juce::ValueTree element)
-    {
-        for (; element.isValid(); element = element.getParent())
-            if (element.hasType (phazite::schema::CURVE) && element.getParent().hasType (phazite::schema::AUTOMATION))
-                return true;
-
-        return false;
-    }
-
-    void hear (bool underCurve) { ++(underCurve ? curves : other); }
-
-    void hearChild (const juce::ValueTree& parent, const juce::ValueTree& child)
-    {
-        if (child.hasType (phazite::schema::AUTOMATION) && child.getChildWithName (phazite::schema::CURVE).isValid())
-            ++automationWithCurves;
-
-        hear ((child.hasType (phazite::schema::CURVE) && parent.hasType (phazite::schema::AUTOMATION)) || isUnderCurve (parent));
-    }
-
-    void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&) override { hear (isUnderCurve (tree)); }
-    void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override { hearChild (parent, child); }
-    void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override { hearChild (parent, child); }
-    void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override { hear (isUnderCurve (parent)); }
-
-    juce::ValueTree root;
-    int curves = 0, automationWithCurves = 0, other = 0;
 };
 
 // How often the song's curves' area moved to another value (SongValues::curves), heard as the area itself tells its
@@ -212,8 +170,8 @@ std::vector<phazite::ParameterRef> findDiffering (const phazite::SongCurves& bef
 
     return differing;
 }
-
-// A song in a project of its own, with its versions, the values' listener and a listener of its root recording what they
+// A song in a project of its own, with its versions and the values' listener recording what they are told. It holds a
+// curve from the start.
 // are told. It holds a curve from the start, so that its AUTOMATION is there before the edits.
 struct Watched
 {
@@ -226,13 +184,13 @@ struct Watched
 
     ~Watched() { song.getValues()->removeListener (&told); }
 
-    // What a change told: the values' listener; the root's listener, under the curves, of an AUTOMATION added or taken out
-    // with curves, and of everything else; how far the project's count of changes and the versions' count of the song's
-    // changes went up meanwhile; the parameters whose curves differ after it; and the song's curves before it and after.
+    // What a change told: the values' listener; how far the area moved; how far the project's count of changes and the
+    // versions' count of the song's changes went up meanwhile; the parameters whose curves differ after it; and the song's
+    // curves before it and after.
     struct Heard
     {
         Told told;
-        int curves = 0, automationWithCurves = 0, other = 0, moves = 0;
+        int moves = 0;
         juce::int64 project = 0, versions = 0;
         std::vector<phazite::ParameterRef> differing;
         phazite::SongCurves before, after;
@@ -243,7 +201,6 @@ struct Watched
         auto* versions = phazite::getVersionHistory (s.context);
         REQUIRE (versions != nullptr);
         told = {};
-        tree.curves = tree.automationWithCurves = tree.other = 0;
         area.moves = 0;
         const auto projectBefore = s.getProject().getChangeCount();
         const auto versionsBefore = versions->countSongChanges();
@@ -251,9 +208,6 @@ struct Watched
         change();
         const auto after = phazite::getCurvesValue (song);
         return { told,
-                 tree.curves,
-                 tree.automationWithCurves,
-                 tree.other,
                  area.moves,
                  s.getProject().getChangeCount() - projectBefore,
                  versions->countSongChanges() - versionsBefore,
@@ -277,23 +231,13 @@ struct Watched
     phazite::test::TestSong s;
     phazite::Song& song = *phazite::findSong (s.context);
     Told told;
-    TreeHeard tree { song.getState() };
     AreaMoves area { song.getValues()->curves };
 };
-
-// How often the listener is told: since automation's switch (roadmap step S5.20) the area tells it once for each change of
-// its value (a curve given another parameter included, in one change), and the song's tree tells nothing of the curves (a
-// tree heard under them a failure, checked here).
-int toldForTheTree (const Watched::Heard& heard)
-{
-    CHECK (heard.curves + heard.automationWithCurves == 0);
-    return heard.moves;
-}
 
 // What a change and its Undo and Redo told, each against the parameters whose curves differ: exactly those, a parameter told
 // whose curve is there and the same before and after, or that names no curve before nor after (a curve given another
 // parameter in two writes, its device and then its parameter, passing through one), failing it; once for each change of
-// the curves' value; nothing of another area unless othersToo; and, where the tree told nothing else, the project's and the
+// the curves' value; nothing of another area unless othersToo; and, where no other area told, the project's and the
 // versions' counts up by what the listener was told.
 void checkHeard (const juce::String& name, const std::vector<Watched::Heard>& heard, bool othersToo = false)
 {
@@ -308,7 +252,7 @@ void checkHeard (const juce::String& name, const std::vector<Watched::Heard>& he
         const auto& told = each.told.parameters;
         CHECK_MESSAGE (describe (told) == describe (each.differing), "told " << describe (told).joinIntoString (", ") << "; differing "
                                                                              << describe (each.differing).joinIntoString (", "));
-        CHECK (each.told.curves == toldForTheTree (each));
+        CHECK (each.told.curves == each.moves);
 
         if (! othersToo)
         {
@@ -317,9 +261,9 @@ void checkHeard (const juce::String& name, const std::vector<Watched::Heard>& he
             CHECK (each.told.tempo == 0);
         }
 
-        // Heard once: what listens to the song's root counts what it was told, and its tree's callbacks nothing more (where
-        // nothing else changed: the tree, or the devices, which a device removed comes and goes with).
-        if (each.other == 0 && each.told.devices == 0 && each.told.tracksTold == 0)
+        // Heard once: what counts the song's changes counts what it was told (where nothing else changed: the tracks, or
+        // the devices, which a device removed comes and goes with).
+        if (each.told.devices == 0 && each.told.tracksTold == 0)
         {
             CHECK (each.project == each.told.curves);
             CHECK (each.versions == each.told.curves);
@@ -616,7 +560,7 @@ TEST_CASE ("Song values' curves: a version with other curves applied both ways i
     CHECK_FALSE (phazite::test::hasDevice (song, eq));
     apply ("Without Automation", without);
     CHECK (phazite::getCurveKeys (song).empty());
-    CHECK (song.getState().getChildWithName (phazite::schema::AUTOMATION).isValid());
+    CHECK_FALSE (phazite::test::copyWholeSong (song).getChildWithName (phazite::schema::AUTOMATION).isValid());
     apply ("Automation Again", before);
     apply ("The Same", before); // nothing differs: no step
     CHECK (undo.getNumSteps() == 4);
@@ -630,13 +574,12 @@ TEST_CASE ("Song values' curves: a version with other curves applied both ways i
     }
 }
 
-TEST_CASE ("Song values' curves: a version without automation applied takes the song's curves away in one action, the song's "
-           "elements staying in their places")
+TEST_CASE ("Song values' curves: a version without automation applied takes the song's curves away in one action, "
+           "what hears the curves told them at once")
 {
-    // ApplySong.cpp: makeCurvesLike(), in one set of the curves' area. Three curves, and an element of the song's after its
-    // AUTOMATION (its SECTIONS, added later), which keeps its place: the step is one action, not one for each curve, nor a
-    // move of what comes after; what hears the curves change is told the three at once. The song's AUTOMATION, the place of
-    // its curves, stays; a whole copy of the song, without curves, writes none, as the version has none.
+    // ApplySong.cpp: makeCurvesLike(), in one set of the curves' area. Three curves, and the song's sections beside them: the
+    // step is one action, not one for each curve; what hears the curves change is told the three at once; a whole copy of
+    // the song, without curves, writes no AUTOMATION, as the version has none, and its other elements as the version's.
     phazite::test::TestSong s;
     auto& song = *phazite::findSong (s.context);
     const auto track = s.firstTrack;
@@ -650,11 +593,6 @@ TEST_CASE ("Song values' curves: a version without automation applied takes the 
         const phazite::UndoStep step (song, "Add Section");
         phazite::addSectionAt (song, at (0.0), nullptr);
     }
-
-    const auto state = song.getState();
-    const auto automationAt = state.indexOf (state.getChildWithName (phazite::schema::AUTOMATION));
-    REQUIRE (automationAt >= 0);
-    REQUIRE (automationAt < state.indexOf (state.getChildWithName (phazite::schema::SECTIONS)));
 
     auto version = phazite::test::copyWholeSong (song);
     version.removeChild (version.getChildWithName (phazite::schema::AUTOMATION), nullptr);
@@ -683,7 +621,6 @@ TEST_CASE ("Song values' curves: a version without automation applied takes the 
     song.getValues()->removeListener (&told);
 
     CHECK (actions == 1);
-    CHECK (state.indexOf (state.getChildWithName (phazite::schema::AUTOMATION)) == automationAt);
     CHECK (typesOf (phazite::test::copyWholeSong (song)) == typesOf (version));
     CHECK (describe (told.parameters) == describe (std::vector { volume, pan, otherVolume }));
     CHECK (told.curves == 3); // the step, its Undo, its Redo: each the three at once
@@ -774,6 +711,7 @@ TEST_CASE ("Song values' curves: the song made as it was copied after an automat
     putPoints (song, volume, { { at (0.0), 0.5f }, { at (4.0), 0.8f } });
     putPoints (song, pan, { { at (2.0), 0.3f } });
     const auto copy = phazite::test::copyWholeSong (song);
+    const auto copyState = phazite::getSongState (song);
 
     {
         const phazite::UndoStep step (song, "Edit");
@@ -782,10 +720,9 @@ TEST_CASE ("Song values' curves: the song made as it was copied after an automat
     }
 
     phazite::undo (song);
-    TreeHeard tree { song.getState() };
-    phazite::makeSongAsCopied (song, copy);
-    CHECK (tree.curves == 0);
-    CHECK (tree.automationWithCurves == 0);
+    AreaMoves area { song.getValues()->curves };
+    phazite::makeSongAsCopied (song, copyState);
+    CHECK (area.moves == 0);
     CHECK (writeAutomation (phazite::test::copyWholeSong (song)) == writeAutomation (copy));
 }
 
@@ -872,148 +809,4 @@ TEST_CASE ("Song values' curves: a merge's clash on a curve is chosen each way t
     CHECK_FALSE (phazite::getCurveValue (*ours, volume).has_value());
     undo.walkBackAndForth();
     phazite::test::checkSong (*ours);
-}
-
-TEST_CASE ("Song values' curves: the keeper takes in a curve added to the song's AUTOMATION outside the history, its points given "
-           "keys, and refuses one added in a step")
-{
-    // Its safety net (SongValues.h, CurvesArea.h), which the versions never leave anything to (ApplySong.cpp: NothingTakenIn).
-    phazite::test::TestSong s;
-    auto& song = *phazite::findSong (s.context);
-    auto& values = *song.getValues();
-    const auto volume = s.getVolumeParameter (s.firstTrack), pan = s.getPanParameter (s.firstTrack);
-    putPoints (song, volume, { { at (0.0), 0.5f } });
-    const auto adoptedBefore = values.countCurvesAdopted();
-    const auto element = [] (const phazite::ParameterRef& parameter, std::initializer_list<phazite::PointValue> points)
-    {
-        phazite::CurveValue curve;
-
-        for (const auto& point : points)
-            curve.points = curve.points.push_back (point);
-
-        juce::ValueTree automation (phazite::schema::AUTOMATION);
-        phazite::writeCurveElement (parameter, curve, automation);
-        auto written = automation.getChild (0);
-        automation.removeChild (written, nullptr);
-        return written;
-    };
-
-    // A curve added outside the history: its points the song's, each with a key of its own, after the others; the element
-    // taken out again.
-    {
-        const phazite::Song::OutsideHistory outside (song);
-        song.getState()
-            .getChildWithName (phazite::schema::AUTOMATION)
-            .appendChild (
-                element (pan, { { phazite::BeatPosition::fromBeats (1.0), 0.25f }, { phazite::BeatPosition::fromBeats (2.0), 0.75f } }),
-                nullptr);
-    }
-
-    CHECK (phazite::getCurveKeys (song) == std::vector { volume, pan });
-    REQUIRE (phazite::getPoints (song, pan).size() == 2);
-    const auto keys = phazite::getPointKeys (song, pan);
-    CHECK (keys[0] != 0);
-    CHECK (keys[1] != 0);
-    CHECK (keys[0] != keys[1]);
-    CHECK (song.getState().getChildWithName (phazite::schema::AUTOMATION).getNumChildren() == 0);
-    CHECK (values.countCurvesAdopted() == adoptedBefore + 1);
-    phazite::test::checkSong (song);
-
-    // A curve added by itself in a step: refused (automation's functions change the curves), the curves as they were; the
-    // step undone takes it out again.
-    const auto held = phazite::getCurvesValue (song);
-
-    {
-        const phazite::test::ExpectedAssertion refused ("CurvesArea.cpp");
-        const phazite::UndoStep step (song, "A Lone Curve");
-        song.getState()
-            .getChildWithName (phazite::schema::AUTOMATION)
-            .appendChild (element (volume, { { phazite::BeatPosition::fromBeats (4.0), 0.1f } }), &song.getUndoManager());
-#if JUCE_DEBUG
-        CHECK (refused.getCount() == 1);
-#endif
-    }
-
-    CHECK (phazite::getCurvesValue (song).isSameAs (held));
-    CHECK (values.countCurvesAdopted() == adoptedBefore + 1);
-    phazite::undo (song);
-    CHECK (song.getState().getChildWithName (phazite::schema::AUTOMATION).getNumChildren() == 0);
-    phazite::test::checkSong (song);
-}
-
-TEST_CASE ("Song values' curves: the keeper refuses an AUTOMATION added to the song, its curves unread, the song keeping its own, "
-           "outside the history and in a step")
-{
-    // Every song that holds its values has its AUTOMATION from then on (CurvesArea.h: adopt()), which nothing adds or takes
-    // out: another is a second, into which a whole copy would write the curves too. Refused, a JUCE assertion, in either mode:
-    // taken out again outside the history; left in a step, whose Undo takes it out (JUCE workaround W62).
-    phazite::test::TestSong s;
-    auto& song = *phazite::findSong (s.context);
-    auto& values = *song.getValues();
-    auto state = song.getState();
-    const auto volume = s.getVolumeParameter (s.firstTrack), pan = s.getPanParameter (s.firstTrack);
-    putPoints (song, volume, { { at (0.0), 0.5f } });
-    const auto held = phazite::getCurvesValue (song);
-    const auto adoptedBefore = values.countCurvesAdopted();
-    const auto own = state.getChildWithName (phazite::schema::AUTOMATION);
-    REQUIRE (own.isValid());
-
-    // Another AUTOMATION with a curve in it.
-    const auto second = [&pan]
-    {
-        phazite::CurveValue curve;
-        curve.points = curve.points.push_back ({ phazite::BeatPosition::fromBeats (1.0), 0.25f });
-        juce::ValueTree automation (phazite::schema::AUTOMATION);
-        phazite::writeCurveElement (pan, curve, automation);
-        return automation;
-    };
-
-    const auto countAutomations = [&state]
-    {
-        auto count = 0;
-
-        for (const auto& child : state)
-            count += child.hasType (phazite::schema::AUTOMATION) ? 1 : 0;
-
-        return count;
-    };
-
-    // Outside the history: taken out again, the song's own kept, empty, and its curves as they were.
-    {
-        const phazite::test::ExpectedAssertion refused ("CurvesArea.cpp");
-        const phazite::Song::OutsideHistory outside (song);
-        state.appendChild (second(), nullptr);
-#if JUCE_DEBUG
-        CHECK (refused.getCount() == 1);
-#endif
-    }
-
-    CHECK (countAutomations() == 1);
-    CHECK (state.getChildWithName (phazite::schema::AUTOMATION) == own);
-    CHECK (own.getNumChildren() == 0);
-    CHECK (phazite::getCurvesValue (song).isSameAs (held));
-    CHECK (values.countCurvesAdopted() == adoptedBefore);
-    phazite::test::checkSong (song);
-
-    // In a step: left to the step's Undo, which takes it out, the curves as they were throughout; the check finds the
-    // second meanwhile.
-    {
-        const phazite::test::ExpectedAssertion refused ("CurvesArea.cpp");
-        const phazite::UndoStep step (song, "A Second Automation");
-        state.appendChild (second(), &song.getUndoManager());
-#if JUCE_DEBUG
-        CHECK (refused.getCount() == 1);
-#endif
-    }
-
-    CHECK (countAutomations() == 2);
-    CHECK (phazite::getCurvesValue (song).isSameAs (held));
-    CHECK (values.countCurvesAdopted() == adoptedBefore);
-    const auto problems = phazite::test::findValueProblems (song);
-    CHECK (std::find (problems.begin(), problems.end(), "values: the song has more than one AUTOMATION") != problems.end());
-    phazite::undo (song);
-    CHECK (countAutomations() == 1);
-    CHECK (state.getChildWithName (phazite::schema::AUTOMATION) == own);
-    CHECK (phazite::getCurvesValue (song).isSameAs (held));
-    phazite::test::checkSong (song);
 }

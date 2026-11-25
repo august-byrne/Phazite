@@ -36,8 +36,7 @@ struct PlayedClip;
 struct SongModulation;
 struct TrackValue;
 
-class SongPlayer : private juce::ValueTree::Listener,
-                   private SongValues::Listener
+class SongPlayer : private SongValues::Listener
 {
 public:
     // A song's, with its plug-ins' instances (those of its session: none play without).
@@ -313,48 +312,38 @@ private:
     // changed: in a big song a change is in one track, and its notes are many.
     std::map<std::int64_t, std::shared_ptr<const engine::NoteSequence>> notes;
     std::set<std::int64_t> usedNotes;
-    juce::ValueTree songState;
     std::shared_ptr<const engine::NoteSequence> getNotes (const TrackValue& trackState);
-    void markChange (const juce::ValueTree& changed); // an element added, removed or moved in it
-    void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override;
-    void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override;
-    void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int newIndex) override;
     void clipNotesChanged (const std::vector<ClipID>&) override;
     void clipsChanged (const std::vector<SongValues::ClipChange>&, const std::vector<TrackID>& reordered) override;
     void tempoMapChanged() override { changes.tempo = true; } // every track's audio, which plays in seconds
 
-    // The chord lane (SongValues.h: chordLaneChanged()): nothing, as nothing a plan holds reads chords or keys; its tree
-    // callbacks leave what is in the song's CHORDLANE alone (isHeardAsKept()). Nor the MIDI links (midiLinksChanged()), which
-    // no plan holds (the session gives the MIDI tap them: PlaybackSession.h); its tree callbacks leave what is in the song's
-    // MIDILINKS alone too.
+    // The chord lane (SongValues.h: chordLaneChanged()): nothing, as nothing a plan holds reads chords or keys. Nor the MIDI
+    // links (midiLinksChanged()), which no plan holds (the session gives the MIDI tap them: PlaybackSession.h).
 
-    // The sections (SongValues.h: sectionsChanged()): nothing, as nothing a plan holds reads them; its tree callbacks leave what
-    // is in the song's SECTIONS alone (isHeardAsKept()), and its SECTIONS's own coming and going marks nothing that plays.
+    // The sections (SongValues.h: sectionsChanged()): nothing, as nothing a plan holds reads them.
 
     // The song's own (SongValues.h: songOwnChanged(), songStandingChanged(), songOutsideChanged()): nothing. What a plan holds
     // of it, the loop and the metronome, the next compile reads (compile(): getLoop(), isMetronomeOn()), which the playback
-    // session makes for a change of either (PlaybackSession.h); nothing that plays reads the rest. Its tree callbacks leave
-    // the root's own properties and its LASTKEY, PIANOROLL and MERGING alone (isHeardAsKept()), which marked the song's
-    // element, read by no compile, as a child of the root that counts.
+    // session makes for a change of either (PlaybackSession.h); nothing that plays reads the rest.
 
     // The curves that changed (SongValues.h), each read again by the next compile.
     void curvesChanged (const std::vector<ParameterRef>&) override;
 
-    // The modulators and macros that changed (SongValues.h; its tree callbacks leave the song's MODULATOR and MACRO elements
-    // and what is in them alone, isHeardAsKept()): the channels they were on and are on, and those whose modulators came in
+    // The modulators and macros that changed (SongValues.h):
+    // the channels they were on and are on, and those whose modulators came in
     // another order, their devices read again by the next compile (as a change under one of its modulators marked its
     // channel), whatever part changed, a value the session takes at once (takeModulator()) too.
     void modulationChanged (const std::vector<SongValues::ModulationChange>&, const std::vector<ModulatorPlace>& reordered) override;
 
-    // The sends that changed (SongValues.h; the song's tree holds none): the channels a send was added to, taken out of or
+    // The sends that changed (SongValues.h): the channels a send was added to, taken out of or
     // came to and from, and those whose sends came in another order, their devices read again by the next compile (as a
     // send added to or taken out of its track marks the track's channel); a send's route or level marks nothing (every plan
     // reads every track's sends: getChannels()), and the session plays a level at once (takeSendLevel()). And the song's sends
     // as they are now kept (heldSends): the area's value the teller hands the listener.
     void sendsChanged (const std::vector<SongValues::SendChange>&, const std::vector<TrackID>& reordered, const SongSends& now) override;
 
-    // The devices, containers and chains that changed (SongValues.h; its tree callbacks leave what the devices' value covers
-    // alone, isHeardAsKept()): the channels each was on and is on (the master's under 0), and those whose devices came in
+    // The devices, containers and chains that changed (SongValues.h):
+    // the channels each was on and is on (the master's under 0), and those whose devices came in
     // another order, their devices read again by the next compile, whatever part changed, a value the session takes at once
     // (takeDevice()) too, as a change at or under a device marked its channel; the sounds of each device that came (made:
     // Changes::sounds), and of each whose sounds were set in place, its first and its last among them (soundsSet). And what
@@ -362,14 +351,14 @@ private:
     void devicesChanged (const std::vector<SongValues::DeviceChange>&, const std::vector<DevicePlace>& reordered,
                          const SongDevices& now) override;
 
-    // What the devices' store changed (SongValues.h; the song's tree holds none of it): the channel of a plug-in whose first
+    // What the devices' store changed (SongValues.h): the channel of a plug-in whose first
     // value set by hand came or whose last went, and of a chain muted or soloed, its devices read again by the next compile
     // (as a VALUE added or taken out, a CHAIN's switch, marked its channel); a plug-in's state, program, format ID and version
     // nothing, nor a value set by hand in place (the plug-in keeps it). The store as it is now kept (heldStore), which a
     // chain's mute and solo are read from.
     void deviceStoreChanged (const std::vector<SongValues::DeviceStoreChange>&, const DeviceStore& now) override;
 
-    // The tracks that changed (SongValues.h; its tree callbacks leave what the tracks' values cover alone, isHeardAsKept()):
+    // The tracks that changed (SongValues.h):
     // a track added or taken out (made, or come to another folder), its notes and audio and its channel read again by the next
     // compile, and the channel of the folder it was in and is in, as a TRACK added to its parent or taken out of it marked
     // them; the master's element put in or taken out, its channel; the folders whose tracks came in another order, their
@@ -389,7 +378,7 @@ private:
     // this header doesn't see the tracks' values' names.
     struct HeldTracks;
     std::unique_ptr<HeldTracks> heldTracks;
-    void holdTracks(); // from what the keeper told (or the song's tree, for a song without values), as a compile begins
+    void holdTracks();                                                  // from the tracks' and the switches' areas, as the player is made
     void setChannelFrom (const SongTracks&, const TrackValue& channel); // its fader as takeTracks() takes it
 
     // What decides what is heard between plans (updateAudibility(), which a track muted or soloed asks as the values tell it,

@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The devices' part of the keeper (roadmap step S5.20, the devices' switch: model/base/internal/DevicesArea.h), now that the
-// song's devices, containers and chains are its values' (SongValues.h: devices) and its tree holds none: a track's devices go
-// with it and come back with it, a container's macros go with the container (model/mixer/internal/Mixer.h:
-// forgetWhatNamesTheGone()), and what is made, copied or chosen gives the song its
-// devices through the devices' setters, never through the keeper's safety net (countDevicesAdopted()), which takes in a
-// track that comes in with them and refuses a lone one in a step. Each change one exact undo step (UndoCheck.h).
+// The devices as values of the song (roadmap step S5.20, the devices' switch: model/base/internal/DevicesArea.h): a track's
+// devices go with it and come back with it, a container's macros go with the container (model/mixer/internal/Mixer.h:
+// forgetWhatNamesTheGone()), and what is made, copied or chosen gives the song its devices through the devices' setters.
+// Each change one exact undo step (UndoCheck.h).
 //   phazite_tests.exe --test-case="Devices' keeper*"
 #include "SongCheck.h"
 #include "TestDeviceValues.h"
@@ -18,7 +16,6 @@
 #include "devices/eq/Equalizer.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/DevicesArea.h"
-#include "model/base/internal/Schema.h"
 #include "model/base/internal/SongValues.h"
 #include "model/base/internal/TracksValue.h"
 #include "model/base/internal/WholeState.h"
@@ -42,17 +39,6 @@ namespace
 namespace dev = phazite::devices;
 using phazite::DeviceID;
 using phazite::TrackID;
-
-// Whether the song's tree holds a device's element anywhere: it holds none (the devices' area does).
-bool holdsDeviceElement (const juce::ValueTree& element)
-{
-    for (const auto& child : element)
-        if (child.hasType (phazite::schema::DEVICE) || child.hasType (phazite::schema::CONTAINER) || child.hasType (phazite::schema::CHAIN)
-            || holdsDeviceElement (child))
-            return true;
-
-    return false;
-}
 } // namespace
 
 TEST_CASE ("Devices' keeper: a track's devices go with its deletion and come back with its Undo, stay through a folder, a "
@@ -63,7 +49,6 @@ TEST_CASE ("Devices' keeper: a track's devices go with its deletion and come bac
     phazite::test::TestSong s;
     auto& song = *phazite::findSong (s.context);
     auto& context = s.context;
-    const auto& values = *song.getValues();
     const auto track = s.firstTrack;
     const auto other = s.addTrack ("Other");
     const auto equalizer = s.addEffect (track, "phaziteEq");
@@ -91,8 +76,6 @@ TEST_CASE ("Devices' keeper: a track's devices go with its deletion and come bac
     s.setMacroValue (macros[0], 0.5f);
     const auto before = phazite::getDevicesValue (song);
     const auto modulationBefore = phazite::getModulationValue (song);
-    const auto adopted = values.countDevicesAdopted();
-    CHECK_FALSE (holdsDeviceElement (song.getState()));
     phazite::test::UndoCheck undo (context);
 
     // (a) The track deleted: its devices, its container with its chain and its devices, and its plug-in go with it, erased as
@@ -139,8 +122,6 @@ TEST_CASE ("Devices' keeper: a track's devices go with its deletion and come bac
     CHECK (phazite::isContainer (song, copiedContainer));
     CHECK (copiedContainer != container);
     CHECK (phazite::getContainerMacros (song, copiedContainer).size() == 8);
-    CHECK (values.countDevicesAdopted() == adopted);
-    CHECK (values.countModulationAdopted() == 0);
     phazite::test::checkSong (song);
 
     // A preset of the container added to the other track: its chain and its devices set with it, its macros too, none taken in.
@@ -157,8 +138,6 @@ TEST_CASE ("Devices' keeper: a track's devices go with its deletion and come bac
     CHECK (phazite::isContainer (song, made));
     CHECK (phazite::getContainerDevices (song, made).size() == 1);
     CHECK (phazite::getContainerMacros (song, made).size() == 8);
-    CHECK (values.countDevicesAdopted() == adopted);
-    CHECK_FALSE (holdsDeviceElement (song.getState()));
     phazite::test::checkSong (song);
     undo.walkBackAndForth();
     phazite::test::checkSong (song);
@@ -193,89 +172,5 @@ TEST_CASE ("Devices' keeper: a track deleted and brought back by Undo, whose dev
     phazite::test::checkSong (song);
     undo.walkBackAndForth();
     CHECK_FALSE (phazite::hasDevice (song, equalizer));
-    phazite::test::checkSong (song);
-}
-
-TEST_CASE ("Devices' keeper: a lone device added to the master in a step is refused and one outside the history read in; a track "
-           "that comes in with devices outside the history has them taken in by the tracks' safety net, one of an ID the song "
-           "holds dropped")
-{
-    // The master's element, the one channel the song's tree still holds (a place: the tracks are values, roadmap step S5.20,
-    // the tracks' switch), takes the lone device; a TRACK that comes in is the tracks' part of the keeper's (TracksArea.h),
-    // which reads its devices through the devices' reader of a channel (DevicesArea.h: takeChannelDevicesIn()), outside the
-    // history alone (in a step it is refused: SongValuesTracksKeeperTests.cpp).
-    phazite::test::TestSong s;
-    auto& song = *phazite::findSong (s.context);
-    const auto& values = *song.getValues();
-    const auto track = s.firstTrack;
-    const auto held = s.addEffect (track, "phaziteEq");
-
-    // (c) A lone one in a step: refused (the element can't be taken out in the step that adds it: JUCE workaround W62,
-    // docs/juce-workarounds.md), the song's devices as they were; its step's Undo takes the element out again.
-    auto masterState = song.getState().getChildWithName (phazite::schema::MASTER);
-    const auto loneID = DeviceID::fromRaw (song.makeID());
-    phazite::DeviceValue loneValue;
-    loneValue.id = loneID;
-    loneValue.form = phazite::DeviceValue::Form::own;
-    loneValue.type = dev::Delay::typeID;
-    const auto lone = phazite::writeDeviceElement (loneValue);
-    const auto before = phazite::getDevicesValue (song);
-    const auto onMaster = phazite::getDevices (song, {});
-
-    {
-        const phazite::test::ExpectedAssertion refused ("DevicesArea.cpp");
-        const phazite::UndoStep step (song, "A Lone Device");
-        masterState.appendChild (lone.createCopy(), &song.getUndoManager());
-#if JUCE_DEBUG
-        CHECK (refused.getCount() == 1);
-#endif
-    }
-
-    CHECK (phazite::getDevicesValue (song) == before);
-    phazite::undo (song);
-    CHECK_FALSE (holdsDeviceElement (song.getState()));
-
-    // Outside the history: read in, as the song holds one, after the master's others, and taken out.
-    const auto adoptedBefore = values.countDevicesAdopted();
-
-    {
-        const phazite::Song::OutsideHistory outside (song);
-        masterState.appendChild (lone.createCopy(), nullptr);
-    }
-
-    auto expected = onMaster;
-    expected.push_back (loneID);
-    CHECK (values.countDevicesAdopted() == adoptedBefore + 1);
-    CHECK (phazite::getDevices (song, {}) == expected);
-    CHECK_FALSE (holdsDeviceElement (song.getState()));
-
-    // (b) A track that comes in whole with its devices' elements, outside the history: the tracks' safety net takes it in with
-    // its own device (counted, by the devices' count and as a track taken in), the one under an ID the song holds dropped (the
-    // song's kept, on its track), none left in the tree. The track given a second device first (the lone one went to the
-    // master).
-    s.addEffect (track, "phaziteDelay");
-    auto incoming = phazite::test::copyTrack (song, track);
-    phazite::giveNewIDs (song, incoming);
-    auto devicesIn = 0;
-
-    for (auto child : incoming)
-        if (child.hasType (phazite::schema::DEVICE) && devicesIn++ == 0)
-            child.setProperty (phazite::schema::deviceID, (juce::int64) held.getRaw(), nullptr); // the song's device's ID
-
-    REQUIRE (devicesIn == 2);
-    const auto came = phazite::readTrackElementID (incoming);
-    const auto adoptedThen = values.countDevicesAdopted();
-    const auto tracksThen = values.countTracksAdopted();
-
-    {
-        const phazite::Song::OutsideHistory outside (song);
-        song.getState().getChildWithName (phazite::schema::TRACKS).appendChild (incoming, nullptr);
-    }
-
-    CHECK (values.countDevicesAdopted() == adoptedThen + 1);
-    CHECK (values.countTracksAdopted() == tracksThen + 1);
-    REQUIRE (phazite::getDevices (song, came).size() == 1);
-    CHECK (phazite::getDeviceChannel (song, held) == track);
-    CHECK_FALSE (holdsDeviceElement (song.getState()));
     phazite::test::checkSong (song);
 }

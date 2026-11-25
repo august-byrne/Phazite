@@ -1,15 +1,13 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
-// The song's sections as an area of its values (model/base/internal/SongValues.h, SectionsArea.h; roadmap step S5.20, the
-// sections' switch). What hears the sections change hears it from one place (Listener::sectionsChanged()), which the
-// sections' area tells, by the IDs of the sections added, taken out or changed: for each edit made through the model, once for
-// each change of the value, its Undo and its Redo once, and nothing of another area; another area's change tells it nothing.
-// What listens to the song's root hears what is in the song's SECTIONS from the area alone, and the SECTIONS's own coming and
-// going (with the first section) from the tree. The keeper takes in a SECTIONS that comes with sections, and refuses a lone
-// SECTION added in an undo step; a set equal to the sections held makes no step; every edit (the edits of time, copy and
-// paste) is one exact undo step; a section selected stays so across its removal's Undo, as the selection holds it by its ID;
-// a pasted section's ID is past every ID the song holds; the project's unsaved check compares them as one value; and the
-// versions give the song another's sections, or none, through the sections' code, the whole song's and the song's own line
-// alike, and a merge's clash on a section's property or on a whole section is chosen each way.
+// SPDX-License-Identifier: AGPL-3.0-or-later The song's sections as an area of its values (model/base/internal/SongValues.h,
+// SectionsArea.h; roadmap step S5.20, the sections' switch). What hears the sections change hears it from one place
+// (Listener::sectionsChanged()), which the sections' area tells, by the IDs of the sections added, taken out or changed: for each
+// edit made through the model, once for each change of the value, its Undo and its Redo once, and nothing of another area;
+// another area's change tells it nothing. A song's file writes a SECTIONS while the song has a section, and none for an empty
+// list. A set equal to the sections held makes no step; every edit (the edits of time, copy and paste) is one exact undo step; a
+// section selected stays so across its removal's Undo, as the selection holds it by its ID; a pasted section's ID is past every
+// ID the song holds; the project's unsaved check compares them as one value; and the versions give the song another's sections,
+// or none, through the sections' code, the whole song's and the song's own line alike, and a merge's clash on a section's
+// property or on a whole section is chosen each way.
 //   phazite_tests.exe --test-case="Song values' sections*"
 #include "SongCheck.h"
 #include "TestClips.h"
@@ -71,55 +69,7 @@ struct Told final : phazite::SongValues::Listener
     std::set<SectionID> named;
 };
 
-// What a listener of the song's root is told: inside the song's SECTIONS, of the SECTIONS itself (added or taken out), and all
-// else.
-struct TreeHeard final : juce::ValueTree::Listener
-{
-    explicit TreeHeard (const juce::ValueTree& rootToHear)
-        : root (rootToHear)
-    {
-        root.addListener (this);
-    }
-
-    ~TreeHeard() override { root.removeListener (this); }
-
-    static bool isInSections (juce::ValueTree element)
-    {
-        for (; element.isValid(); element = element.getParent())
-            if (element.hasType (schema::SECTIONS))
-                return true;
-
-        return false;
-    }
-
-    void hear (const juce::ValueTree& element)
-    {
-        if (isInSections (element))
-            ++inSections;
-        else
-            ++other;
-    }
-
-    void hearChild (const juce::ValueTree& parent, const juce::ValueTree& child)
-    {
-        if (child.hasType (schema::SECTIONS))
-            ++place;
-        else
-            hear (parent);
-    }
-
-    void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&) override { hear (tree); }
-
-    void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override { hearChild (parent, child); }
-    void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override { hearChild (parent, child); }
-    void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override { hear (parent); }
-
-    juce::ValueTree root;
-    int inSections = 0, place = 0, other = 0;
-};
-
-// A song in a project of its own, with its versions, the values' listener and a listener of its root recording what they
-// are told.
+// A song in a project of its own, with its versions and the values' listener recording what they are told.
 struct Watched
 {
     Watched()
@@ -133,7 +83,6 @@ struct Watched
     struct Heard
     {
         Told told;
-        int inSections = 0, place = 0, other = 0;
         juce::int64 project = 0, versions = 0;
         std::uint64_t ids = 0; // how far the song's count of IDs moved on (Song.h: makeID())
     };
@@ -143,17 +92,11 @@ struct Watched
         auto* versions = phazite::getVersionHistory (s.context);
         REQUIRE (versions != nullptr);
         told = {};
-        tree.inSections = tree.place = tree.other = 0;
         const auto projectBefore = s.getProject().getChangeCount();
         const auto versionsBefore = versions->countSongChanges();
         const auto idsBefore = phazite::getNextID (song);
         change();
-        return { told,
-                 tree.inSections,
-                 tree.place,
-                 tree.other,
-                 s.getProject().getChangeCount() - projectBefore,
-                 versions->countSongChanges() - versionsBefore,
+        return { told, s.getProject().getChangeCount() - projectBefore, versions->countSongChanges() - versionsBefore,
                  phazite::getNextID (song) - idsBefore };
     }
 
@@ -172,7 +115,6 @@ struct Watched
     phazite::test::TestSong s;
     phazite::Song& song = *phazite::findSong (s.context);
     Told told;
-    TreeHeard tree { song.getState() };
 };
 
 phazite::SectionsValue heldSections (const phazite::Song& song)
@@ -182,7 +124,7 @@ phazite::SectionsValue heldSections (const phazite::Song& song)
 
 bool hasSectionsPlace (const phazite::Song& song)
 {
-    return song.getState().getChildWithName (schema::SECTIONS).isValid();
+    return phazite::test::copyWholeSong (song).getChildWithName (schema::SECTIONS).isValid();
 }
 
 std::set<SectionID> idsOf (std::initializer_list<SectionID> ids)
@@ -224,12 +166,11 @@ TEST_CASE ("Song values' sections: each edit through the model tells the section
     REQUIRE_FALSE (hasSectionsPlace (song));
     SectionID verse, chorus, bridge;
 
-    // The edit that makes the first section is heard twice by what counts: its SECTIONS added by the tree, its section by the
-    // area. Every other edit only by the area, the tree telling nothing inside the song's SECTIONS. An edit that writes the
-    // sections more than once in its step (an edit of time and the section after it) is told each write; its Undo and its
-    // Redo once, the whole step's.
+    // Every edit is heard by what counts from the area alone, the first section's too. An edit that writes the sections more
+    // than once in its step (an edit of time and the section after it) is told each write; its Undo and its Redo once, the
+    // whole step's.
     const auto check = [&w] (const juce::String& name, const std::function<void()>& change,
-                             const std::function<std::set<SectionID>()>& named, int writes = 1, bool makesThePlace = false, int idsMade = 0)
+                             const std::function<std::set<SectionID>()>& named, int writes = 1, int idsMade = 0)
     {
         INFO (name.toStdString());
         const std::array<const char*, 3> moments { "the step", "its Undo", "its Redo" };
@@ -247,11 +188,8 @@ TEST_CASE ("Song values' sections: each edit through the model tells the section
             CHECK (heard[i].told.tempo == 0);
             CHECK (heard[i].told.chords == 0);
             CHECK (heard[i].told.links == 0);
-            CHECK (heard[i].other == 0);
-            CHECK (heard[i].inSections == 0);
-            CHECK (heard[i].place == (makesThePlace ? 1 : 0));
-            CHECK (heard[i].project == heard[i].told.sections + heard[i].place);
-            CHECK (heard[i].versions == heard[i].told.sections + heard[i].place);
+            CHECK (heard[i].project == heard[i].told.sections);
+            CHECK (heard[i].versions == heard[i].told.sections);
 
             // The song's count of IDs moves on in the step alone (no Undo takes it back), told to no one: neither the project
             // nor the versions count it (Song.h: makeID()).
@@ -262,11 +200,10 @@ TEST_CASE ("Song values' sections: each edit through the model tells the section
         }
     };
 
-    check (
-        "Add Section", [&] { verse = phazite::addSectionAt (w.song, at (0.0), nullptr); }, [&] { return idsOf ({ verse }); }, 1, true, 1);
+    check ("Add Section", [&] { verse = phazite::addSectionAt (w.song, at (0.0), nullptr); }, [&] { return idsOf ({ verse }); }, 1, 1);
     CHECK (hasSectionsPlace (song));
-    check ("Add Section", [&] { chorus = phazite::appendSection (w.song, nullptr); }, [&] { return idsOf ({ chorus }); }, 1, false, 1);
-    check ("Add Section", [&] { bridge = phazite::appendSection (w.song, nullptr); }, [&] { return idsOf ({ bridge }); }, 1, false, 1);
+    check ("Add Section", [&] { chorus = phazite::appendSection (w.song, nullptr); }, [&] { return idsOf ({ chorus }); }, 1, 1);
+    check ("Add Section", [&] { bridge = phazite::appendSection (w.song, nullptr); }, [&] { return idsOf ({ bridge }); }, 1, 1);
     check ("Rename Section", [&] { phazite::renameSection (w.song, verse, "Intro"); }, [&] { return idsOf ({ verse }); });
     check (
         "Change Section Color", [&] { phazite::setSectionColour (w.song, chorus, juce::Colours::orange); },
@@ -286,24 +223,23 @@ TEST_CASE ("Song values' sections: each edit through the model tells the section
     // Copied right after the last: no room to make for it (the time inserted moves nothing: no write), then the copy pasted,
     // with an ID of its own.
     SectionID copy;
-    check (
-        "Copy Section", [&] { copy = phazite::duplicateSection (w.song, bridge, false); }, [&] { return idsOf ({ copy }); }, 1, false, 1);
+    check ("Copy Section", [&] { copy = phazite::duplicateSection (w.song, bridge, false); }, [&] { return idsOf ({ copy }); }, 1, 1);
     CHECK (copy.isValid());
 
     // Copied to the song's start: room made (one write, every section moved), then the copy pasted (another).
     SectionID first;
     check (
         "Copy Section", [&] { first = phazite::copySection (w.song, copy, at (0.0), false); },
-        [&] { return idsOf ({ first, chorus, verse, bridge, copy }); }, 2, false, 1);
+        [&] { return idsOf ({ first, chorus, verse, bridge, copy }); }, 2, 1);
     check (
         "Delete Section", [&] { phazite::deleteSection (w.song, first); }, [&] { return idsOf ({ first, chorus, verse, bridge, copy }); });
     CHECK (heldSections (song).sections.size() == 4);
 
     check ("Delete Section", [&] { phazite::deleteSection (w.song, chorus); }, [&] { return idsOf ({ chorus, verse, bridge, copy }); });
 
-    // Every section taken away: its SECTIONS stays, empty.
+    // Every section taken away: an empty list, which a file writes no SECTIONS for.
     check ("Remove Sections", [&] { phazite::removeSections (w.song); }, [&] { return idsOf ({ verse, bridge, copy }); });
-    CHECK (hasSectionsPlace (song));
+    CHECK_FALSE (hasSectionsPlace (song));
     CHECK (heldSections (song).sections.empty());
     phazite::test::checkSong (song);
 
@@ -344,8 +280,6 @@ TEST_CASE ("Song values' sections: another area's change tells nothing of the se
         for (const auto& heard : w.hearEach (name, change))
         {
             CHECK (heard.told.sections == 0);
-            CHECK (heard.inSections == 0);
-            CHECK (heard.place == 0);
         }
     };
 
@@ -354,99 +288,6 @@ TEST_CASE ("Song values' sections: another area's change tells nothing of the se
     check ("Change Tempo", [&] { phazite::setTempo (song, 100.0); });
     check ("Rename Track", [&] { phazite::setTrackName (song, track, "Renamed"); });
     check ("Add Track", [&] { CHECK (phazite::insertTrack (song, track, nullptr).isValid()); });
-}
-
-TEST_CASE ("Song values' sections: the keeper takes in a SECTIONS that comes into the song with sections, and one added outside "
-           "the history, and refuses a lone section added in a step")
-{
-    // Its safety net (SongValues.h), which the versions never leave anything to (ApplySong.cpp, Sections.cpp).
-    auto song = phazite::createSong();
-    auto& values = *song->getValues();
-    REQUIRE_FALSE (hasSectionsPlace (*song));
-    phazite::test::UndoCheck undo (*song);
-    const auto adoptedBefore = values.countSectionsAdopted();
-
-    const auto makeSection = [&song] (const juce::String& name, double start)
-    {
-        phazite::SectionValue section;
-        section.id = SectionID::fromRaw (song->makeID());
-        section.start = at (start);
-        section.length = lasting (8.0);
-        section.name = name;
-        return section;
-    };
-
-    const auto verse = makeSection ("Verse", 0.0), chorus = makeSection ("Chorus", 8.0);
-
-    // A SECTIONS with three sections (the third the first's ID again, which goes), in a step: its sections the song's, its
-    // element empty, what Phazite doesn't know of it gone with them.
-    undo.check ("Take In Sections",
-                [&]
-                {
-                    const phazite::UndoStep step (*song, "Take In Sections");
-                    juce::ValueTree sections (schema::SECTIONS);
-                    sections.appendChild (phazite::writeSectionElement (verse), nullptr);
-                    sections.appendChild (phazite::writeSectionElement (chorus), nullptr);
-                    auto again = verse;
-                    again.name = "Again";
-                    sections.appendChild (phazite::writeSectionElement (again), nullptr);
-                    sections.setProperty ("unknownToPhazite", 1, nullptr);
-                    sections.appendChild (juce::ValueTree ("UNKNOWNTOPHAZITE"), nullptr);
-                    song->getState().appendChild (sections, &song->getUndoManager());
-                });
-
-    REQUIRE (hasSectionsPlace (*song));
-    REQUIRE (heldSections (*song).sections.size() == 2);
-    CHECK (heldSections (*song).sections[0] == verse);
-    CHECK (heldSections (*song).sections[1] == chorus);
-    CHECK (song->getState().getChildWithName (schema::SECTIONS).getNumChildren() == 0);
-    CHECK (song->getState().getChildWithName (schema::SECTIONS).getNumProperties() == 0);
-    CHECK (values.countSectionsAdopted() == adoptedBefore + 3);
-    phazite::test::checkSong (*song);
-
-    // Undone and redone: the area's own action, nothing taken in again; undone, no sections and no SECTIONS.
-    phazite::undo (*song);
-    CHECK_FALSE (hasSectionsPlace (*song));
-    CHECK (heldSections (*song) == phazite::SectionsValue {});
-    phazite::redo (*song);
-    CHECK (heldSections (*song).sections.size() == 2);
-    CHECK (values.countSectionsAdopted() == adoptedBefore + 3);
-    phazite::test::checkSong (*song);
-
-    // A section added to the song's SECTIONS outside the history: after the others, taken out again.
-    const auto bridge = makeSection ("Bridge", 16.0);
-
-    {
-        const phazite::Song::OutsideHistory outside (*song);
-        song->getState().getChildWithName (schema::SECTIONS).appendChild (phazite::writeSectionElement (bridge), nullptr);
-    }
-
-    REQUIRE (heldSections (*song).sections.size() == 3);
-    CHECK (heldSections (*song).sections.back() == bridge);
-    CHECK (song->getState().getChildWithName (schema::SECTIONS).getNumChildren() == 0);
-    CHECK (values.countSectionsAdopted() == adoptedBefore + 4);
-    phazite::test::checkSong (*song);
-
-    // A section added to the song's SECTIONS by itself in a step: refused (the sections' functions change them), the sections
-    // as they were; the step undone takes it out again.
-    const auto held = heldSections (*song);
-
-    {
-        const phazite::test::ExpectedAssertion refused ("SectionsArea.cpp");
-        const phazite::UndoStep step (*song, "A Lone Section");
-        song->getState()
-            .getChildWithName (schema::SECTIONS)
-            .appendChild (phazite::writeSectionElement (makeSection ("Lone", 24.0)), &song->getUndoManager());
-#if JUCE_DEBUG
-        CHECK (refused.getCount() == 1);
-#endif
-    }
-
-    CHECK (heldSections (*song).isSameAs (held));
-    CHECK (values.countSectionsAdopted() == adoptedBefore + 4);
-    phazite::undo (*song);
-    CHECK (song->getState().getChildWithName (schema::SECTIONS).getNumChildren() == 0);
-    phazite::test::checkSong (*song);
 }
 
 TEST_CASE ("Song values' sections: sections set equal to those the song holds make no undo step, tell nothing and keep the value "
@@ -496,8 +337,7 @@ TEST_CASE ("Song values' sections: the SECTIONS its first section makes goes wit
                     });
     };
 
-    // The first section: the SECTIONS added in the step (the tree's action), then the section (the area's); its Undo takes
-    // both back.
+    // The first section: a file writes a SECTIONS with it; its Undo takes it back, and the SECTIONS with it.
     SectionID verse;
     edit ("Add Section", [&] { verse = phazite::addSectionAt (song, at (0.0), nullptr); });
     REQUIRE (hasSectionsPlace (song));
@@ -530,7 +370,7 @@ TEST_CASE ("Song values' sections: the SECTIONS its first section makes goes wit
     edit ("Move Time", [&] { phazite::moveTime (song, { at (0.0), at (8.0) }, at (24.0)); });
     edit ("Copy Time", [&] { phazite::copyTime (song, { at (0.0), at (16.0) }, at (32.0), false); });
     edit ("Remove Sections", [&] { phazite::removeSections (song); });
-    CHECK (hasSectionsPlace (song));
+    CHECK_FALSE (hasSectionsPlace (song));
     phazite::test::checkSong (song);
     undo.walkBackAndForth();
 }
@@ -672,10 +512,10 @@ TEST_CASE ("Song values' sections: a section's edit is an unsaved change, which 
     phazite::undo (song);
     CHECK (project.isWholeAsSaved());
 
-    // Every section taken away: unsaved, the SECTIONS staying, empty, as the whole song's comparison says; and saved so, a
-    // section made again is a change.
+    // Every section taken away: unsaved, an empty list, which writes no SECTIONS, as the whole song's comparison says; and
+    // saved so, a section made again is a change.
     edit ("Remove Sections", [&] { phazite::removeSections (song); });
-    CHECK (hasSectionsPlace (song));
+    CHECK_FALSE (hasSectionsPlace (song));
     CHECK_FALSE (project.isWholeAsSaved());
     CHECK (project.hasUnsavedChanges());
     REQUIRE (project.save().wasOk());
@@ -688,8 +528,7 @@ TEST_CASE ("Song values' sections: a version's sections, and a version without t
            "song's own line, each one exact undo step")
 {
     // The versions give the song another song's sections through the sections pass (ApplySong.cpp: makeSectionsLike(), through
-    // Sections.h's makeSectionsAs()), its SECTIONS added or taken out with them, never leaving its sections to the keeper. A
-    // restore of the song's own line gives the song another's sections too, as it always did.
+    // Sections.h's makeSectionsAs()). A restore of the song's own line gives the song another's sections too, as it always did.
     SectionsSong s;
     auto& song = *s.song;
     phazite::test::UndoCheck undo (song);
@@ -705,7 +544,6 @@ TEST_CASE ("Song values' sections: a version's sections, and a version without t
     }
 
     const auto other = phazite::test::copyWholeSong (*withSections);
-    const auto adopted = song.getValues()->countSectionsAdopted();
 
     const auto apply = [&] (const juce::String& name, const juce::ValueTree& from, const std::function<void (const juce::ValueTree&)>& make)
     {
@@ -766,7 +604,6 @@ TEST_CASE ("Song values' sections: a version's sections, and a version without t
     CHECK (heldSections (song).isSameAs (before));
     CHECK (hasSectionsPlace (song));
 
-    CHECK (song.getValues()->countSectionsAdopted() == adopted);
     phazite::test::checkSong (song);
     undo.walkBackAndForth();
 }

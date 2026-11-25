@@ -22,9 +22,9 @@ namespace phazite
 {
 class TrackRender;
 
-// A new song, as a new project's starts: its tempo map, its master and one empty track, numbered by the song itself
-// (Schema.h).
-juce::ValueTree makeNewSong();
+// A new song, as a new project's starts, as a state (SongState.h): its tempo map, its master and one empty track, numbered by
+// the song itself (Schema.h). What createSong() and Project::create() make a song of. Message thread.
+SongState makeNewSong();
 
 // A new song, as a new project's starts (Project::create() makes one in a project folder): its tempo map, its track list
 // and one empty track, with no undo steps. Its file, if given, is where its audio files' paths start from. For a song
@@ -34,12 +34,15 @@ Song::Ptr createSong (const juce::File& file = {});
 // Where new projects go unless the user picks another folder: Documents/Phazite/Projects.
 juce::File getDefaultProjectsFolder();
 
-// A song made of a state (Schema.h: PHAZITE, which it takes), with what every song has added (its tempo map, its track list
-// with the master, its next ID), as a project opens. Its file, if given, is where its audio files' paths start from, and
-// its cache folder where its frozen tracks' files are. No undo steps. Nothing for a state that isn't a song. Once it is
-// consistent, its clips with their notes and controllers' values leave the state for values beside it (Song::holdValues()):
-// the state given holds no CLIP element then. Message thread.
+// A song made of a file's tree (Schema.h: PHAZITE), as a project opens: the tree made consistent in place
+// (makeConsistent()), what every song has added to it (its tempo map, its track list with the master, its next ID past every
+// ID it holds, without the curves of what is gone), then read into values (SongState.h: readSongTree()), which the song is
+// made of (Song.h: Song (SongState)), without the frozen files that are gone (on its switches) and playing from its start.
+// And a song made of a state (a new song's, makeNewSong(); another song's), the same from its making on. Its file, if given,
+// is where its audio files' paths start from, and its cache folder where its frozen tracks' files are. No undo steps, and
+// nothing told: no listener is there yet. Nothing for a tree that isn't a song. Message thread.
 Song::Ptr makeSong (const juce::ValueTree& state, const juce::File& file = {}, const juce::File& cacheFolder = {});
+Song::Ptr makeSong (SongState, const juce::File& file = {}, const juce::File& cacheFolder = {});
 
 // The furthest place in beats a song holds anything at, as a file from elsewhere is taken in: a million beats, days of music
 // at any tempo (Schema.h: schema::maxBeats, which the song's ranges are described with).
@@ -58,28 +61,29 @@ inline constexpr double maxSongBeats = schema::maxBeats;
 // past it given anew, what named it following, the song stamped with its new numbering (Schema.h: renumberMark,
 // idNumbering); a lane, a curve or a modulation of something the song hasn't
 // left out, as a sidechain or a pad's sampler that isn't there, and a sidechain the model would refuse, a device hearing
-// its own track's sound round a loop (model/mixer/internal/Sidechain.h: forgetSidechainLoops()); no two elements of a parent with one key (Schema.h:
-// getElementKey()); and, for a song with a file, a sound file on a network share, or one that leaves the project's folder
-// with "..", looked for by its name in the project's Audio folder (a full path of a computer's stays: Phazite writes one
-// where a file couldn't be copied in). No undo steps.
+// its own track's sound round a loop (model/mixer/internal/Sidechain.h: forgetSidechainLoopsIn(), the model's rule on a
+// tree); no two elements of a parent with one key (Schema.h: getElementKey()); and, with a project's folder given, a sound
+// file on a network share, or one that leaves the project's folder with "..", looked for by its name in the project's Audio
+// folder (a full path of a computer's stays: Phazite writes one where a file couldn't be copied in). New IDs it gives come
+// from the tree's count (Schema.h: makeIDIn()). On the tree itself, in place: no song is made of it here.
 // A song read in part (the versions' song of a commit some of whose pieces couldn't be read, with stand-ins for them:
 // model/versions/internal/SongPieces.h, joinSong()) keeps what names an ID it hasn't, which may be in what wasn't read (a
 // send to a return, a curve or a modulation of a device in a lost piece): the song it is taken into, which knows, removes
-// what names nothing there (model/versions/internal/ApplySong.h: removeBrokenReferences()). For any thread, on a song that
-// belongs to that thread alone and to no session: nothing here asks a plug-in's instance (a plug-in's curve is kept within
-// 0 to 1 from its element) nor anything else of the message thread's.
+// what names nothing there (model/versions/internal/ApplySong.h: removeBrokenReferences()). For any thread, on a tree that
+// belongs to that thread alone: nothing here asks a plug-in's instance (a plug-in's curve is kept within 0 to 1 from its
+// element) nor anything else of the message thread's.
 enum class ReadAs
 {
     whole,
     inPart
 };
 
-void makeConsistent (Song&, ReadAs = ReadAs::whole);
+void makeConsistent (juce::ValueTree& song, const juce::File& projectFolder = {}, ReadAs = ReadAs::whole);
 
 // The same, keeping to the ranges, words and hexadecimal ids of the description's tables given (Schema.h:
 // schema::getTables()), rather than the description's own: for a test, which changes one in a copy and sees the loader
 // follow (tests/SchemaTests.cpp).
-void makeConsistent (Song&, ReadAs, const schema::Tables&);
+void makeConsistent (juce::ValueTree& song, const juce::File& projectFolder, ReadAs, const schema::Tables&);
 
 // The properties makeConsistent() takes as switches, by their element's type (Schema.h: "bool", or "true, or none"):
 // whether Phazite leaves one that is off out (none), as their setters do, rather than writing it false; and what one that
@@ -138,8 +142,7 @@ void setLeftoverCopyRemoval (std::function<bool (const juce::File&)> removal);
 //                    schema::versions), once there is one
 //
 // Create, open and destroy Projects on the message thread.
-class Project : private juce::ValueTree::Listener,
-                private SongValues::Listener,
+class Project : private SongValues::Listener,
                 private juce::AsyncUpdater,
                 private juce::Timer
 {
@@ -306,7 +309,6 @@ private:
     Project (Song::Ptr, const juce::File&);
 
     Song::Ptr song;
-    juce::ValueTree songState; // which this listens to (a listener belongs to the tree object it was added to)
     juce::File file;
     int changesOutsideHistory = 0; // the song's count of them as it was last compared (a plug-in's own changes)
 
@@ -344,13 +346,9 @@ private:
     std::optional<SongState> savedState;
     bool mayHaveChanged = false;
 
-    // What the tree told (its callbacks, until the song's tree goes): a root's place come or gone (a CHORDLANE, a MIDILINKS or
-    // a SECTIONS), or the root's places in another order, and what a safety net refused in a step: the places compared with
-    // the saved copy's (arePlacesAsSaved(): which the root holds, never their order). And a store of the devices' states, which
-    // writes the store without a notification (compareStoredStates()): the tracks and the master compared whole
-    // (WholeState.h: holdSameChannels()).
-    bool placesToCompare = false, channelsToCompare = false;
-    bool arePlacesAsSaved() const;
+    // A store of the devices' states, which writes the store without a notification (compareStoredStates()): the tracks and
+    // the master compared whole (WholeState.h: holdSameChannels()).
+    bool channelsToCompare = false;
     void clearToCompare();
 
     // The clips whose notes and controllers' values changed (the song holds them beside its tree: SongValues.h), compared
@@ -369,56 +367,48 @@ private:
     bool comparingClipsWhole = false; // past mostToCompare: each one's track whole
     void clipsChanged (const std::vector<SongValues::ClipChange>&, const std::vector<TrackID>& reordered) override;
 
-    // The tempo map changed (SongValues.h: Listener::tempoMapChanged(); the tree's callbacks below leave its elements alone,
-    // isHeardAsKept()): compared with savedState's when asked, as one value (WholeState.h: holdSameTempoMap()), so that
-    // a tempo changed and changed back is saved again.
+    // The tempo map changed (SongValues.h: Listener::tempoMapChanged()): compared with savedState's when asked, as one value
+    // (WholeState.h: holdSameTempoMap()), so that a tempo changed and changed back is saved again.
     bool tempoToCompare = false;
     void tempoMapChanged() override;
 
-    // The chord lane changed (SongValues.h: Listener::chordLaneChanged(); the tree's callbacks below leave what is in its
-    // CHORDLANE alone, isHeardAsKept(), and mark the element's own coming and going as any element's): compared with
+    // The chord lane changed (SongValues.h: Listener::chordLaneChanged(); a lane placed or taken away too): compared with
     // savedState's when asked, as one value with whether each has a lane (WholeState.h: holdSameChordLane()), so that a chord
     // changed and changed back is saved again.
     bool chordLaneToCompare = false;
     void chordLaneChanged() override;
 
-    // What the song holds of its own changed (SongValues.h: Listener::songOwnChanged(), songStandingChanged(); the tree's
-    // callbacks below leave what the song's own keeper takes in alone, isHeardAsKept()): its own value (the outline, the
-    // notes, the numbering, patterns' speed, a merge waiting) and the key set last, each counted as a change, and compared
-    // with savedState's kept values when asked (isSongOwnAsSaved(); SongOwnArea.h: holdSameSongOwn()), so that notes
-    // changed and changed back are saved again. Where the song stands in its versions is no change: its names go into the
-    // project file in the background (versionsMoved()). What it keeps of how it plays and shows (the loop, the grids:
+    // What the song holds of its own changed (SongValues.h: Listener::songOwnChanged(), songStandingChanged()): its own value
+    // (the outline, the notes, the numbering, patterns' speed, a merge waiting) and the key set last, each counted as a change,
+    // and compared with savedState's kept values when asked (isSongOwnAsSaved(); SongOwnArea.h: holdSameSongOwn()), so that notes
+    // changed and changed back are saved again. Where the song stands in its versions is no change: its names go into the project
+    // file in the background (versionsMoved()). What it keeps of how it plays and shows (the loop, the grids:
     // songOutsideChanged()) counts nothing.
     bool songOwnToCompare = false;
     void songOwnChanged (const SongOwnChange&) override;
     void songStandingChanged (bool lastKey, bool versionsNames) override;
     void markSongOwnChanged(); // counted, and compared when asked
 
-    // The curves that changed, by their parameters (SongValues.h: Listener::curvesChanged(); the tree's callbacks below leave
-    // the curves' elements alone, isHeardAsKept()): compared with savedState's when asked, each as a value, and the curves'
-    // order with it (WholeState.h: holdSameCurve(), holdSameCurveOrder()), so that a point moved and moved back is saved
-    // again. Bounded: past mostToCompare of them, every curve (holdSameCurves()).
+    // The curves that changed, by their parameters (SongValues.h: Listener::curvesChanged()): compared with savedState's when
+    // asked, each as a value, and the curves' order with it (WholeState.h: holdSameCurve(), holdSameCurveOrder()), so that a
+    // point moved and moved back is saved again. Bounded: past mostToCompare of them, every curve (holdSameCurves()).
     std::vector<ParameterRef> curvesToCompare;
     bool comparingCurvesWhole = false;
     void curvesChanged (const std::vector<ParameterRef>&) override;
     void clearCurvesToCompare(); // clearToCompare()'s
 
-    // The MIDI links changed (SongValues.h: Listener::midiLinksChanged(); the tree's callbacks below leave what is in its
-    // MIDILINKS alone, isHeardAsKept(), and mark the element's own coming and going as any element's): compared with
-    // savedState's when asked, as one value with whether each has a MIDILINKS (WholeState.h: holdSameMidiLinks()), so that a
-    // link taken away and made again as it was is saved again.
+    // The MIDI links changed (SongValues.h: Listener::midiLinksChanged()): compared with savedState's when asked, as one value
+    // (WholeState.h: holdSameMidiLinks(): none is none), so that a link taken away and made again as it was is saved again.
     bool midiLinksToCompare = false;
     void midiLinksChanged() override;
 
-    // The sections changed (SongValues.h: Listener::sectionsChanged(); the tree's callbacks below leave what is in its
-    // SECTIONS alone, isHeardAsKept(), and mark the element's own coming and going as any element's): compared with
-    // savedState's when asked, as one value with whether each has a SECTIONS (WholeState.h: holdSameSections()), so that a
-    // section changed and changed back is saved again.
+    // The sections changed (SongValues.h: Listener::sectionsChanged()): compared with savedState's when asked, as one value
+    // (WholeState.h: holdSameSections(): none is none), so that a section changed and changed back is saved again.
     bool sectionsToCompare = false;
     void sectionsChanged (const std::vector<SectionID>&) override;
 
     // The modulators and macros that changed, by their IDs, and the owners whose modulators came in another order
-    // (SongValues.h: Listener::modulationChanged(); the song's tree holds none of them): compared with savedState when asked,
+    // (SongValues.h: Listener::modulationChanged()): compared with savedState when asked,
     // each against the saved copy's of its ID, as values (WholeState.h: holdSameModulator(), holdSameModulatorOrder()), so
     // that a macro turned and turned back is saved again. Bounded: past mostToCompare of them, the song's
     // modulation whole (holdSameModulation()).
@@ -429,7 +419,7 @@ private:
     bool areModulatorsAsSaved() const;
 
     // The sends that changed, by their IDs, and the tracks a send was added to, taken out of or came to and from, and those
-    // whose sends came in another order (SongValues.h: Listener::sendsChanged(); the song's tree holds none): compared with
+    // whose sends came in another order (SongValues.h: Listener::sendsChanged()): compared with
     // savedState when asked, each against the saved copy's of its ID, as values (WholeState.h: holdSameSend(),
     // holdSameTrackSendOrder()), so that a level turned and turned back is saved again, and a send taken out and put back at
     // another place before the comparison compares by where it is among its track's. Bounded: past
@@ -442,7 +432,7 @@ private:
 
     // The devices, containers and chains that changed, by their IDs, and the owners (a channel, a container, a chain) that one
     // was added to, taken out of or came to and from, and those whose devices came in another order (SongValues.h:
-    // Listener::devicesChanged(); the song's tree holds none of them): compared with savedState when asked, each against the
+    // Listener::devicesChanged()): compared with savedState when asked, each against the
     // saved copy's of its ID, as values (WholeState.h: holdSameDevice(), holdSameDeviceOrder(), each a look in the two
     // values by its ID), its place too, so that a knob turned and turned back is saved again, and a device taken out and put
     // back at another place before the comparison compares by where it is among its owner's.
@@ -455,7 +445,7 @@ private:
     bool areDevicesAsSaved() const;
 
     // The devices and chains whose entries in the devices' store changed, by their IDs (SongValues.h:
-    // Listener::deviceStoreChanged(); the song's tree holds none of it): counted as a change where the song's entries changed
+    // Listener::deviceStoreChanged()): counted as a change where the song's entries changed
     // of an item the song holds (a held value alone, and an answer written for a device a step took away, count nothing),
     // and compared with savedState when asked, each against the saved copy's entries of its ID, as values (WholeState.h:
     // holdSameDeviceStore()), so that a knob a plug-in's window turned and turned back is saved again. A plug-in's own change
@@ -468,8 +458,7 @@ private:
 
     // The tracks, folders, returns and master that changed, by their IDs (the master by a flag of its own: its ID may be given
     // anew), and the lists (a folder's, by its ID; the top list's, TrackID()) a track was added to, taken out of, or whose
-    // tracks came in another order (SongValues.h: Listener::tracksChanged(); the tree's callbacks below leave what the tracks'
-    // values cover alone, isHeardAsKept(), and count a property Phazite doesn't know on a TRACK as before); and the tracks whose
+    // tracks came in another order (SongValues.h: Listener::tracksChanged()); and the tracks whose
     // switches changed (trackSwitchesChanged(): a mute toggled outside the history counts, as its property did). Counted as
     // a change, and compared with savedState when asked, never as they are told: as values (WholeState.h: holdSameTrack(),
     // holdSameMaster(), holdSameTrackList()), a track found in the song's kept values and the saved copy's by its ID (one
@@ -553,8 +542,6 @@ private:
     void rememberSavedState (SongState); // or a state of it taken since its last change (what save() wrote)
     void forgetSavedState();             // the project file doesn't hold the song: unsaved until a save
     void compareWithSavedState();
-    void markChanged (const juce::ValueTree&);
-    void markChildChanged (const juce::ValueTree& parent, const juce::ValueTree& child);
 
 public:
     // How many elements the comparisons with the saved copies looked at since the program started (each element compared
@@ -562,8 +549,9 @@ public:
     // thread.
     static juce::int64 countElementsCompared();
 
-    // How many tracks the comparison of the tracks with the saved copy looked at since the program started (areTracksAsSaved():
-    // a track or a list found by its ID in the song's kept values or the saved copy's, one each), for the same tests. Message thread.
+    // How many tracks the comparison of the tracks with the saved copy looked at since the program started (areTracksAsSaved(): a
+    // track or a list found by its ID in the song's kept values or the saved copy's, one each), for the same tests. Message
+    // thread.
     static juce::int64 countTrackElementsWalkedWithSaved();
 
     // How many notifications since the last comparison are compared one by one; past them, each one's track whole.
@@ -583,16 +571,6 @@ public:
     // once a write under way is over (it waits for it, so a hold is let go first). Message thread.
     void setWriteStartForTests (std::function<void()>);
 
-private:
-    void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override { markChildChanged (parent, child); }
-    void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override { markChildChanged (parent, child); }
-
-    void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override
-    {
-        if (! isHeardAsKept (parent)) // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged(), midiLinksChanged()
-            markChanged (parent);
-    }
-
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Project)
 };
 
@@ -607,8 +585,8 @@ public:
     explicit AutosaveTimer (Project&, int intervalSeconds = 120, int firstDelaySeconds = 15);
     ~AutosaveTimer() override;
 
-    // Called once when failuresToReport autosaves (or auto saves) in a row have failed (docs/archive/performance-audit.md, R7); and
-    // whether they have, until one works, which the status bar says.
+    // Called once when failuresToReport autosaves (or auto saves) in a row have failed (docs/archive/performance-audit.md, R7);
+    // and whether they have, until one works, which the status bar says.
     std::function<void()> onRepeatedFailures;
     static constexpr int failuresToReport = 3;
     bool hasFailedRepeatedly() const noexcept { return failures >= failuresToReport; }

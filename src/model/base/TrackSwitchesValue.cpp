@@ -234,17 +234,6 @@ bool holdsSwitchesOf (const TrackSwitches& switches, std::uint64_t key)
            || switches.modes.find (key) != nullptr;
 }
 
-TrackSwitches withoutIDsFrom (const TrackSwitches& switches, std::uint64_t first)
-{
-    jassert (first > 0); // the master's mode, under 0, stays
-    auto kept = switches;
-    kept.mutes = withoutIDsFrom (switches.mutes, first);
-    kept.solos = withoutIDsFrom (switches.solos, first);
-    kept.frozen = withoutIDsFrom (switches.frozen, first);
-    kept.modes = withoutIDsFrom (switches.modes, first);
-    return kept;
-}
-
 void readSwitchesOf (const juce::ValueTree& element, TrackSwitches& switches)
 {
     readInto (element, switches, false);
@@ -308,31 +297,9 @@ bool keepSwitchesAsHeld (juce::ValueTree element)
     return true;
 }
 
-bool holdsSwitchesIn (const juce::ValueTree& element)
-{
-    if (! element.hasType (schema::TRACK) && ! element.hasType (schema::MASTER))
-        return false;
-
-    for (int i = 0; i < element.getNumProperties(); ++i)
-        if (isSwitch (element, element.getPropertyName (i)))
-            return true;
-
-    return false;
-}
-
 bool isSwitchProperty (const juce::ValueTree& element, const juce::Identifier& property)
 {
     return (element.hasType (schema::TRACK) || element.hasType (schema::MASTER)) && isSwitch (element, property);
-}
-
-void takeSwitchesOutOf (juce::ValueTree element, juce::UndoManager* undo)
-{
-    if (! element.hasType (schema::TRACK) && ! element.hasType (schema::MASTER))
-        return;
-
-    for (auto i = element.getNumProperties(); --i >= 0;)
-        if (const auto property = element.getPropertyName (i); isSwitch (element, property))
-            element.removeProperty (property, undo);
 }
 
 TrackSwitches readTrackSwitches (const juce::ValueTree& song)

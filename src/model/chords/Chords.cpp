@@ -27,17 +27,6 @@ namespace
     // How near a beat a chord or a key change starts that is "at" it (findStartingAt()).
     constexpr double nearAt = 1.0e-4;
 
-    juce::ValueTree findLaneState (const Song& song)
-    {
-        return song.getState().getChildWithName (schema::CHORDLANE);
-    }
-
-    // The song's tree written as the song is written now: in the step in progress, or outside the history.
-    juce::UndoManager* getTreeUndo (Song& song)
-    {
-        return song.isWritingOutsideHistory() ? nullptr : &song.getUndoManager();
-    }
-
     // The key before any is written: the one new tracks get, which a new project sets (SongOwnValue.h: SongStanding's key
     // set last, as model/notes/Notes.cpp's getLastKey() reads it: its scale by its word, major for none), or else C major.
     Key getDefaultKey (const Song& song)
@@ -179,25 +168,25 @@ namespace
             value = keepChordsApart (kept.toValue());
         }
 
-        if (auto* values = song.getValues())
-            values->setChordLane (song, std::move (value));
-        else
-            jassertfalse; // the chord lane's edits are a song's that holds its values (model/project/internal/Project.h: makeSong())
+        song.getValues()->setChordLane (song, std::move (value));
     }
 
-    // The lane an edit that writes a chord or a key works on: the song's, its element added first where it has none (an
-    // action of the tree's in the step in progress), starting with a key from 0, the one getLaneKeys() gives until then. The
-    // edit sets the value it works out (setLane()), the step's second action, which that key alone makes another value: so
-    // Undo takes the lane's value back and its element away, and the keys are the key set last again. A song without values
-    // gets no element: nothing is written (setLane() refuses the edit).
+    // The lane an edit that writes a chord or a key works on: the song's, placed first where it has none (an action of its own
+    // in the step in progress, a lane with no entries: ChordLaneValue.h, placed), starting with a key from 0, the one
+    // getLaneKeys() gives until then. The edit sets the value it works out (setLane()), the step's second action, which that
+    // key alone makes another value: so Undo takes the lane's entries back and then the lane away, and the keys are the key
+    // set last again.
     Lane openLane (Song& song)
     {
-        if (song.getValues() == nullptr || findLaneState (song).isValid())
+        auto* values = song.getValues();
+
+        if (values->chordLane.get().placed)
             return Lane (getChordLaneValue (song));
 
-        song.getState().appendChild (juce::ValueTree (schema::CHORDLANE), getTreeUndo (song));
-        Lane lane (getChordLaneValue (song)); // empty: a song without a lane holds none (ChordLaneValue.h)
-        lane.placed = true;
+        auto placed = values->chordLane.get(); // empty: a song without a lane holds none (ChordLaneValue.h)
+        placed.placed = true;
+        values->setChordLane (song, placed);
+        Lane lane (placed);
         const auto key = getDefaultKey (song);
         lane.keys.push_back ({ BeatPosition(), key.root, getSavedScaleName (key.scale) });
         return lane;
@@ -317,50 +306,44 @@ namespace
 //==============================================================================
 ChordLaneValue getChordLaneValue (const Song& song)
 {
-    if (const auto* values = song.getValues())
-        return values->chordLane.get();
-
-    return readChordLaneValue (findLaneState (song));
+    return song.getValues()->chordLane.get();
 }
 
 bool hasChordLane (const Song& song)
 {
-    if (const auto* values = song.getValues())
-        return values->chordLane.get().placed;
-
-    return findLaneState (song).isValid();
+    return song.getValues()->chordLane.get().placed;
 }
 
 bool makeChordLaneAs (Song& song, const juce::ValueTree& lane)
 {
-    auto* values = song.getValues();
-
-    if (values == nullptr || (lane.isValid() && ! lane.hasType (schema::CHORDLANE)))
+    if (lane.isValid() && ! lane.hasType (schema::CHORDLANE))
         return false;
 
-    // Its element first where it comes, its value, then its element away where it goes: the value never says more than the
-    // element does (a song without a lane holds an empty one).
-    auto state = song.getState();
-    const auto live = findLaneState (song);
+    // The other song's lane, placed as it has one: its entries first where it comes, then the lane away where it goes, as the
+    // song's element came first and went last (two actions, two changes told: ChordLaneArea.h).
+    auto* values = song.getValues();
     const auto before = values->chordLane.get();
-    auto wrote = false;
 
-    if (lane.isValid() && ! live.isValid())
+    if (lane.isValid())
     {
-        state.appendChild (juce::ValueTree (schema::CHORDLANE), getTreeUndo (song));
-        wrote = true;
+        if (! before.placed)
+        {
+            auto placed = before;
+            placed.placed = true;
+            values->setChordLane (song, std::move (placed));
+        }
+
+        values->setChordLane (song, readHeldChordLane (lane));
+    }
+    else
+    {
+        values->setChordLane (song, ChordLaneValue { .placed = before.placed });
+
+        if (before.placed)
+            values->setChordLane (song, ChordLaneValue {});
     }
 
-    values->setChordLane (song, lane.isValid() ? readHeldChordLane (lane) : ChordLaneValue {});
-    wrote = wrote || ! values->chordLane.get().isSameAs (before);
-
-    if (! lane.isValid() && live.isValid())
-    {
-        state.removeChild (live, getTreeUndo (song));
-        wrote = true;
-    }
-
-    return wrote;
+    return ! values->chordLane.get().isSameAs (before);
 }
 
 std::vector<LaneKey> getLaneKeys (const Song& song)
@@ -737,8 +720,8 @@ void pasteLaneChords (Song& song, const LaneCopy& copy, BeatPosition destination
 //==============================================================================
 AreaChoice chooseChordLaneClash (Song& song, const MergeClash& clash, int value, const MergeSides&)
 {
-    // A path into the song's CHORDLANE, which the song holds as a value beside its tree (model/base/internal/SongValues.h),
-    // its tree's element an empty placeholder: the lane merges whole (SongMerge.cpp: mergesWhole()), so its clash is the
+    // A path into the song's CHORDLANE, which the song holds as a value (model/base/internal/SongValues.h): the lane merges
+    // whole (SongMerge.cpp: mergesWhole()), so its clash is the
     // whole element's, its path the lane's alone. The side chosen's lane made the song's, or none where that side had none
     // (makeChordLaneAs(): its element added or taken out, its value set, in the choice's step). Refused (nothing written) for
     // any other clash on its path, which a merge of two songs Phazite holds never makes, but a commit's song may come from

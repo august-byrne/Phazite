@@ -25,35 +25,12 @@ namespace
     const auto tiny = BeatDuration::fromBeats (1.0e-6);
     std::atomic<std::uint64_t> sectionListsBuilt { 0 }; // countSectionListsBuilt(): a count alone, which orders nothing
 
-    // The song's SECTIONS, the place a whole copy writes its sections in (an empty placeholder: SectionsArea.h).
-    juce::ValueTree findSectionsState (const Song& song)
-    {
-        return song.getState().getChildWithName (schema::SECTIONS);
-    }
-
-    // The song's tree written as the song is written now: in the step in progress, or outside the history.
-    juce::UndoManager* getTreeUndo (Song& song)
-    {
-        return song.isWritingOutsideHistory() ? nullptr : &song.getUndoManager();
-    }
-
-    // The song's SECTIONS added where it has none, after its other elements: the place of its sections, made with the first,
-    // before the value that holds it (the value never says more than the element).
-    void makeSectionsPlace (Song& song)
-    {
-        if (! findSectionsState (song).isValid())
-            song.getState().appendChild (juce::ValueTree (schema::SECTIONS), getTreeUndo (song));
-    }
-
     // The song's sections made the next value: their area's, in the step in progress, or outside the history while the song is
     // written outside it (SongValues.h: setSections(), which writes nothing for the sections the song holds already), kept as
     // the song holds them (SectionsValue.h: keepSectionsHeld(), the rule what enters the area keeps too).
     void setSections (Song& song, const SectionsValue& next)
     {
-        if (auto* values = song.getValues())
-            values->setSections (song, keepSectionsHeld (next));
-        else
-            jassertfalse; // the sections' edits are a song's that holds its values (model/project/internal/Project.h: makeSong())
+        song.getValues()->setSections (song, keepSectionsHeld (next));
     }
 
     // Where a section starts and ends, as its element read: from its start for its length (none for a length below 0).
@@ -268,7 +245,6 @@ SectionID insertSection (Song& song, BeatPosition start, const SectionInfo& info
     if (info.colour.has_value())
         section.colour = info.colour->toString();
 
-    makeSectionsPlace (song);
     setSections (song, { getSectionsValue (song).sections.push_back (section) });
     return section.id;
 }
@@ -615,46 +591,25 @@ void pasteSections (Song& song, const SectionsCopy& copy, BeatPosition destinati
         sections = sections.push_back (withRange (std::move (pasted), getRange (section).movedBy (destination - copy.rangeStart)));
     }
 
-    makeSectionsPlace (song);
     setSections (song, { sections });
 }
 
 bool makeSectionsAs (Song& song, const juce::ValueTree& sections)
 {
-    auto* values = song.getValues();
-
-    if (values == nullptr || (sections.isValid() && ! sections.hasType (schema::SECTIONS)))
+    if (sections.isValid() && ! sections.hasType (schema::SECTIONS))
         return false;
 
-    // Its element first where it comes, its value, then its element away where it goes: the value never says more than the
-    // element does (a song without a SECTIONS holds no sections).
-    auto state = song.getState();
-    const auto live = findSectionsState (song);
+    // The other song's sections, none where it has no SECTIONS (an empty list is none).
+    auto* values = song.getValues();
     const auto before = values->sections.get();
-    auto wrote = false;
-
-    if (sections.isValid() && ! live.isValid())
-    {
-        state.appendChild (juce::ValueTree (schema::SECTIONS), getTreeUndo (song));
-        wrote = true;
-    }
-
     values->setSections (song, sections.isValid() ? readHeldSections (sections) : SectionsValue {});
-    wrote = wrote || ! values->sections.get().isSameAs (before);
-
-    if (! sections.isValid() && live.isValid())
-    {
-        state.removeChild (live, getTreeUndo (song));
-        wrote = true;
-    }
-
-    return wrote;
+    return ! values->sections.get().isSameAs (before);
 }
 
 AreaChoice chooseSectionClash (Song& song, const MergeClash& clash, int value, const MergeSides&)
 {
-    // A path into the song's SECTIONS, whose sections the song holds as a value beside its tree (model/base/internal/
-    // SongValues.h), its tree's element an empty placeholder: a section merges by its ID, a property at a time (SongMerge.cpp),
+    // A path into the song's SECTIONS, whose sections the song holds as a value (model/base/internal/SongValues.h): a section
+    // merges by its ID, a property at a time (SongMerge.cpp),
     // so its clash is one section's property, or the whole section's (added or taken out on a side), by its ID, the path's
     // second step. A property: the value chosen given to the section of that ID (SectionsValue.h: setSectionProperty(), a void
     // value taking it away as the tree did), refused where the song holds no section of that ID, for the ID itself (the path's
@@ -664,13 +619,12 @@ AreaChoice chooseSectionClash (Song& song, const MergeClash& clash, int value, c
     // none; or the song's taken away where that side had none: as the song's tree had it chosen, in the choice's step. Refused
     // (nothing written) for any other clash on its path, which a merge of two songs Phazite holds never makes, but a commit's
     // song may come from anyone (tests/FuzzTests.cpp chooses every clash of a damaged merge): the SECTIONS itself, an element
-    // of another type, a section the song can't hold or of another ID, one that stands in for what its version couldn't read,
-    // and a song without a SECTIONS (where the tree had no place to choose in).
+    // of another type, a section the song can't hold or of another ID, and one that stands in for what its version couldn't
+    // read.
     if (clash.path.isEmpty() || ! clash.path[0].startsWith (schema::SECTIONS.toString() + ":"))
         return AreaChoice::notTheArea;
 
-    if (clash.path.size() != 2 || ! clash.path[1].startsWith (schema::SECTION.toString() + ":") || ! juce::isPositiveAndBelow (value, 3)
-        || song.getValues() == nullptr || ! findSectionsState (song).isValid())
+    if (clash.path.size() != 2 || ! clash.path[1].startsWith (schema::SECTION.toString() + ":") || ! juce::isPositiveAndBelow (value, 3))
         return AreaChoice::refused;
 
     const auto sections = getSectionsValue (song);

@@ -8,9 +8,7 @@
 // As values (model/base/internal/ModulationValue.h: ModulatorValue, SongModulation), which the song holds as modulation's
 // area (SongValues.h; roadmap step S5.20): every reader looks in the area through the readers below (one modulator by its
 // ID, an owner's list, what modulates one parameter, the whole value for the plan's compile and the passes), and every
-// writer works its next value out and sets it through the setters below, once for an edit. A song that holds no values (a
-// check's copy, which holds everything in its tree) is read from its tree, as the conversion reads one (ModulationValue.h:
-// readModulationValue()).
+// writer works its next value out and sets it through the setters below, once for an edit.
 #pragma once
 
 #include "devices/core/DeviceInfo.h"
@@ -39,9 +37,9 @@ SongModulation getModulationValue (const Song&);
 // the loader takes away): a look in the area.
 std::optional<ModulatorValue> getModulatorValue (const Song&, ModulatorID);
 
-// How many times the readers here looked at the song's modulation (its area's value, or a song's tree without values) since
-// Phazite started: for the test that a tree callback looks at none (tests/SongValuesModulationTests.cpp), as no tree
-// callback may read an area (SongValues.h). A count alone, on the message thread.
+// How many times the readers here looked at the song's modulation (its area's value) since Phazite started: for the test that the
+// MIDI linker, hearing a device taken out, looks at none (tests/SongValuesModulationTests.cpp). A count alone, on the message
+// thread.
 std::uint64_t countModulationLooks() noexcept;
 
 // An owner's modulators and macros (ModulationValue.h: ModulatorPlace, the container's where it names one, else the
@@ -105,8 +103,7 @@ bool eraseModulatorsOf (Song&, const std::vector<ModulatorPlace>& owners);
 
 // The modulators and macros an owner's element holds (a TRACK's, the MASTER's, a CONTAINER's on one: its MODULATOR and MACRO
 // children, not those of the containers or tracks in it) given to the song (a merge's choice of a whole track: Tracks.h,
-// chooseTrackClash()), as the keeper takes in those of an owner that comes into the song with them (model/base/internal/
-// ModulationArea.h): each read as the song holds one (readHeldModulator()) at its element's place (readModulatorPlace()), in
+// chooseTrackClash()): each read as the song holds one (readHeldModulator()) at its element's place (readModulatorPlace()), in
 // their order, after the owner's others (setModulator()), one of an ID the song holds left out.
 void takeModulatorsOf (Song&, const juce::ValueTree& owner);
 

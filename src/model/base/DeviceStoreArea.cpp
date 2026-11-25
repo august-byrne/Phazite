@@ -41,27 +41,6 @@ namespace
                 forEachItemIn (child, each);
     }
 
-    // Each DEVICE and CHAIN anywhere in an element, whatever holds it: what the adoption takes the store's out of.
-    void forEachItemAnywhere (const juce::ValueTree& element, const std::function<void (const juce::ValueTree&)>& each)
-    {
-        for (const auto& child : element)
-        {
-            if (isDeviceOrChain (child))
-                each (child);
-
-            forEachItemAnywhere (child, each);
-        }
-    }
-
-    bool isInVALUE (juce::ValueTree element)
-    {
-        for (; element.isValid(); element = element.getParent())
-            if (element.hasType (schema::VALUE) && element.getParent().hasType (schema::DEVICE))
-                return true;
-
-        return false;
-    }
-
     // Each of one map's entries that differ, told as a change of a kind; the song's entries all (no held one in them).
     template <typename Entry>
     void addChanges (std::vector<Change>& told, const std::vector<MapChange<std::uint64_t, Entry>>& changes, Kind kind)
@@ -150,67 +129,6 @@ void SongValues::DeviceStoreTeller::valueAreaChanged (const DeviceStore& before,
 }
 
 //==============================================================================
-SongValues::DeviceStoreKeeper::DeviceStoreKeeper (SongValues& v, Song& s)
-    : values (v),
-      song (s)
-{
-}
-
-void SongValues::DeviceStoreKeeper::childAdded (juce::ValueTree&, juce::ValueTree& child)
-{
-    // (A lone VALUE (b) never comes: the song's tree holds no DEVICE for one to be added to, as the devices' part of the keeper
-    // takes one out as it comes in, DevicesArea.h. Nor does a TRACK, the track list or the MASTER with devices in it: the
-    // tracks' part of the keeper takes those, TracksArea.h.)
-    if (! isDeviceOrChain (child) && ! child.hasType (schema::CONTAINER))
-        return;
-
-    // What came in with what the store holds (a): each item's entries made the store's, its window's place given, all of it
-    // taken out of the element, in the mode of the moment.
-    std::vector<juce::ValueTree> holding;
-    forEachItemIn (child,
-                   [&holding] (const juce::ValueTree& item)
-                   {
-                       if (holdsStoreIn (item))
-                           holding.push_back (item);
-                   });
-
-    if (holding.empty())
-        return;
-
-    auto next = values.deviceStore.get();
-
-    for (const auto& item : holding)
-    {
-        const auto id = readDeviceElementID (item);
-
-        if (! id.isValid())
-            continue;
-
-        DeviceStore read;
-        readHeldStoreOf (item, read);
-        next = withEntriesOf (next, id, read);
-
-        if (const auto window = item.hasType (schema::DEVICE) ? readWindowPlaceOf (item) : std::nullopt)
-            values.setWindowPlace (id, *window);
-    }
-
-    values.setDeviceStore (song, std::move (next));
-    auto* undo = song.isWritingOutsideHistory() ? nullptr : &song.getUndoManager();
-
-    for (auto& item : holding)
-    {
-        takeStoreOutOf (item, undo);
-        ++values.deviceStoreAdopted;
-    }
-}
-
-void SongValues::DeviceStoreKeeper::adopt (SongValues&, Song& loaded)
-{
-    // Everything of the store taken out of every DEVICE and CHAIN of the tree, those anywhere else too, its reader having read
-    // the song's channels' into the store and the windows' places before (readHeldDeviceStoreIn(): SongValues.cpp, adopt()).
-    forEachItemAnywhere (loaded.getState(), [] (const juce::ValueTree& item) { takeStoreOutOf (item, nullptr); });
-}
-
 void readHeldDeviceStoreIn (const juce::ValueTree& song, SongState& into)
 {
     // Every DEVICE and CHAIN of the song's channels, their containers' and chains', each read as the song holds it (the first
@@ -284,30 +202,6 @@ void SongValues::setWindowPlace (DeviceID id, std::optional<WindowPlace> place)
 }
 
 //==============================================================================
-int takeChannelStoreIn (DeviceStore& store, DevicesOutside& outside, const juce::ValueTree& channel)
-{
-    // Its devices and containers, with their chains and their devices (not a folder's tracks: each is a channel of its own).
-    auto taken = 0;
-
-    for (const auto& child : channel)
-    {
-        if (! (child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER)))
-            continue;
-
-        forEachItemIn (child,
-                       [&store, &outside, &taken] (const juce::ValueTree& item)
-                       {
-                           taken += holdsStoreIn (item) ? 1 : 0;
-                           readHeldStoreOf (item, store);
-
-                           if (const auto window = item.hasType (schema::DEVICE) ? readWindowPlaceOf (item) : std::nullopt)
-                               outside = outside.withWindow (readDeviceElementID (item), *window);
-                       });
-    }
-
-    return taken;
-}
-
 bool leadsToDeviceStore (const juce::ValueTree& parent, const juce::ValueTree& child)
 {
     if (parent.hasType (schema::PHAZITE))
@@ -344,28 +238,5 @@ void writeDeviceStoreIn (juce::ValueTree& element, const SongState& kept)
 bool holdSameDeviceStore (const SongState& a, const SongState& b, DeviceID id)
 {
     return holdSameEntriesOf (a.deviceStore, b.deviceStore, id);
-}
-
-//==============================================================================
-bool isHeardAsDeviceStore (const juce::ValueTree& element)
-{
-    return isInVALUE (element);
-}
-
-bool isHeardAsDeviceStore (const juce::ValueTree& element, const juce::Identifier& property)
-{
-    if (element.hasType (schema::DEVICE))
-        return property == schema::pluginState || property == schema::pluginProgram || property == schema::pluginFormatID
-               || property == schema::pluginVersion || schema::isDeviceViewProperty (property);
-
-    if (element.hasType (schema::CHAIN))
-        return property == schema::chainMute || property == schema::chainSolo;
-
-    return isInVALUE (element);
-}
-
-bool isHeardAsDeviceStore (const juce::ValueTree& parent, const juce::ValueTree& child)
-{
-    return (child.hasType (schema::VALUE) && parent.hasType (schema::DEVICE)) || isInVALUE (parent);
 }
 } // namespace phazite

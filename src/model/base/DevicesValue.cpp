@@ -1599,60 +1599,9 @@ bool holdsDevice (const Song& song, DeviceID id, bool chainsToo)
     if (! id.isValid())
         return false;
 
-    // A look in the devices' area, for a song that holds its values; a walk of its tree for one that holds none (the loader's).
-    if (const auto* values = song.getValues())
-    {
-        const auto* held = values->devices.get().find (id);
-        return held != nullptr && (chainsToo || held->form != Form::chain);
-    }
-
-    const auto isIt = [id] (const juce::ValueTree& element) { return readDeviceElementID (element) == id; };
-
-    // A channel's devices and containers, a container's chains and their devices.
-    const auto holdsIn = [&isIt, chainsToo] (const juce::ValueTree& channel)
-    {
-        for (const auto& child : channel)
-        {
-            const auto form = readDeviceForm (child);
-
-            if (! form.has_value() || *form == Form::chain)
-                continue;
-
-            if (isIt (child))
-                return true;
-
-            if (*form != Form::container)
-                continue;
-
-            for (const auto& chain : child)
-            {
-                if (readDeviceForm (chain) != Form::chain)
-                    continue;
-
-                if (chainsToo && isIt (chain))
-                    return true;
-
-                for (const auto& device : chain)
-                    if (const auto inside = readDeviceForm (device); (inside == Form::own || inside == Form::plugin) && isIt (device))
-                        return true;
-            }
-        }
-
-        return false;
-    };
-
-    // Each track's, in the track list and in the folders in it, then the master's.
-    const auto holdsInTracks = [&holdsIn] (const juce::ValueTree& list, auto& holdsInNext) -> bool
-    {
-        for (const auto& child : list)
-            if (child.hasType (schema::TRACK) && (holdsIn (child) || holdsInNext (child, holdsInNext)))
-                return true;
-
-        return false;
-    };
-
-    const auto state = song.getState();
-    return holdsInTracks (state.getChildWithName (schema::TRACKS), holdsInTracks) || holdsIn (state.getChildWithName (schema::MASTER));
+    // A look in the devices' area.
+    const auto* held = song.getValues()->devices.get().find (id);
+    return held != nullptr && (chainsToo || held->form != Form::chain);
 }
 
 //==============================================================================

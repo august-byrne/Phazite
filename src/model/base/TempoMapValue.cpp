@@ -233,17 +233,6 @@ TempoMapValue readHeldTempoMap (const juce::ValueTree& tempoMap)
              readKind<SignatureEntry> (tempoMap, schema::TIMESIGNATURE, readHeldSignature) };
 }
 
-TempoMapValue withEntryTaken (const TempoMapValue& value, const juce::ValueTree& entry)
-{
-    if (entry.hasType (schema::TEMPO))
-        return { insertByBeat (value.tempos, readHeldTempo (entry)), value.signatures };
-
-    if (entry.hasType (schema::TIMESIGNATURE))
-        return { value.tempos, insertByBeat (value.signatures, readHeldSignature (entry)) };
-
-    return value;
-}
-
 bool isHeldAsTheSongHoldsIt (const TempoMapValue& value)
 {
     if (value.tempos.empty() || value.signatures.empty() || ! isInOrder (value.tempos) || ! isInOrder (value.signatures))

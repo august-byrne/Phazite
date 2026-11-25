@@ -5,9 +5,8 @@
 // OutsideValue<SongOutside>), which its setters set (SongOwnValue.h: setSongOwn(), setSongStanding(),
 // storeStandingOutsideHistory(), setSongOutside(), through SongValues' setOwn(), setStanding(), setStandingOutsideHistory(),
 // setOutside(), defined here). Here: what the values' listeners are told of them (SongOwnChange: SongValues::Listener::
-// songOwnChanged(), songStandingChanged(), songOutsideChanged()), by each area's teller; the song's own part of the keeper:
-// its adoption as the song holds its values, and its safety net; and what of the tree's notifications is the song's own
-// (isHeardAsSongOwn()), which every listener of the song's root leaves to the values' listener. Message thread.
+// songOwnChanged(), songStandingChanged(), songOutsideChanged()), by each area's teller; and its part of whole state and its
+// reader of a song's tree. Message thread, but for whole state's part and the reader, which read only what they are given.
 #pragma once
 
 #include "model/base/Song.h"
@@ -82,52 +81,10 @@ struct SongValues::SongOutsideTeller final : private OutsideValue<SongOutside>::
     JUCE_DECLARE_NON_COPYABLE (SongOutsideTeller)
 };
 
-// The song's own part of the keeper (SongValues.h):
-//   - its adoption (adopt(), which SongValues::adopt() asks first, as the song holds its values): what the loaded tree's root
-//     holds of the song's own, read as the song holds it (SongOwnValue.h: readHeldSongOwn(), readHeldSongStanding(),
-//     readHeldSongOutside(); the loader made it so: keepSongOwnAsHeld()) by its reader (readHeldSongOwnIn()), set into the three
-//     areas outside the history, and its count of IDs (Schema.h: nextID) onto the song (Song.h: setIDCount()), as every area's
-//     (SongValues.cpp: adopt()); then (adopt()) the root's every property and its LASTKEY,
-//     PIANOROLL and MERGING taken out of the tree, and with them what Phazite doesn't know there (a property of the root's, an
-//     element of a type it doesn't know, with everything in it: dropped as the song opens, the one place that drops them, as
-//     the areas' adoptions drop what Phazite doesn't know in their elements);
-//   - its safety net (the keeper's callbacks, nothing while the history undoes or redoes a step): a property of the root's own
-//     (SongOwnValue.h: isSongOwnProperty()) or its count (nextID) written to the song's root, or a LASTKEY, PIANOROLL or
-//     MERGING added to it: in a step, refused (a JUCE assertion, as a lone CLIP is: the step that wrote it can't take it out
-//     again, as its Undo would find it gone; it stays where it was written until that Undo: JUCE workaround W62
-//     (docs/juce-workarounds.md)); outside the history (Song::OutsideHistory), read in as the song holds it (the property's or
-//     the element's value in place of the area's own, through the setters; the count as it is) and taken out, counted
-//     (countSongOwnAdopted()). No path of Phazite's writes either to the tree of a song that holds its values.
-struct SongValues::SongOwnKeeper final
-{
-    SongOwnKeeper (SongValues&, Song&);
-
-    void propertyChanged (const juce::ValueTree& tree, const juce::Identifier& property);
-    void childAdded (juce::ValueTree& parent, juce::ValueTree& child);
-
-    static void adopt (SongValues& into, Song& loaded);
-
-    SongValues& values;
-    Song& song;
-
-    JUCE_DECLARE_NON_COPYABLE (SongOwnKeeper)
-};
-
-// Whether what the song's tree tells is the song's own, which a listener of the song's root hears from the values' listener
-// alone (SongValues::Listener::songOwnChanged(), songStandingChanged(), songOutsideChanged()) and leaves alone in its tree
-// callbacks: what its safety net takes in (SongOwnKeeper), the tree holding none of it. Of an element (children in another
-// order): the song's LASTKEY, PIANOROLL or MERGING, or one in it. Of a property changed: one of the root's own that the three
-// values hold (SongOwnValue.h: isSongOwnProperty()) or its count of IDs (nextID), or any property of the song's LASTKEY,
-// PIANOROLL or MERGING. Of a child added or taken out: the song's LASTKEY, PIANOROLL or MERGING, or a child of one. In
-// SongOwnArea.cpp.
-bool isHeardAsSongOwn (const juce::ValueTree& element);
-bool isHeardAsSongOwn (const juce::ValueTree& element, const juce::Identifier& property);
-bool isHeardAsSongOwn (const juce::ValueTree& parent, const juce::ValueTree& child);
-
 // The song's own part of whole state (WholeState.h; the recipe's step 5): into a whole copy's root (PHAZITE), the kept
 // values' song's own (WholeState.h: SongState: songOwn, songStanding, songOutside), its properties and its LASTKEY, PIANOROLL
-// and MERGING, as SongOwnValue.h's writeSongOwnInto() writes them (the elements after the root's other children: the
-// placeholders, its track list and its master, in the tree's order), and its count of IDs (nextID) where it is kept; nothing
+// and MERGING, as SongOwnValue.h's writeSongOwnInto() writes them (writeSongTree() then puts the root's children in the
+// description's order: SongState.h), and its count of IDs (nextID) where it is kept; nothing
 // for another element. And whether two songs' roots, each with its kept values, hold the same of what counts of the song's
 // own: its own value (the outline, the notes, the numbering, patterns' speed, a merge waiting) and its key set last (LASTKEY,
 // counted; the versions' names and how the song plays and shows count nothing, nor its count of IDs). Both of Project's

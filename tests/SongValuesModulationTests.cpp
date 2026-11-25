@@ -5,12 +5,12 @@
 // differs before and after, compared as values (getModulationValue(), independent of what tells it), with where it was and
 // is, the parts that differ among those it was told and its value after as getModulatorValue() reads it; one told that
 // doesn't differ was taken out and came back (a track moved); and nothing of another area. Another area's change tells it
-// nothing. What listens to the song's root hears each change once: where the tree told nothing but modulation's, the
+// nothing. What counts the song's changes hears each change once: where no other area told anything, the
 // project's count of changes and the versions' count of the song's changes go up by the calls the listener was told. The
 // area tells once for each change of its value (modulation's switch): an edit's step once where one writer sets it, its Undo
 // and its Redo once. And what plays takes a value set by hand at once, without a plan, and what makes a plan makes one, as
-// before. The keeper's cases under UndoCheck (a container removed and brought back, a track moved into a folder and back, a
-// container preset's macros taken in, a track duplicated, a lone macro refused), a set equal to what is held, the unsaved
+// before. Under UndoCheck: (a container removed and brought back, a track moved into a folder and back, a
+// container preset's macros set with it, a track duplicated), a set equal to what is held, the unsaved
 // check, a version applied each way and as copied, and Swap's trial on a track with modulation.
 //   phazite_tests.exe --test-case="Song values' modulation*"
 #include "EnginePlayback.h"
@@ -92,15 +92,14 @@ struct Told final : phazite::SongValues::Listener
     void clipsChanged (const std::vector<phazite::SongValues::ClipChange>&, const std::vector<phazite::TrackID>&) override { ++clips; }
     void tempoMapChanged() override { ++tempo; }
 
-    // The tracks', which a track removed, duplicated or moved comes and goes with since the tracks' switch (no TRACK element
-    // in the tree).
+    // The tracks', which a track removed, duplicated or moved comes and goes with since the tracks' switch.
     void tracksChanged (const std::vector<phazite::TrackChange>&, const std::vector<phazite::TrackID>&, const phazite::SongTracks&) override
     {
         ++tracksTold;
     }
     void curvesChanged (const std::vector<phazite::ParameterRef>&) override { ++curves; }
 
-    // The devices', which a container's macros come and go with since the devices' switch (no CONTAINER element in the tree).
+    // The devices', which a container's macros come and go with since the devices' switch.
     void devicesChanged (const std::vector<phazite::SongValues::DeviceChange>&, const std::vector<phazite::DevicePlace>&,
                          const phazite::SongDevices&) override
     {
@@ -147,49 +146,6 @@ struct Told final : phazite::SongValues::Listener
     int notes = 0, clips = 0, tempo = 0, curves = 0, tracksTold = 0, devices = 0, calls = 0;
     std::map<std::uint64_t, Entry> told;
     std::vector<ModulatorPlace> reordered;
-};
-
-// What a listener of the song's root is told, as the test sees it, without asking the song: under a modulator (a MODULATOR
-// or a MACRO, or what is in one; one added or taken out), and all else.
-struct TreeHeard final : juce::ValueTree::Listener
-{
-    explicit TreeHeard (const juce::ValueTree& rootToHear)
-        : root (rootToHear)
-    {
-        root.addListener (this);
-    }
-
-    ~TreeHeard() override { root.removeListener (this); }
-
-    static bool isModulator (const juce::ValueTree& element)
-    {
-        return element.hasType (phazite::schema::MODULATOR) || element.hasType (phazite::schema::MACRO);
-    }
-
-    static bool isUnderModulator (juce::ValueTree element)
-    {
-        for (; element.isValid(); element = element.getParent())
-            if (isModulator (element))
-                return true;
-
-        return false;
-    }
-
-    void hear (bool underModulator) { ++(underModulator ? modulation : other); }
-
-    void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&) override { hear (isUnderModulator (tree)); }
-    void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override
-    {
-        hear (isModulator (child) || isUnderModulator (parent));
-    }
-    void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override
-    {
-        hear (isModulator (child) || isUnderModulator (parent));
-    }
-    void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override { hear (isUnderModulator (parent)); }
-
-    juce::ValueTree root;
-    int modulation = 0, other = 0;
 };
 
 bool holdSameNumbers (const ModulatorValue& a, const ModulatorValue& b)
@@ -299,8 +255,7 @@ std::vector<ModulatorPlace> findReordered (const SongModulation& before, const S
     return owners;
 }
 
-// A song in a project of its own, with its versions, the values' listener and a listener of its root recording what they
-// are told.
+// A song in a project of its own, with its versions and the values' listener recording what they are told.
 struct Watched
 {
     Watched()
@@ -311,13 +266,11 @@ struct Watched
 
     ~Watched() { song.getValues()->removeListener (&told); }
 
-    // What a change told: the values' listener; the root's listener, under the modulators and of everything else; how far
-    // the project's count of changes and the versions' count of the song's changes went up meanwhile; and the song's
-    // modulation before it and after.
+    // What a change told: the values' listener; how far the project's count of changes and the versions' count of the
+    // song's changes went up meanwhile; and the song's modulation before it and after.
     struct Heard
     {
         Told told;
-        int modulation = 0, other = 0;
         juce::int64 project = 0, versions = 0;
         SongModulation before, after;
         std::map<std::uint64_t, std::optional<ModulatorValue>> read; // each modulator told, as getModulatorValue() reads it after
@@ -328,7 +281,6 @@ struct Watched
         auto* versions = phazite::getVersionHistory (s.context);
         REQUIRE (versions != nullptr);
         told = {};
-        tree.modulation = tree.other = 0;
         const auto projectBefore = s.getProject().getChangeCount();
         const auto versionsBefore = versions->countSongChanges();
         auto before = phazite::getModulationValue (song);
@@ -336,8 +288,6 @@ struct Watched
         auto after = phazite::getModulationValue (song);
         Heard heard;
         heard.told = told;
-        heard.modulation = tree.modulation;
-        heard.other = tree.other;
         heard.project = s.getProject().getChangeCount() - projectBefore;
         heard.versions = versions->countSongChanges() - versionsBefore;
         heard.before = std::move (before);
@@ -364,7 +314,6 @@ struct Watched
     phazite::test::TestSong s;
     phazite::Song& song = *phazite::findSong (s.context);
     Told told;
-    TreeHeard tree { song.getState() };
 };
 
 // What a change and its Undo and Redo told, each against the song's modulation before and after: every modulator that
@@ -372,7 +321,7 @@ struct Watched
 // differ; one told that doesn't differ as it is after too (one taken out and back, as a track JUCE moves); every owner whose
 // modulators came in another order told; nothing of another area unless othersToo; once at most for each change of the
 // area's value: once for the step where it sets the area once (severalSets false: one writer that works its whole next value
-// out), and once for its Undo and its Redo, which put the area's whole value back; and, where the tree told nothing else, the
+// out), and once for its Undo and its Redo, which put the area's whole value back; and, where no other area told, the
 // project's and the versions' counts up by the calls the listener was told.
 void checkHeard (const juce::String& name, const std::vector<Watched::Heard>& heard, bool othersToo = false, bool severalSets = false)
 {
@@ -453,9 +402,9 @@ void checkHeard (const juce::String& name, const std::vector<Watched::Heard>& he
             CHECK (each.told.curves == 0);
         }
 
-        // Heard once: what listens to the song's root counts what it was told, and its tree's callbacks nothing more (where
-        // nothing else changed: the tree, or the devices, which a container's macros come and go with).
-        if (each.other == 0 && each.told.devices == 0 && each.told.tracksTold == 0)
+        // Heard once: what counts the song's changes counts what it was told (where nothing else changed: the tracks, or
+        // the devices, which a container's macros come and go with).
+        if (each.told.devices == 0 && each.told.tracksTold == 0)
         {
             CHECK (each.project == each.told.calls);
             CHECK (each.versions == each.told.calls);
@@ -973,13 +922,12 @@ TEST_CASE ("Song values' modulation: the unsaved check compares the order of a m
     CHECK (project.hasUnsavedChanges());
 }
 
-TEST_CASE ("Song values' modulation: the keeper keeps a container's macros and a track's modulators with their elements, takes a "
-           "new container's in, and refuses a lone macro, each one exact undo step")
+TEST_CASE ("Song values' modulation: a container's macros and a track's modulators go and come back with them, follow a move "
+           "and a copy, and a new container's are set with it, each one exact undo step")
 {
     phazite::test::TestSong s;
     auto& song = *phazite::findSong (s.context);
     auto& context = s.context;
-    const auto& values = *song.getValues();
     const auto track = s.firstTrack;
     const auto other = s.addTrack ("Other");
     const auto lfo = s.addModulator (track, ModulatorType::lfo);
@@ -990,23 +938,6 @@ TEST_CASE ("Song values' modulation: the keeper keeps a container's macros and a
     REQUIRE (macros.size() == 8);
     s.setMacroValue (macros[0], 0.25f);
     phazite::test::UndoCheck undo (context);
-
-    // The tree holds none of them; each is the area's, on its place.
-    const auto holdsNoElement = [&song]
-    {
-        const std::function<bool (const juce::ValueTree&)> none = [&none] (const juce::ValueTree& element)
-        {
-            for (const auto& child : element)
-                if (child.hasType (phazite::schema::MODULATOR) || child.hasType (phazite::schema::MACRO) || ! none (child))
-                    return false;
-
-            return true;
-        };
-
-        return none (song.getState());
-    };
-
-    CHECK (holdsNoElement());
 
     // (b) A container removed, its macros with it, and brought back by its Undo, their values and places as they were.
     const auto before = phazite::getModulationValue (song);
@@ -1027,12 +958,10 @@ TEST_CASE ("Song values' modulation: the keeper keeps a container's macros and a
     CHECK (phazite::getModulationValue (song) == before);
     undo.checkSeveral ("Ungroup Folder", [&] { phazite::ungroupFolder (song, folder); });
     CHECK (phazite::getModulationValue (song) == before);
-    CHECK (holdsNoElement());
 
     // (c) A container from a preset of the one there: its eight macros, made as values with it and set by its inserter in its
-    // one step, none taken in by the keeper's safety net; its Undo and its Redo take them out and back.
+    // one step; its Undo and its Redo take them out and back.
     const auto preset = phazite::makeDevicePreset (song, container);
-    const auto adoptedBefore = values.countModulationAdopted();
     phazite::DeviceID made;
     undo.check ("Add Device",
                 [&]
@@ -1044,10 +973,8 @@ TEST_CASE ("Song values' modulation: the keeper keeps a container's macros and a
     REQUIRE (made.isValid());
     const auto madeMacros = phazite::getContainerMacros (song, made);
     REQUIRE (madeMacros.size() == 8);
-    CHECK (values.countModulationAdopted() == adoptedBefore);
     CHECK (phazite::getModulatorValue (song, madeMacros[0])->value == doctest::Approx (0.25f));
     CHECK (phazite::getModulatorValue (song, madeMacros[0])->place.track == other);
-    CHECK (holdsNoElement());
     phazite::undo (song);
     CHECK (phazite::getContainerMacros (song, made).empty());
     phazite::redo (song);
@@ -1063,11 +990,8 @@ TEST_CASE ("Song values' modulation: the keeper keeps a container's macros and a
     CHECK (copied.front() != lfo);
     REQUIRE (phazite::getModulations (song, copied.front()).size() == 1);
     CHECK (phazite::getModulations (song, copied.front())[0].parameter == s.getPanParameter (copies.front()));
-    CHECK (holdsNoElement());
     undo.walkBackAndForth();
 
-    // (A lone macro added to a container's element: none since the devices' switch, the song's tree holding no container.)
-    CHECK (holdsNoElement());
     phazite::test::checkSong (song);
 }
 
@@ -1143,7 +1067,7 @@ TEST_CASE ("Song values' modulation: a version with other modulation applied eac
 
     // The song as copied writes nothing (asserted in Debug builds: ApplySong.cpp), its modulation the value it was.
     const auto held = phazite::getModulationValue (song);
-    phazite::makeSongAsCopied (song, phazite::test::copyWholeSong (song));
+    phazite::makeSongAsCopied (song, phazite::getSongState (song));
     CHECK (phazite::getModulationValue (song).isSameAs (held));
     undo.walkBackAndForth();
     phazite::test::checkSong (song);
@@ -1184,11 +1108,11 @@ TEST_CASE ("Song values' modulation: Swap's trial of a preset on a track with mo
     phazite::test::checkSong (song);
 }
 
-TEST_CASE ("Song values' modulation: a learning device's removal heard by the MIDI linker's tree callback looks at no modulation")
+TEST_CASE ("Song values' modulation: a learning device's removal heard by the MIDI linker looks at no modulation")
 {
-    // The linker hears a device taken out from the devices' listener, by its ID (model/midi/internal/MidiLinks.h), and its tree
-    // callback asks the tree alone of what the tree holds (Parameters.h: locateParameterInTree()): no tree callback reads an
-    // area. The device taken out through the devices' setter, outside the history, so that no step's work runs meanwhile.
+    // The linker hears a device taken out from the devices' listener, by its ID (model/midi/internal/MidiLinks.h), and ends
+    // learning without a look at modulation. The device taken out through the devices' setter, outside the history, so that
+    // no step's work runs meanwhile.
     phazite::test::TestSong s;
     auto& song = *phazite::findSong (s.context);
     const auto track = s.firstTrack;
@@ -1314,44 +1238,10 @@ TEST_CASE ("Song values' modulation: a track deleted and brought back by Undo, w
     phazite::test::checkSong (song);
 }
 
-TEST_CASE ("Song values' modulation: a lone modulator added to the master in a step is refused")
-{
-    // The keeper's own, which stays: on the master, the one channel whose element the song's tree holds (a
-    // place: the tracks are values since the tracks' switch).
-    // As a lone macro is (the keeper's case (d)): the element can't be taken out in the step that adds it (JUCE workaround
-    // W62, docs/juce-workarounds.md), so it is refused, the song's modulation as it was; its step's Undo takes it out again.
-    phazite::test::TestSong s;
-    auto& song = *phazite::findSong (s.context);
-    const auto track = s.firstTrack;
-    s.addModulator (track, ModulatorType::lfo);
-    const auto held = phazite::getModulationValue (song);
-    auto trackState = song.getState().getChildWithName (phazite::schema::MASTER);
-    juce::ValueTree lone (phazite::schema::MODULATOR);
-    lone.setProperty (phazite::schema::modulatorID, (juce::int64) song.makeID(), nullptr);
-    lone.setProperty (phazite::schema::modulatorType, "lfo", nullptr);
-    REQUIRE (phazite::readModulatorKind (lone).has_value());
-
-    {
-        const phazite::test::ExpectedAssertion refused ("ModulationArea.cpp");
-        const phazite::UndoStep step (song, "A Lone Modulator");
-        trackState.appendChild (lone, &song.getUndoManager());
-#if JUCE_DEBUG
-        CHECK (refused.getCount() == 1);
-#endif
-    }
-
-    CHECK (phazite::getModulationValue (song) == held);
-    phazite::undo (song);
-    CHECK_FALSE (trackState.getChildWithName (phazite::schema::MODULATOR).isValid());
-    CHECK (phazite::getModulationValue (song) == held);
-    phazite::test::checkSong (song);
-}
-
 TEST_CASE ("Song values' modulation: a track deleted, then its line brought back from a version, comes back with its modulators "
            "and its container's macros as they were, and Undo and Redo take them back and forth")
 {
-    // What the keeper does with a track that comes in with its modulators (the case above refuses a lone one), as someone does
-    // it, through the model: so that it holds unchanged once the tracks leave the song's tree (roadmap step S5.20).
+    // A track that comes back with its modulators, as someone does it, through the model.
     phazite::test::TestSong s;
     auto& song = *phazite::findSong (s.context);
     auto& context = s.context;

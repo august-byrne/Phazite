@@ -1,31 +1,29 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song whole, or a part of it whole: what needs the song or a part of it with everything it holds (a save, a version's
-// pieces, a comparison, a merge, the clipboard, a duplicate, an export) asks these, never the song's tree alone
-// (Song::getState().createCopy()). The song keeps areas of itself as values beside its tree (roadmap step S5.20;
-// model/base/internal/SongValues.h): its clips, a MIDI clip's notes and its controllers' values, and its tempo map, which its
-// tree doesn't hold. These write what is kept beside the tree back in, so that what asks gets the tree a song that kept
-// everything in its tree would give: under each track, its clips first among its elements, in the track's order, each
+// The song whole, or a part of it whole, as the tree a file holds: what needs the song or a part of it with everything it
+// holds as elements (a save, a version's pieces, a comparison, a merge, the clipboard, a duplicate, an export) asks these. The
+// song is values (roadmap step S5.20; model/base/internal/SongValues.h); these write its file's form from a state of it
+// (SongState.h: writeSongTree()): under each track, its clips first among its elements, in the track's order, each
 // written as ClipsValue.h's writeClipElement() writes it (each property only while it is set; an audio clip's warp markers;
-// a MIDI clip's NOTE elements, then its CONTROL elements, each kind in its order); in the song's TEMPOMAP element, which
-// the tree keeps empty for it, its tempos then its time signatures, each kind by beat, each written as TempoMapValue.h's
-// writeTempoMap() writes it (a tempo's curve only while it isn't 1); in the song's CHORDLANE, where it has one, its
-// chords then its key changes, each kind in its order, each written as ChordLaneValue.h's writeChordLane() writes it; and in
-// the song's MIDILINKS, where it has one, its MIDI links in their order, each written as MidiLinksValue.h's writeMidiLinks()
-// writes it; and in the song's AUTOMATION, while it has a curve (a song without one is written without an AUTOMATION), its
-// curves in their order, each written as CurveValues.h's writeCurves() writes it; under each TRACK, the MASTER and each
-// CONTAINER, its modulators and macros in their order, after its other children, each written as ModulationValue.h's
+// a MIDI clip's NOTE elements, then its CONTROL elements, each kind in its order); in the song's TEMPOMAP element its tempos
+// then its time signatures, each kind by beat, each written as TempoMapValue.h's writeTempoMap() writes it (a tempo's curve
+// only while it isn't 1); in the song's CHORDLANE, where its lane is placed, its chords then its key changes, each kind in its
+// order, each written as ChordLaneValue.h's writeChordLane() writes it; and in the song's MIDILINKS, while it has a link, its
+// MIDI links in their order, each written as MidiLinksValue.h's writeMidiLinks() writes it; and in the song's AUTOMATION,
+// while it has a curve, its curves in their order, each written as CurveValues.h's writeCurves() writes it; in the song's
+// SECTIONS, while it has a section, its sections in their order; under each TRACK, the MASTER and each CONTAINER, its
+// modulators and macros in their order, after its other children, each written as ModulationValue.h's
 // writeModulatorElement() writes it; and under each TRACK, its sends in their order, after those (the last of its children),
 // each written as SendsValue.h's writeSendElement() writes it; and in each plug-in's DEVICE what the store holds of it, its
 // values set by hand as VALUEs sorted by their parameters after its other children, in each CHAIN its mute and solo, and in
 // each DEVICE its window's place (DeviceStoreValue.h: writeStoreInto(), writeWindowPlaceInto()); and on each TRACK and the
 // MASTER its switches and its view's properties, with its LANES after its clips, its devices and a folder's tracks, before its
 // modulators and its sends (TracksArea.h: writeTrackLeavesIn()). The tracks themselves are written by one function
-// (WholeState.cpp: writeTracksIn()), into the copy's TRACKS and MASTER, which the song's tree keeps empty: each TRACK in its
-// list's order with, in this order, its own properties (TracksValue.h: writeTrackElement()), its switches and its view's
-// properties; its clips; its devices and containers; a folder's TRACKs, each written the same; its LANES; its modulators and
-// macros; its sends; the MASTER its own properties, its mode and view, its devices, its LANES, its modulators. And on the
-// song's root (PHAZITE) the song's own, its properties and its count of IDs (nextID), with its LASTKEY, PIANOROLL and
-// MERGING after the root's other children, in that order (SongOwnArea.h: writeSongOwnIn()).
+// (WholeState.cpp: writeTracksIn()), into the copy's TRACKS and MASTER: each TRACK in its list's order with, in this order,
+// its own properties (TracksValue.h: writeTrackElement()), its switches and its view's properties; its clips; its devices
+// and containers; a folder's TRACKs, each written the same; its LANES; its modulators and macros; its sends; the MASTER its
+// own properties, its mode and view, its devices, its LANES, its modulators. And on the song's root (PHAZITE) the song's own,
+// its properties and its count of IDs (nextID), with its LASTKEY, PIANOROLL and MERGING (SongOwnArea.h: writeSongOwnIn()),
+// the root's children in the description's order (SongState.h: writeSongTree()).
 #pragma once
 
 #include "model/base/IDs.h"
@@ -43,13 +41,9 @@ namespace phazite
 {
 class Song;
 
-// The song's tree, or a part of it (its track list, its TEMPOMAP, any of its root's places), as a copy that holds everything
-// the song holds of it: for a song that holds its values, written from its state alone (SongState.h: writeSongTree (getSongState
-// (song)), and a place by writeSongPart()). A part that isn't the song's, and any part of a song that keeps everything in its
-// tree (one that holds no values: Song::getValues()), is copied as it is. A copy no one else holds, which any thread may then
-// read. Message thread.
+// The song as a tree that holds everything the song holds, written from its state (SongState.h: writeSongTree (getSongState
+// (song))). A copy no one else holds, which any thread may then read. Message thread.
 juce::ValueTree copyWholeSong (const Song&);
-juce::ValueTree copyWhole (const Song&, const juce::ValueTree& part);
 
 // A clip of the song by its ID, as a CLIP element that holds everything the song holds of it (an invalid tree for a clip that
 // isn't the song's): what reads a clip as a file would hold it (the tests). Message thread.
@@ -60,7 +54,7 @@ juce::ValueTree copyWholeClip (const Song&, ClipID);
 // model/project/internal/Project.h; a version's song, split on the history's thread; what a frozen track's file holds:
 // model/mixer/internal/Freeze.h), with writeSongTree() and readSongTree(), its converters to and from the file's form, which
 // build the tree where it is used: the message thread takes the state alone. copyWholeSong() is writeSongTree (getSongState
-// (song)) for a song that holds its values.
+// (song)).
 //
 // One device, container or chain of a state, as a DEVICE, CONTAINER or CHAIN element that holds everything the state holds of
 // it, as whole state writes it (DevicesArea.h: writeDeviceWhole(), with what the store, the windows' places and modulation
@@ -89,8 +83,8 @@ bool holdSameClip (const SongState&, const SongState&, ClipID);
 bool holdSameTrackClips (const SongState&, const SongState&, TrackID);
 
 // Whether two states hold the same tempo map, as one value (TempoMapValue.h: the same tempos and time signatures, each kind by
-// beat): so that a tempo changed and changed back compares as the same; and both a TEMPOMAP among their root's places or
-// neither. Both of Project's comparisons with the saved copy compare the tempo map so (the quick one, and the whole song's:
+// beat): so that a tempo changed and changed back compares as the same. Both of Project's comparisons with the saved copy
+// compare the tempo map so (the quick one, and the whole song's:
 // holdSameSong()), so that the two agree. Any thread. In TempoMapArea.cpp.
 bool holdSameTempoMap (const SongState&, const SongState&);
 
@@ -100,11 +94,10 @@ bool holdSameTempoMap (const SongState&, const SongState&);
 // thread. In ChordLaneArea.cpp.
 bool holdSameChordLane (const SongState&, const SongState&);
 
-// Whether two states hold the same MIDI links: both a MIDILINKS among their root's places or neither (an empty one is written
-// into the file, as the first link made it: SongState::rootPlaces), and the same links as one value (MidiLinksValue.h: in
-// their order), so that a link taken away and made again as it was compares as the same. Both of Project's comparisons with
-// the saved copy compare the links so (the quick one, and the whole song's), so that the two agree. Any thread. In
-// MidiLinksArea.cpp.
+// Whether two states hold the same MIDI links, as one value (MidiLinksValue.h: in their order; none is none, whether a file held
+// an empty MIDILINKS or none), so that a link taken away and made again as it was compares as the same. Both of Project's
+// comparisons with the saved copy compare the links so (the quick one, and the whole song's), so that the two agree. Any thread.
+// In MidiLinksArea.cpp.
 bool holdSameMidiLinks (const SongState&, const SongState&);
 
 // Whether two songs' kept values hold the same automation, as values (CurveValues.h: their points' keys aside), so that a
@@ -118,10 +111,10 @@ bool holdSameCurve (const SongState&, const SongState&, const ParameterRef&);
 bool holdSameCurveOrder (const SongState&, const SongState&);
 bool holdSameCurves (const SongState&, const SongState&);
 
-// Whether two states hold the same sections: both a SECTIONS among their root's places or neither (an empty one is written
-// into the file, as the first section made it), and the same sections as one value (SectionsValue.h: in their order), so that
-// a section changed and changed back compares as the same. Both of Project's comparisons with the saved copy compare the
-// sections so (the quick one, and the whole song's), so that the two agree. Any thread. In SectionsArea.cpp.
+// Whether two states hold the same sections, as one value (SectionsValue.h: in their order; none is none, whether a file held an
+// empty SECTIONS or none), so that a section changed and changed back compares as the same. Both of Project's comparisons with
+// the saved copy compare the sections so (the quick one, and the whole song's), so that the two agree. Any thread. In
+// SectionsArea.cpp.
 bool holdSameSections (const SongState&, const SongState&);
 
 // Whether two songs' kept values hold the same modulation, as values (ModulationValue.h): all of it; one modulator or macro

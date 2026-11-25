@@ -848,7 +848,6 @@ void whenNoVersionsWriteInto (const juce::File& folder, std::function<void()> ac
 
 VersionHistory::VersionHistory (Song& s, std::function<void()> changeCallback)
     : song (s),
-      state (s.getState()),
       onChange (std::move (changeCallback)),
       thread (std::make_shared<BackgroundJobs> ("Phazite versions", 1, juce::Thread::Priority::normal)),
       audioPaths (std::make_shared<VersionsAudio>())
@@ -856,7 +855,6 @@ VersionHistory::VersionHistory (Song& s, std::function<void()> changeCallback)
     changesOutsideHistory = song.getChangesOutsideHistory();
     outsideSeen = song.getDeviceChangesOutsideHistory();
     pluginsLoadingSeen = getPluginsLoading (song).size();
-    state.addListener (this);
 
     if (auto* values = song.getValues())
         values->addListener (this);
@@ -878,8 +876,6 @@ VersionHistory::~VersionHistory()
     backgroundBounce = nullptr; // cancelled, before what it renders goes
     if (auto* values = song.getValues())
         values->removeListener (this);
-
-    state.removeListener (this);
 
     // A version open: the song as it was again, so that whatever holds it on (a test's song, which outlives its project) holds
     // its own. Its owner's work as it goes back (VersionsModel.cpp) needs a history, which goes: the trial alone is put back.
@@ -3063,46 +3059,6 @@ void VersionHistory::changesWorked (bool compared, const ChangesWorker::Result& 
 }
 
 //==============================================================================
-void VersionHistory::markChanged (const juce::ValueTree& tree)
-{
-    if (! schema::isCounted (tree, {}))
-        return;
-
-    edited();
-
-    // The track (or the master) it is in, nearest first: an element a safety net refused in a step, left where it was put
-    // until the step's Undo (a track's line otherwise: tracksChanged()). Or else the song's own: a placeholder come or gone,
-    // its elements in another order (its curves: curvesChanged()).
-    for (auto element = tree; element.isValid(); element = element.getParent())
-    {
-        if (element.hasType (schema::TRACK) || element.hasType (schema::MASTER))
-        {
-            markTrack (element);
-            return;
-        }
-    }
-
-    markSongOwn();
-}
-
-void VersionHistory::markChildChanged (const juce::ValueTree& parent, const juce::ValueTree& child)
-{
-    // (A merge taken or undone, redone, aborted, Schema.h: MERGING, and the key set last: songOwnChanged(),
-    // songStandingChanged().)
-    if (schema::isUncountedElement (parent, child) || ! schema::isCounted (parent, {}))
-        return;
-
-    edited();
-
-    // (A track, the track list or the master added or taken away: tracksChanged().)
-    markChanged (parent);
-}
-
-void VersionHistory::markTrack (const juce::ValueTree& track)
-{
-    markLineKey (track.hasType (schema::MASTER) ? ChangesWorker::masterKey : readID (track[schema::trackID]));
-}
-
 void VersionHistory::markLineKey (std::uint64_t key)
 {
     sinceBase.markTrack (key);
@@ -3456,15 +3412,6 @@ void VersionHistory::markOrder()
     sinceBase.markOrder();
     againstCompared.markOrder();
     changesMayDiffer();
-}
-
-void VersionHistory::valueTreeChildOrderChanged (juce::ValueTree& parent, int, int)
-{
-    if (isHeardAsKept (parent))
-        return; // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged(), midiLinksChanged(), tracksChanged()
-
-    ++songChanges;
-    markChanged (parent); // (tracks in another order: tracksChanged())
 }
 
 void VersionHistory::markAllChanged()

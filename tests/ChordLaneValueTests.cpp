@@ -8,6 +8,7 @@
 #include "TestHelpers.h"
 #include "model/base/internal/ChordLaneValue.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongState.h"
 #include "model/chords/ChordValues.h"
 #include "model/chords/Progressions.h"
 #include "model/chords/internal/Chords.h"
@@ -247,7 +248,7 @@ TEST_CASE ("Chord lane value: damaged lanes read as the lane's code read them, w
 
     // The readers on a song opened with the lane (a file from others, which the loader makes consistent and the song takes
     // into its values: ChordLaneValue.h, readHeldChordLane()), the same as the lane's code read the lane the loader left.
-    auto state = phazite::makeNewSong();
+    auto state = phazite::writeSongTree (phazite::makeNewSong());
     state.appendChild (lane.createCopy(), nullptr);
     const auto song = phazite::makeSong (state);
     REQUIRE (song != nullptr);
@@ -339,12 +340,4 @@ TEST_CASE ("Chord lane value: what enters the song's lane keeps its chords apart
     // Chords that touch, or overlap by no more than the lane's nearness, are apart.
     const ChordLaneValue touching { { chord (0.0, 4.0 + phazite::chordLaneNear / 2.0, "a"), chord (4.0, 4.0, "b") }, {} };
     CHECK (phazite::holdsChordsApart (touching));
-
-    // The keeper's safety net keeps them apart too: a chord taken in over the end of one held.
-    const auto taken = phazite::withEntryTaken (
-        ChordLaneValue { { chord (0.0, 8.0, "a") }, {} },
-        juce::ValueTree (schema::CHORD, { { schema::chordStart, 4.0 }, { schema::chordLength, 4.0 }, { schema::chordType, "b" } }));
-    REQUIRE (taken.chords.size() == 2);
-    CHECK (taken.chords[0] == chord (0.0, 4.0, "a"));
-    CHECK (taken.chords[1] == chord (4.0, 4.0, "b"));
 }

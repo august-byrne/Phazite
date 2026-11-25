@@ -15,6 +15,7 @@
 #include "model/automation/AutomationModel.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SendsValue.h"
+#include "model/base/internal/SongState.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/ParameterHandle.h"
@@ -471,7 +472,7 @@ TEST_CASE ("Another project opened ends learning, and its own links are diverted
     phazite::startMidiLearn (s.parameter ("resonance"));
     CHECK (tap.isLearning());
 
-    s.song.openSong (phazite::makeNewSong()); // a new song written whole: a live song's tree holds no track
+    s.song.openSong (phazite::writeSongTree (phazite::makeNewSong())); // a new song written whole
     CHECK_FALSE (phazite::isLearningMidi (s.song.context));
     CHECK_FALSE (tap.isLearning());
     CHECK_FALSE (tap.isDiverted (1, 21));
@@ -948,7 +949,7 @@ TEST_CASE ("The project closed during a burst: the burst is kept with its song, 
     sendController (1, 21, 120);
     REQUIRE (s.getLinker().isInBurst());
 
-    s.song.openSong (phazite::makeNewSong()); // a new song written whole: a live song's tree holds no track
+    s.song.openSong (phazite::writeSongTree (phazite::makeNewSong())); // a new song written whole
     auto* linker = phazite::findMidiLinker (getSong (s.song));
     REQUIRE (linker != nullptr);
     CHECK_FALSE (linker->isBurstOpen());

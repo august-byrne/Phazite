@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/SongPieces.h"
 #include "model/base/Json.h"
-#include "model/base/Song.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
 #include "model/project/internal/Project.h"
@@ -18,6 +17,16 @@ namespace phazite
 namespace
 {
     namespace versions = schema::versions;
+
+    // Text between an element's tags, which a piece Phazite writes never holds (its values are attributes) and a value tree has
+    // nothing for: left out of a piece from elsewhere before it becomes one.
+    void removeText (juce::XmlElement& element)
+    {
+        element.deleteAllTextElements();
+
+        for (auto* child : element.getChildIterator())
+            removeText (*child);
+    }
 
     // A list of an element's notes or points this long or longer is in runs, each ending after about one in averageRun of
     // them: after one whose text's FNV-1a hash is a multiple of averageRun. Where a run ends depends on what it holds alone,
@@ -463,16 +472,9 @@ namespace
         if (idsGivenAnew != nullptr)
             *idsGivenAnew = ! holdsEachIDOnce (song, keptOut);
 
-        {
-            Song checked (song);
-
-            // The project's file isn't read: the checks take the folder it is in.
-            if (projectFolder != juce::File())
-                checked.setFile (projectFolder.getChildFile ("song.phazite"));
-
-            // Read in part, what names an ID it hasn't may name what wasn't read: kept, for the song it is taken into to judge.
-            makeConsistent (checked, wrappers.empty() ? ReadAs::whole : ReadAs::inPart);
-        }
+        // Read in part, what names an ID it hasn't may name what wasn't read: kept, for the song it is taken into to judge. The
+        // project's file isn't read: the checks take the folder it is in.
+        makeConsistent (song, projectFolder, wrappers.empty() ? ReadAs::whole : ReadAs::inPart);
 
         for (auto& wrapper : wrappers)
         {
@@ -613,7 +615,10 @@ juce::ValueTree readElement (const juce::MemoryBlock& block)
         return {};
 
     if (const auto xml = juce::parseXML (block.toString()))
+    {
+        removeText (*xml);
         return juce::ValueTree::fromXml (*xml);
+    }
 
     return {};
 }

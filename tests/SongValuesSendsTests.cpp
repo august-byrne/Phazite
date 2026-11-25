@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // What hears the song's sends change hears it from one place (model/base/internal/SongValues.h: Listener::sendsChanged()), by
-// the sends' IDs (roadmap step S5.20; from the sends' switch on, the song's tree holds none: their area tells). For each edit
+// the sends' IDs (roadmap step S5.20). For each edit
 // of sends made through the model, its Undo and its Redo, the listener is told every send that differs before and after,
 // compared as values (getSendsValue(), independent of what tells it), with the track it was on and is on, the return it went
 // to and goes to, the parts that differ among those it was told and its value after as getSendValue() reads it, and the
 // song's sends whole after; one told that doesn't differ was taken out and came back (a track moved); what it was told,
 // change by change, takes the sends before to those after; and nothing of another area. Each edit tells once, its Undo and
-// its Redo once each. Another area's change tells it nothing. What listens to the song's root hears each change once: where
-// the tree told nothing but the sends', the project's count of changes and the versions' count of the song's changes go up
+// its Redo once each. Another area's change tells it nothing. What counts the song's changes hears each change once: where
+// no other area told anything, the project's count of changes and the versions' count of the song's changes go up
 // by the calls the listener was told. And what plays takes a level at once, without a plan, and what makes a plan makes
 // one, as before; what decides which send sends follows them between plans, sends in another order too; what writes
 // automation follows what an undo, a redo or a trial put back set, once the move is whole; the unsaved check and MIDI learn
-// follow them too. The keeper's cases under UndoCheck (a track's sends through a deletion, a folder, a duplicate, a return
-// removed, a lone send refused, a track that comes in with sends), a version applied each way and a line's, and a merge's
+// follow them too. Under UndoCheck: (a track's sends through a deletion, a folder, a duplicate, a return
+// removed), a version applied each way and a line's, and a merge's
 // choices.
 //   phazite_tests.exe --test-case="Song values' sends*"
 #include "EnginePlayback.h"
@@ -92,8 +92,7 @@ struct Told final : phazite::SongValues::Listener
     void clipsChanged (const std::vector<phazite::SongValues::ClipChange>&, const std::vector<TrackID>&) override { ++clips; }
     void tempoMapChanged() override { ++tempo; }
 
-    // The tracks', which a track removed, duplicated or moved comes and goes with since the tracks' switch (no TRACK element
-    // in the tree).
+    // The tracks', which a track removed, duplicated or moved comes and goes with since the tracks' switch.
     void tracksChanged (const std::vector<phazite::TrackChange>&, const std::vector<phazite::TrackID>&, const phazite::SongTracks&) override
     {
         ++tracksTold;
@@ -188,45 +187,7 @@ bool takesTo (const SongSends& applied, const SongSends& after)
     return true;
 }
 
-// What a listener of the song's root is told, as the test sees it, without asking the song: of a SEND (one added or taken
-// out, a property of one), and all else.
-struct TreeHeard final : juce::ValueTree::Listener
-{
-    explicit TreeHeard (const juce::ValueTree& rootToHear)
-        : root (rootToHear)
-    {
-        root.addListener (this);
-    }
-
-    ~TreeHeard() override { root.removeListener (this); }
-
-    static bool isUnderSend (juce::ValueTree element)
-    {
-        for (; element.isValid(); element = element.getParent())
-            if (element.hasType (phazite::schema::SEND))
-                return true;
-
-        return false;
-    }
-
-    void hear (bool ofSend) { ++(ofSend ? sends : other); }
-
-    void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&) override { hear (isUnderSend (tree)); }
-    void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override
-    {
-        hear (child.hasType (phazite::schema::SEND) || isUnderSend (parent));
-    }
-    void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override
-    {
-        hear (child.hasType (phazite::schema::SEND) || isUnderSend (parent));
-    }
-    void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override { hear (isUnderSend (parent)); }
-
-    juce::ValueTree root;
-    int sends = 0, other = 0;
-};
-
-// The parts in which a send differs between two values of the song's sends, worked out here (independent of the keeper):
+// The parts in which a send differs between two values of the song's sends, worked out here (independent of what tells it):
 // none where it is the same, `made` where it comes or goes or is on another track.
 std::uint8_t findDifferingParts (const SendValue* was, const SendValue* is)
 {
@@ -290,8 +251,7 @@ std::vector<TrackID> findReordered (const SongSends& before, const SongSends& af
     return tracks;
 }
 
-// A song in a project of its own, with its versions, the values' listener and a listener of its root recording what they
-// are told.
+// A song in a project of its own, with its versions and the values' listener recording what they are told.
 struct Watched
 {
     Watched()
@@ -302,13 +262,11 @@ struct Watched
 
     ~Watched() { song.getValues()->removeListener (&told); }
 
-    // What a change told: the values' listener; the root's listener, of the sends and of everything else; how far the
-    // project's count of changes and the versions' count of the song's changes went up meanwhile; and the song's sends before
-    // it and after.
+    // What a change told: the values' listener; how far the project's count of changes and the versions' count of the
+    // song's changes went up meanwhile; and the song's sends before it and after.
     struct Heard
     {
         Told told {};
-        int sends = 0, other = 0;
         juce::int64 project = 0, versions = 0;
         SongSends before {}, after {};
         std::map<std::uint64_t, std::optional<SendValue>> read {}; // each send told, as getSendValue() reads it after
@@ -319,7 +277,6 @@ struct Watched
         auto* versions = phazite::getVersionHistory (s.context);
         REQUIRE (versions != nullptr);
         told = {};
-        tree.sends = tree.other = 0;
         const auto projectBefore = s.getProject().getChangeCount();
         const auto versionsBefore = versions->countSongChanges();
         auto before = phazite::getSendsValue (song);
@@ -328,8 +285,6 @@ struct Watched
         auto after = phazite::getSendsValue (song);
         Heard heard;
         heard.told = told;
-        heard.sends = tree.sends;
-        heard.other = tree.other;
         heard.project = s.getProject().getChangeCount() - projectBefore;
         heard.versions = versions->countSongChanges() - versionsBefore;
         heard.before = std::move (before);
@@ -356,13 +311,12 @@ struct Watched
     phazite::test::TestSong s;
     phazite::Song& song = *phazite::findSong (s.context);
     Told told;
-    TreeHeard tree { song.getState() };
 };
 
 // What a change and its Undo and Redo told, each against the song's sends before and after: every send that differs told,
 // as it is after (there or not, on which track, to which return, its value as getSendValue() reads it), with at least the
 // parts that differ; one told that doesn't differ as it is after too (one taken out and back, as a track JUCE moves); every
-// track whose sends came in another order told; nothing of another area unless othersToo; and, where the tree told nothing
+// track whose sends came in another order told; nothing of another area unless othersToo; and, where the tracks told nothing
 // else, the project's and the versions' counts up by the calls the listener was told.
 void checkHeard (const juce::String& name, const std::vector<Watched::Heard>& heard, bool othersToo = false)
 {
@@ -449,8 +403,8 @@ void checkHeard (const juce::String& name, const std::vector<Watched::Heard>& he
             CHECK (each.told.modulation == 0);
         }
 
-        // Heard once: what listens to the song's root counts what it was told, and its tree's callbacks nothing more.
-        if (each.other == 0 && each.told.tracksTold == 0)
+        // Heard once: what counts the song's changes counts what it was told (where the tracks told nothing).
+        if (each.told.tracksTold == 0)
         {
             CHECK (each.project == each.told.calls);
             CHECK (each.versions == each.told.calls);
@@ -596,8 +550,7 @@ TEST_CASE ("Song values' sends: what takes sends along tells them: a track with 
     }
 
     // Into a folder: the same sends, on the same track, told nothing since the tracks' switch (roadmap step S5.20): a track
-    // moved changes its place in the tracks' lists alone (named: JUCE took its element out and put it in again before, and
-    // the sends' keeper told its sends taken out and back).
+    // moved changes its place in the tracks' lists alone.
     TrackID folder;
 
     {
@@ -771,7 +724,7 @@ TEST_CASE ("Song values' sends: which sends send while a track is muted follows 
            "holds of them: a bus's send switched before its fader, then removed, before the plans they asked for")
 {
     // A bus muted feeds what listens to it, a send of its before its fader among them, so the tracks in it play on into it
-    // (SongPlayer.cpp: updateAudibility()). A mute or a solo decides that at once, in the tree's callback, from the sends the
+    // (SongPlayer.cpp: updateAudibility()). A mute or a solo decides that at once, as the switches tell it, from the sends the
     // player holds (SongPlayer::heldSends), which the song's values keep up to date between plans. A bus's send is made by no
     // edit (a send is a track's), so the song is opened from a file that holds one, as the loader keeps it.
     phazite::test::TestSong s;
@@ -1298,20 +1251,7 @@ TEST_CASE ("Song values' sends: what writes automation follows a send's level th
     CHECK (points.back().position == doctest::Approx (position).epsilon (0.002));
 }
 
-namespace
-{
-// Whether the song's tree holds a SEND anywhere: none, from the sends' switch on (their area holds them).
-bool holdsSendElement (const juce::ValueTree& tree)
-{
-    for (const auto& child : tree)
-        if (child.hasType (phazite::schema::SEND) || holdsSendElement (child))
-            return true;
-
-    return false;
-}
-} // namespace
-
-TEST_CASE ("Song values' sends: the keeper keeps a track's sends with its element through a deletion and its Undo, a folder and "
+TEST_CASE ("Song values' sends: a track's sends go with it through a deletion and come back with its Undo, follow a folder and "
            "a duplicate whose sends' modulated, automated and MIDI-linked levels follow the copy, and a return removed takes the "
            "sends to it, each one exact undo step")
 {
@@ -1343,7 +1283,6 @@ TEST_CASE ("Song values' sends: the keeper keeps a track's sends with its elemen
         phazite::linkMidiController (song, { 1, 21 }, levelOf (toReverb));
     }
 
-    CHECK_FALSE (holdsSendElement (song.getState()));
     const auto before = phazite::getSendsValue (song);
     phazite::test::UndoCheck undo (context);
 
@@ -1363,7 +1302,6 @@ TEST_CASE ("Song values' sends: the keeper keeps a track's sends with its elemen
     CHECK (phazite::getSendsValue (song) == before);
     undo.checkSeveral ("Ungroup Folder", [&] { phazite::ungroupFolder (song, folder); });
     CHECK (phazite::getSendsValue (song) == before);
-    CHECK_FALSE (holdsSendElement (song.getState()));
 
     // Duplicated: the copy's sends under new IDs, to the same returns, as they are; the copy's LFO modulates the copy's first
     // send's level, its second's automation is the copy's too; the MIDI link stays the original's (a controller turns one
@@ -1398,7 +1336,6 @@ TEST_CASE ("Song values' sends: the keeper keeps a track's sends with its elemen
     };
     CHECK (isLinked (toReverb));
     CHECK_FALSE (isLinked (copied[0].id));
-    CHECK_FALSE (holdsSendElement (song.getState()));
     phazite::test::checkSong (song);
 
     // A return removed: the sends to it go in that step (the original's, the copy's and the other track's), with what
@@ -1421,8 +1358,8 @@ TEST_CASE ("Song values' sends: the keeper keeps a track's sends with its elemen
 TEST_CASE ("Song values' sends: a track deleted and brought back by Undo, whose send is then removed, is moved into a folder "
            "without it")
 {
-    // The keeper remembers a deleted track's sends with its element, and the Undo (which it leaves alone) brings them back
-    // itself: what it remembered must not come back with the next move of the same element, once the send is gone.
+    // A track deleted and brought back by its Undo, whose send is then removed: the send must not come back with the next
+    // move of the track.
     phazite::test::TestSong s;
     auto& song = *phazite::findSong (s.context);
     auto& context = s.context;
@@ -1456,60 +1393,10 @@ TEST_CASE ("Song values' sends: a track deleted and brought back by Undo, whose 
     phazite::test::checkSong (song);
 }
 
-TEST_CASE ("Song values' sends: a track that comes in with sends outside the history has them taken in by the tracks' safety net, "
-           "one of an ID the song holds dropped")
-{
-    // The tracks' safety net. Since the tracks' switch the song's tree holds no TRACK, so no lone SEND
-    // can be added to one; a TRACK that comes in is the tracks' part of the keeper's (TracksArea.h), which reads its sends
-    // through the sends' reader of a track (SendsArea.h: takeTrackSendsIn()), outside the history alone.
-    phazite::test::TestSong s;
-    auto& song = *phazite::findSong (s.context);
-    const auto& values = *song.getValues();
-    const auto track = s.firstTrack;
-    TrackID reverb;
-    DeviceID held, other;
-
-    {
-        const phazite::UndoStep step (song, "Add Sends");
-        reverb = phazite::addReturnTrack (song, "Reverb", nullptr);
-        held = phazite::addSend (song, track, reverb, false);
-        other = phazite::addSend (song, track, phazite::addReturnTrack (song, "Delay", nullptr), true);
-    }
-
-    REQUIRE (other.isValid());
-
-    // A track that comes in whole with its SEND elements (as a merge's choice of a whole track brings one), outside the
-    // history: its own taken in, counted (by the sends' count, and as a track taken in), the one under an ID the song holds
-    // dropped (the song's kept, on its track), none left in the tree.
-    auto incoming = phazite::test::copyTrack (song, track);
-    phazite::giveNewIDs (song, incoming);
-    auto sendsIn = 0;
-
-    for (auto child : incoming)
-        if (child.hasType (phazite::schema::SEND) && sendsIn++ == 0)
-            child.setProperty (phazite::schema::sendID, (juce::int64) held.getRaw(), nullptr); // the song's send's ID
-
-    REQUIRE (sendsIn == 2);
-    const auto came = phazite::readTrackElementID (incoming);
-    const auto tracksBefore = values.countTracksAdopted();
-
-    {
-        const phazite::Song::OutsideHistory outside (song);
-        song.getState().getChildWithName (phazite::schema::TRACKS).appendChild (incoming, nullptr);
-    }
-
-    CHECK (values.countTracksAdopted() == tracksBefore + 1);
-    REQUIRE (phazite::getSends (song, came).size() == 1);
-    CHECK (phazite::getSendTrack (song, held) == track);
-    CHECK_FALSE (holdsSendElement (song.getState()));
-    phazite::test::checkSong (song);
-}
-
 TEST_CASE ("Song values' sends: a track deleted, then its line brought back from a version, comes back with its sends as they "
            "were, and Undo and Redo take them back and forth")
 {
-    // What the keeper does with a track that comes in with its sends (the case above), as someone does it, through the model:
-    // so that it holds unchanged once the tracks leave the song's tree (roadmap step S5.20).
+    // A track that comes back with its sends, as someone does it, through the model.
     phazite::test::TestSong s;
     auto& song = *phazite::findSong (s.context);
     const auto track = s.firstTrack;
@@ -1540,7 +1427,6 @@ TEST_CASE ("Song values' sends: a track deleted, then its line brought back from
                            phazite::removeBrokenReferences (song);
                        });
     CHECK (phazite::getSendsValue (song) == before);
-    CHECK_FALSE (holdsSendElement (song.getState()));
     phazite::test::checkSong (song);
 
     undo.stepBackOrForth ("Undo Restore Track", [&] { phazite::undo (song); });
@@ -1642,7 +1528,6 @@ TEST_CASE ("Song values' sends: a version with other sends applied each way, a t
                                phazite::removeBrokenReferences (song);
                            });
         CHECK (phazite::readSendsValue (*other) == phazite::getSendsValue (song));
-        CHECK_FALSE (holdsSendElement (song.getState()));
         phazite::test::checkSong (song);
     }
 
@@ -1686,7 +1571,7 @@ TEST_CASE ("Song values' sends: a version with other sends applied each way, a t
 
     // The song as copied writes nothing (asserted in Debug builds: ApplySong.cpp), its sends the value they were.
     const auto held = phazite::getSendsValue (song);
-    phazite::makeSongAsCopied (song, phazite::test::copyWholeSong (song));
+    phazite::makeSongAsCopied (song, phazite::getSongState (song));
     CHECK (phazite::getSendsValue (song).isSameAs (held));
     undo.walkBackAndForth();
     phazite::test::checkSong (song);

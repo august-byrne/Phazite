@@ -7,18 +7,6 @@
 
 namespace phazite
 {
-namespace
-{
-    // The song's MIDILINKS element once what it held is read into the song's links (the adoption and the keeper's safety net
-    // alike): emptied, the place a whole copy writes the links in, its properties and children Phazite doesn't know taken out
-    // too (Schema.h, MIDILINKS).
-    void emptyMidiLinksElement (juce::ValueTree& links, juce::UndoManager* undo)
-    {
-        links.removeAllChildren (undo);
-        links.removeAllProperties (undo);
-    }
-} // namespace
-
 //==============================================================================
 SongValues::MidiLinksTeller::MidiLinksTeller (ValueArea<MidiLinksValue>& a, juce::ListenerList<SongValues::Listener>& l)
     : area (a),
@@ -39,74 +27,11 @@ void SongValues::MidiLinksTeller::valueAreaChanged (const MidiLinksValue& before
 }
 
 //==============================================================================
-SongValues::MidiLinksKeeper::MidiLinksKeeper (SongValues& v, Song& s)
-    : values (v),
-      song (s),
-      state (s.getState())
-{
-}
-
-void SongValues::MidiLinksKeeper::childAdded (juce::ValueTree& parent, juce::ValueTree& child)
-{
-    const auto isLinks = child.hasType (schema::MIDILINKS) && parent == state;
-
-    if (! isLinks && ! isHeardAsMidiLinks (parent, child))
-        return;
-
-    // The safety net (SongValues.h): a MIDILINKS that comes into the song with links in it has them read in as the song's
-    // links, and is emptied as adopt() empties the song's own (emptyMidiLinksElement(): what Phazite doesn't know of it goes
-    // too); a link added to the song's MIDILINKS by itself is read into the links and taken out again while the song is
-    // written outside the history, and refused in a step, whose Undo, taking the tree's change back first, would find it gone
-    // (JUCE workaround W62 (docs/juce-workarounds.md)). Either in the mode of the moment.
-    auto* undo = song.isWritingOutsideHistory() ? nullptr : &song.getUndoManager();
-
-    if (isLinks)
-    {
-        auto links = 0;
-
-        for (const auto& element : child)
-            links += element.hasType (schema::MIDILINK) ? 1 : 0;
-
-        if (links > 0)
-        {
-            values.midiLinksAdopted += links;
-            values.setMidiLinks (song, readHeldMidiLinks (child));
-        }
-
-        // Emptied whether or not it held a link: what Phazite doesn't know of it goes too, so that it is the empty place.
-        if (child.getNumChildren() > 0 || child.getNumProperties() > 0)
-            emptyMidiLinksElement (child, undo);
-
-        return;
-    }
-
-    if (! child.hasType (schema::MIDILINK) || ! parent.hasType (schema::MIDILINKS) || parent.getParent() != state)
-        return;
-
-    if (undo != nullptr)
-    {
-        jassertfalse; // a link added to the song's MIDI links: the MIDI links' functions change them (MidiLinks.h)
-        return;
-    }
-
-    ++values.midiLinksAdopted;
-    values.setMidiLinks (song, withLinkTaken (values.midiLinks.get(), child));
-    parent.removeChild (child, nullptr);
-}
-
-void SongValues::MidiLinksKeeper::adopt (SongValues&, Song& loaded)
-{
-    // The song's MIDILINKS, whose links its reader read into the area before (readHeldMidiLinksIn(): SongValues.cpp, adopt()),
-    // emptied (emptyMidiLinksElement()), and kept: it is the place a whole copy writes the links in, written as the song had it.
-    // Nothing for a song without one.
-    if (auto links = loaded.getState().getChildWithName (schema::MIDILINKS); links.isValid())
-        emptyMidiLinksElement (links, nullptr);
-}
-
 void readHeldMidiLinksIn (const juce::ValueTree& song, SongState& into)
 {
     // The links the loader made consistent, each as the song holds one, one of each controller and of each parameter
-    // (MidiLinksValue.h: readHeldMidiLinks()); none for a song without a MIDILINKS.
+    // (MidiLinksValue.h: readHeldMidiLinks()); none for a song without a MIDILINKS, or with an empty one (an empty list is
+    // none).
     if (const auto links = song.getChildWithName (schema::MIDILINKS); links.isValid())
         into.midiLinks = readHeldMidiLinks (links);
 }
@@ -126,20 +51,6 @@ void SongValues::setMidiLinks (Song& song, MidiLinksValue next)
         midiLinks.set (std::move (next));
 }
 
-bool isHeardAsMidiLinks (const juce::ValueTree& element)
-{
-    for (auto each = element; each.isValid(); each = each.getParent())
-        if (each.hasType (schema::MIDILINKS))
-            return each.getParent().hasType (schema::PHAZITE);
-
-    return false;
-}
-
-bool isHeardAsMidiLinks (const juce::ValueTree& parent, const juce::ValueTree&)
-{
-    return isHeardAsMidiLinks (parent);
-}
-
 //==============================================================================
 bool leadsToMidiLinks (const juce::ValueTree& parent, const juce::ValueTree& child)
 {
@@ -148,21 +59,15 @@ bool leadsToMidiLinks (const juce::ValueTree& parent, const juce::ValueTree& chi
 
 void writeMidiLinksIn (juce::ValueTree& element, const SongState& kept)
 {
-    // Nothing kept of no links, nor of a song that keeps everything in its tree (whose MIDILINKS holds its links).
     if (! element.hasType (schema::MIDILINKS) || kept.midiLinks.links.empty())
         return;
 
-    jassert (element.getNumChildren() == 0); // the song's tree holds none of its links (SongValues.h)
     writeMidiLinks (kept.midiLinks, element);
 }
 
 bool holdSameMidiLinks (const SongState& kept, const SongState& otherKept)
 {
-    // Whether each has a MIDILINKS among its root's places (an empty one is written into the file, and is no song without one),
-    // and the values.
-    if (kept.holdsPlace (RootPlace::midiLinks) != otherKept.holdsPlace (RootPlace::midiLinks))
-        return false;
-
+    // The values alone: none is none, an empty MIDILINKS being written nowhere (SongState.h).
     return kept.midiLinks.isSameAs (otherKept.midiLinks) || kept.midiLinks == otherKept.midiLinks;
 }
 } // namespace phazite

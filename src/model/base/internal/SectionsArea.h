@@ -3,15 +3,6 @@
 // which a list of SongValues.h's or WholeState.h's asks in turn, a line for each area. Its value and the conversion of its
 // elements are SectionsValue.h's. It holds IDs (each section's: IDsHeld.h asks findLargestIDIn()). Message thread, but for
 // whole state's parts, which read only the values they are given.
-//
-// The sections' SECTIONS element stays in the song's tree, empty, where the song has one: added with the first section, as
-// it always was, never taken away by the sections' edits (a song whose sections all went keeps it), and the place a whole
-// copy writes the sections in. No reader asks whether it is there (the sections' readers read the value); its presence is
-// written into the song's file and compared with the saved copy (an empty SECTIONS is a difference from none), so it keeps
-// its rules: who makes and takes away the element is the sections' code (model/arrangement/internal/Sections.h: a section
-// made, in that step, as it was made with the first section; and a version's sections made the song's, makeSectionsAs(),
-// which adds or takes it away as the other song has it), never a reader; the element's own coming and going is the tree's,
-// which its listeners hear as before.
 #pragma once
 
 #include "model/base/IDs.h"
@@ -50,34 +41,10 @@ struct SongValues::SectionsTeller final : ValueArea<SectionsValue>::Listener
 // change of the value with no section named).
 std::vector<SectionID> findSectionsChanged (const SectionsValue& before, const SectionsValue& after);
 
-// The sections' part of the keeper (SongValues.h), its safety net: a SECTIONS that comes into the song with sections in it has
-// them read in as the song's sections (readHeldSections()), and is emptied as the adoption empties the song's own (what
-// Phazite doesn't know of it goes too); a SECTION added to the song's SECTIONS by itself is read into the sections
-// (withSectionTaken()) and taken out again while the song is written outside the history, and refused in a step. Nothing when
-// one of its elements leaves the tree. And the sections' adoption from the loaded tree, which the song's holdValues() asks.
-struct SongValues::SectionsKeeper
-{
-    SectionsKeeper (SongValues&, Song&);
-
-    // A child added to an element of the song's tree (the keeper's callback, but while the history undoes or redoes, for
-    // every element, whoever's it is): nothing, at once, but for the song's SECTIONS or a child added to it.
-    void childAdded (juce::ValueTree& parent, juce::ValueTree& child);
-
-    // The song's SECTIONS emptied, once its reader read the sections the loader made consistent into the area
-    // (readHeldSectionsIn(), SongValues.cpp: adopt()). A song without a SECTIONS keeps none, its sections none.
-    static void adopt (SongValues& into, Song& loaded);
-
-    SongValues& values;
-    Song& song;
-    juce::ValueTree state;
-
-    JUCE_DECLARE_NON_COPYABLE (SectionsKeeper)
-};
-
 // The sections' part of whole state (WholeState.cpp: writeIn()): whether a child of an element in a copy of the song is the
 // song's SECTIONS (the child of its PHAZITE element); and a copy's SECTIONS given the sections kept (SectionsValue.h:
-// writeSections(), in their order), where some are kept (a song that keeps everything in its tree keeps none: its SECTIONS
-// holds its sections). Nothing for an element that isn't a SECTIONS.
+// writeSections(), in their order). Nothing for an element that isn't a SECTIONS: whole state writes one while the song
+// holds a section, none for none (SongState.h).
 bool leadsToSections (const juce::ValueTree& parent, const juce::ValueTree& child);
 void writeSectionsIn (juce::ValueTree& element, const SongState&);
 

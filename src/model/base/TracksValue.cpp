@@ -1036,6 +1036,27 @@ juce::ValueTree findTrackElementByID (const juce::ValueTree& song, TrackID id)
     return findIn (song.getChildWithName (schema::TRACKS));
 }
 
+TrackOrder readTrackOrder (const juce::ValueTree& song)
+{
+    TrackOrder order;
+    int number = 0;
+
+    for (const auto& element : listTrackElements (song))
+    {
+        const auto id = readTrackElementID (element);
+        const auto folder = readTrackKind (element) == Kind::folder;
+        number += folder ? 0 : 1;
+        TrackOrder::Place place;
+        place.index = (int) order.order.size();
+        place.number = folder ? 0 : number;
+        order.places.emplace_back (id.getRaw(), place);
+        order.order.push_back (id);
+    }
+
+    std::stable_sort (order.places.begin(), order.places.end(), [] (const auto& a, const auto& b) { return a.first < b.first; });
+    return order;
+}
+
 std::uint64_t countTracksReadAsValues() noexcept
 {
     return tracksRead.load (std::memory_order_relaxed);

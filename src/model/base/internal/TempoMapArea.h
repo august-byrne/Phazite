@@ -30,34 +30,9 @@ struct SongValues::TempoMapTeller final : ValueArea<TempoMapValue>::Listener
     JUCE_DECLARE_NON_COPYABLE (TempoMapTeller)
 };
 
-// The tempo map's part of the keeper (SongValues.h), its safety net: a TEMPOMAP that comes into the song with entries in it
-// has them read in as the song's map, and is emptied as the adoption empties the song's own (what Phazite doesn't know of it
-// goes too); an entry added to the song's TEMPOMAP by itself is read into the map and taken out again while the song is
-// written outside the history, and refused in a step. Nothing when one of its elements leaves the tree. And the tempo map's
-// adoption from the loaded tree, which the song's holdValues() asks.
-struct SongValues::TempoMapKeeper
-{
-    TempoMapKeeper (SongValues&, Song&);
-
-    // A child added to an element of the song's tree (the keeper's callback, but while the history undoes or redoes, for
-    // every element, whoever's it is): nothing, at once, but for what is the tempo map's (isHeardAsTempoMap()).
-    void childAdded (juce::ValueTree& parent, juce::ValueTree& child);
-
-    // The song's TEMPOMAP emptied (made where it has none), once its reader read the map the loader made consistent into the
-    // area (readHeldTempoMapIn(), SongValues.cpp: adopt()).
-    static void adopt (SongValues& into, Song& loaded);
-
-    SongValues& values;
-    Song& song;
-    juce::ValueTree state;
-
-    JUCE_DECLARE_NON_COPYABLE (TempoMapKeeper)
-};
-
 // The tempo map's part of whole state (WholeState.cpp: writeIn()): whether a child of an element in a copy of the song is the
 // song's TEMPOMAP (the child of its PHAZITE element); and a copy's TEMPOMAP given the map kept (TempoMapValue.h:
-// writeTempoMap(): tempos then time signatures, each kind by beat), where one is kept (a song that keeps everything in its
-// tree keeps none: its TEMPOMAP holds its entries). Nothing for an element that isn't a TEMPOMAP.
+// writeTempoMap(): tempos then time signatures, each kind by beat). Nothing for an element that isn't a TEMPOMAP.
 bool leadsToTempoMap (const juce::ValueTree& parent, const juce::ValueTree& child);
 void writeTempoMapIn (juce::ValueTree& element, const SongState&);
 

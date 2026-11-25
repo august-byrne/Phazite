@@ -635,22 +635,16 @@ SavedGrid readSavedGrid (const juce::ValueTree& gridHolder)
 //==============================================================================
 const SongOwnValue& getSongOwn (const Song& song)
 {
-    static const SongOwnValue none {};
-    const auto* values = song.getValues();
-    return values != nullptr ? values->songOwn.get() : none;
+    return song.getValues()->songOwn.get();
 }
 
 const SongStanding& getSongStanding (const Song& song)
 {
-    static const SongStanding none {};
-    const auto* values = song.getValues();
-    return values != nullptr ? values->songStanding.get() : none;
+    return song.getValues()->songStanding.get();
 }
 
 const SongOutside& getSongOutside (const Song& song)
 {
-    static const SongOutside none {};
-    const auto* values = song.getValues();
-    return values != nullptr ? values->songOutside.get() : none;
+    return song.getValues()->songOutside.get();
 }
 } // namespace phazite

@@ -74,10 +74,7 @@ namespace
         next.tempos = keepBeatsDescribed (next.tempos);
         next.signatures = keepBeatsDescribed (next.signatures);
 
-        if (auto* values = song.getValues())
-            values->setTempoMap (song, std::move (next));
-        else
-            jassertfalse; // the tempo map's edits are a song's that holds its values (model/project/internal/Project.h: makeSong())
+        song.getValues()->setTempoMap (song, std::move (next));
     }
 
     // The map with one tempo (by its place in getTempoChanges()) changed in place: its bpm or its curve, never its beat.
@@ -138,13 +135,7 @@ namespace
 //==============================================================================
 const TempoMapValue& getTempoMapValue (const Song& song)
 {
-    if (const auto* values = song.getValues())
-        return values->tempoMap.get();
-
-    // A song that holds no values (one made to be read or checked keeps everything in its tree, which nothing reads the tempo
-    // map of: Song::getValues()).
-    static const auto none = makeDefaultTempoMap();
-    return none;
+    return song.getValues()->tempoMap.get();
 }
 
 std::vector<TempoChange> getTempoChanges (const Song& song)
@@ -179,13 +170,13 @@ Bars getBars (const Song& song)
 namespace
 {
     // The song's tempo map as the engine plays it at a sample rate, as the song keeps it for the value it holds now
-    // (SongValues.h: PlayedTempoMap): made once for each change of the value, not at every call. None for a song that holds no
-    // values, or on another thread than the message thread, where the map is made for the call.
+    // (SongValues.h: PlayedTempoMap): made once for each change of the value, not at every call. None on another thread than
+    // the message thread, where the map is made for the call.
     const engine::TempoMap* findPlayedTempoMap (const Song& song, double sampleRate)
     {
         const auto* values = song.getValues();
 
-        if (values == nullptr || ! juce::MessageManager::existsAndIsCurrentThread())
+        if (! juce::MessageManager::existsAndIsCurrentThread())
             return nullptr;
 
         const auto& value = values->tempoMap.get();
@@ -252,20 +243,14 @@ double getTempoAt (const Song& song, BeatPosition beat)
     return readPlayed (song, 1.0, [beat] (const engine::TempoMap& map) { return map.getTempoAt (beat.inBeats()); });
 }
 
-void ensureTempoMap (Song& song)
+void ensureTempoMap (juce::ValueTree& song)
 {
-    // A song that holds its values holds its map whole in its area, at least one of each kind (SongValues.h), and its TEMPOMAP
-    // element stays, the empty place a whole copy writes the map in: nothing to make.
-    if (song.getValues() != nullptr)
-        return;
-
-    auto phazite = song.getState();
-    auto map = phazite.getChildWithName (schema::TEMPOMAP);
+    auto map = song.getChildWithName (schema::TEMPOMAP);
 
     if (! map.isValid())
     {
         map = juce::ValueTree (schema::TEMPOMAP);
-        phazite.appendChild (map, nullptr);
+        song.appendChild (map, nullptr);
     }
 
     if (! map.getChildWithName (schema::TEMPO).isValid())
@@ -809,7 +794,7 @@ namespace
     {
         auto* values = song.getValues();
 
-        if (values == nullptr || clash.path.size() != 2)
+        if (clash.path.size() != 2)
             return false;
 
         const auto& step = clash.path[1];

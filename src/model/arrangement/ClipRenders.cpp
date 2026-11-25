@@ -224,24 +224,16 @@ void purgeClipRenders (const Song& song)
 //==============================================================================
 ClipRenders::ClipRenders (const Song& s)
     : song (s),
-      state (s.getState()),
       jobs ("Phazite clip renders", 2, juce::Thread::Priority::low)
 {
-    state.addListener (this);
-
-    if (const auto* values = song.getValues())
-        values->addListener (this);
-
+    song.getValues()->addListener (this);
     addFileIdentityListener (*this);
     update();
 }
 
 ClipRenders::~ClipRenders()
 {
-    if (const auto* values = song.getValues())
-        values->removeListener (this);
-
-    state.removeListener (this);
+    song.getValues()->removeListener (this);
     removeFileIdentityListener (*this);
     stopTimer();
     jobs.removeAll (true); // each stops between blocks, and is waited for
@@ -462,46 +454,6 @@ void ClipRenders::handleAsyncUpdate()
     // None being made: the next progress starts over.
     if (running.empty())
         framesMade = framesAll = 0;
-}
-
-void ClipRenders::valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child)
-{
-    if (isSectionsPlaceholder (parent, child))
-        return; // the song's SECTIONS itself, of which no render is made (what is in it is the sections' area's)
-
-    // Whatever was added but an area's of the song's values (isHeardAsKept(): a tempo change, tempoMapChanged(); what is in
-    // the chord lane; a curve's, a modulator's, a send's or a device's, which no render is made of: a render is a clip's
-    // file, stretched by its own settings along the tempo map; a clip comes as clipsChanged()), and but the song's CHORDLANE
-    // itself, of which no render is made (isChordLanePlaceholder()).
-    if (! isHeardAsKept (parent, child) && ! isChordLanePlaceholder (parent, child))
-        rendersMayChange();
-}
-
-void ClipRenders::valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int)
-{
-    if (isSectionsPlaceholder (parent, child))
-        return; // the song's SECTIONS itself
-
-    // Whatever was taken out but an area's of the song's values (isHeardAsKept(): a tempo change, tempoMapChanged(); what is
-    // in the chord lane; a curve's; a send's; a device's; a clip's last warp marker comes as clipsChanged()), and but the song's
-    // CHORDLANE itself (isChordLanePlaceholder()).
-    if (! isHeardAsKept (parent, child) && ! isChordLanePlaceholder (parent, child))
-        rendersMayChange();
-}
-
-bool ClipRenders::isChordLanePlaceholder (const juce::ValueTree& parent, const juce::ValueTree& child)
-{
-    // The song's CHORDLANE itself, added or taken out: the tree's to tell, which isHeardAsKept() leaves to the listeners of
-    // the song's root (SongValues.h: isHeardAsChordLane() leaves it out), and which the renders alone leave alone too.
-    return child.hasType (schema::CHORDLANE) && parent.hasType (schema::PHAZITE);
-}
-
-bool ClipRenders::isSectionsPlaceholder (const juce::ValueTree& parent, const juce::ValueTree& child)
-{
-    // The song's SECTIONS itself, added or taken out (with the first section, or by a version's sections): the tree's to tell,
-    // which isHeardAsKept() leaves to the listeners of the song's root (SongValues.h: isHeardAsSections() leaves it out), and
-    // which the renders alone leave alone too, as the chord lane's.
-    return child.hasType (schema::SECTIONS) && parent.hasType (schema::PHAZITE);
 }
 
 void ClipRenders::tracksChanged (const std::vector<TrackChange>& tracks, const std::vector<TrackID>&, const SongTracks&)

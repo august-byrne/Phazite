@@ -2114,51 +2114,6 @@ std::vector<ClashInfo> getClashes (const ProjectContext& context)
 
 namespace
 {
-    // A choice leaves nothing to the keeper of the song's values (SongValues.h: its safety net): each area's choice sets its
-    // values (chooseInAreas()), a whole track's or the master's among them (chooseTrackClash(): its clips, modulators, macros,
-    // sends and its devices' store entries through each area's code, its values through the tracks' setters), and no choice
-    // in the tree adds an area's entries; checked in Debug builds as a choice ends, as the versions' passes check it (ApplySong.cpp:
-    // NothingTakenIn). What the keeper took in counted for every area that counts it, a line each, in the order of the areas.
-    struct NothingTakenIn
-    {
-        explicit NothingTakenIn (const Song& s)
-            : song (s),
-              before (count (s))
-        {
-        }
-
-        ~NothingTakenIn() { jassert (count (song) == before); }
-
-        static int count (const Song& s)
-        {
-            const auto* values = s.getValues();
-
-            if (values == nullptr)
-                return 0;
-
-            // Not the devices': their choices set them through their setters (chooseDeviceClash()), and their part of the
-            // keeper only tells what the tree holds, taking nothing in, until the devices' switch.
-            return values->countTempoMapAdopted()      // the tempo map's (the clips' and the sends': as a track, below)
-                   + values->countChordLaneAdopted()   // the chord lane's
-                   + values->countMidiLinksAdopted()   // the MIDI links'
-                   + values->countCurvesAdopted()      // the curves'
-                   + values->countSectionsAdopted()    // the sections'
-                   + values->countModulationAdopted()  // modulation's
-                   + values->countDeviceStoreAdopted() // the store's: chooseDeviceStoreClash(), and a whole track's
-                                                       // (chooseTrackClash()) through the store's functions
-                   + values->countTrackLeavesAdopted() // the tracks' switches and view: a switch's clash and a whole
-                                                       // track's through their setters (chooseTrackClash())
-                   + values->countTracksAdopted()      // the tracks': a track's or the master's through their setters
-                   + values->countSongOwnAdopted();    // the song's own: a clash of it through its setters
-                                                       // (chooseSongOwnClash()), the merge's record through setSongOwn()
-        }
-
-        const Song& song;
-        const int before;
-
-        JUCE_DECLARE_NON_COPYABLE (NothingTakenIn)
-    };
-
     // A clash in an area the song holds as a value beside its tree (AreaClashes.h): each area asked in turn, a line each, in
     // this order: the song's own (a property of the song's own, or its LASTKEY), the tempo map (a path into the song's
     // TEMPOMAP), the chord lane (a path into the song's CHORDLANE), the MIDI links, the sections, modulation (a path through a
@@ -2229,7 +2184,6 @@ bool chooseClash (ProjectContext& context, int index, int value)
 
     // A change of its own, one undo step, named for the choice: "Take the Other Branch's: Bass volume".
     const UndoStep step (*song, getClashChoiceName (value) + ": " + clash.line + " " + clash.what);
-    const NothingTakenIn byTheValuesAlone (*song);
 
     // Each area the song holds as a value beside its tree asked. Nothing should reach a clash none of them has: only what
     // Phazite doesn't know at the song's top could, which the song drops as it opens (SongOwnArea.h) and a merge leaves out,
@@ -3229,7 +3183,7 @@ namespace
         auto shown = std::move (*history.shown);
         history.shown.reset();
         // Now's tree written here, from its state, where the song is made as it was.
-        shown.trial->putBackHeld ([song, &shown] { makeSongAsCopied (*song, writeSongTree (shown.now)); });
+        shown.trial->putBackHeld ([song, &shown] { makeSongAsCopied (*song, shown.now); });
 
         // What was selected, and the range: the redo steps undone with the version set the range from before they were done.
         getSelection (context).putBack (shown.selected);

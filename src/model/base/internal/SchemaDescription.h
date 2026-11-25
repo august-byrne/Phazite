@@ -119,7 +119,8 @@ Words oneOf (Word... words)
     return { { words... } };
 }
 
-// Every element it is on holds it (a track's kind).
+// Every element it is on holds it (a track's kind); a text without words not empty either (a lane's parameter), an element
+// without it naming nothing, which goes as the song is read.
 struct Always
 {
 };

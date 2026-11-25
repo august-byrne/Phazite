@@ -3,8 +3,7 @@
 // parameter, in the song's order, in Phazite's own types, and the conversion between the value and the MIDILINKS element with
 // its MIDILINK children (Schema.h), the one place that reads and writes those by name. The song holds this value in an area of
 // its values (SongValues.h, MidiLinksArea.h), which the MIDI links' code (model/midi/internal/MidiLinks.h) computes each edit
-// on; its tree's MIDILINKS, where it has one, is an empty placeholder (added with the first link), the place a whole copy
-// writes the links in.
+// on; a whole copy writes the links in a MIDILINKS while there is one (WholeState.h).
 //
 // Its own header, beside SongValues.h and the other areas' (one header for each area's values; the name MidiLinkValues.h is
 // model/midi's already, for the links' API): the model's base includes no other area, so these are its own types, a
@@ -50,16 +49,16 @@ struct MidiLinksValue
 // readValueNumber()): a channel or a number that is absent, or no finite number, reads as 0, one that isn't whole truncated to
 // a whole one; a device's ID as readID() reads one, text or a number; nothing kept within a range here, which the loader does:
 // model/project/internal/Project.h, makeConsistent()). A child of another type is no link, and a property Phazite doesn't
-// know no part of one. What reads the links of a song that keeps everything in its tree (MidiLinks.h: getMidiLinksValue(),
-// the loader's keepOneMidiLinkEach()), and the tests.
+// know no part of one. What the loader's keepOneMidiLinkEach()
+// reads (MidiLinks.h), and the tests.
 MidiLinksValue readMidiLinksValue (const juce::ValueTree& midiLinksElement);
 
 // One link read so from its MIDILINK element: for what reads a link's element before the song is made of it (the loader:
 // model/project/internal/Project.h, makeConsistent()).
 MidiLinkEntry readMidiLinkEntry (const juce::ValueTree& midiLinkElement);
 
-// The song's links read from a MIDILINKS as the song holds them (SongValues.h: the loaded links Song::holdValues() takes in,
-// the keeper's safety net, a version's links and a merge's choice, MidiLinksArea.h): each MIDILINK child in the element's
+// The song's links read from a MIDILINKS as the song holds them (a song made of a file's state, SongState.h:
+// readSongTree(); a version's links and a merge's choice, MidiLinksArea.h): each MIDILINK child in the element's
 // order, each number as its description reads it (SongText.h: readValueNumber()), made whole: a link whose channel or number
 // is absent, no finite number, or outside its range (Schema.h: goingOutside(), which brought within it would be another
 // controller) goes, as the loader takes it away; so does one that names no parameter (no device's ID, or an empty text). Of
@@ -69,11 +68,6 @@ MidiLinksValue readHeldMidiLinks (const juce::ValueTree& midiLinksElement);
 
 // One link read so from its MIDILINK element (readHeldMidiLinks()): none where it is no link the song can hold.
 std::optional<MidiLinkEntry> readHeldMidiLink (const juce::ValueTree& midiLinkElement);
-
-// The links with one more, read from its MIDILINK element as readHeldMidiLinks() reads one, after the others (where an element
-// appended to the song's MIDILINKS is read), one of each controller and of each parameter kept (keepOneLinkEach()); the links
-// as they are for any other element, and for one that is no link the song can hold. The keeper's safety net.
-MidiLinksValue withLinkTaken (const MidiLinksValue&, const juce::ValueTree& midiLinkElement);
 
 // One link of each controller (its channel and its number) and one of each parameter (its device's ID and its text, as the
 // link holds them): of two, the first in the value's order stays, the other goes. The one rule for both the song's value

@@ -13,7 +13,8 @@
 //           isKnownElementType()), as the format keeps it for a later build or another tool
 //   id      every item's ID once in the song, a note's once in its clip, and the song's next ID past them (SongIDs.h)
 //   names   what names an item names one the song has (a sidechain, a lane's, a curve's and a modulation's device, a pad's
-//           drum sampler), and every value set by hand a parameter its device or modulator has
+//           drum sampler), every value set by hand a parameter its device or modulator has, and a text Schema.h says every
+//           element of its type holds (always, without words: a lane's parameter) there and not empty
 //   key     two elements of a parent never with one key, as describeSongRules() keys them (two curves of one parameter,
 //           two tempos at one beat, two TEMPOMAPs)
 //   kind    what names one of a set of words names one of them: a track's kind, a clip's, a controller event's, a
@@ -25,18 +26,17 @@
 //           with ".."; a full path of any computer's is one Phazite writes itself; nothing for a song without a file
 //   alias   the clips of an alias group (Schema.h: clipLink) hold the same notes and controllers' values (every property of
 //           each NOTE and CONTROL, in the same order), are of one kind, and are two at least
-//   values  of a song that holds its clips and their notes as values beside its tree (model/base/internal/SongValues.h; the
-//           live song, not a copy): no CLIP element in its tree; the clips' lists agree with its clips (holdsItsLists()) and
-//           no alias group is of one clip; each clip on a track of the song that holds clips (not a folder or a return);
-//           every MIDI clip has a value of notes, an audio clip none, and no value belongs to a clip that isn't a MIDI clip
-//           of the song's; and the clips of an alias group hold ONE value of notes, or audio clips ONE sound (the same, not
-//           two alike); and of its tempo map (TempoMapValue.h): no TEMPO or TIMESIGNATURE element in its tree, whose
-//           TEMPOMAP is there and empty; each kind of the value not empty and in the order of its beats; every number within
-//           its description's range (Schema.h); and, while the song's tree holds its tracks, each TRACK and the MASTER read
-//           alike by the lenient readers and the readers of what the song holds (TracksValue.h, TrackSwitchesValue.h,
-//           TracksOutside.h), and the three values written back holding each property they cover as the same text, and the
-//           same lanes, and no other (the tracks' round trip: what the loader's rules leave), but a colour that reads as
-//           none ("0", which a track's preset loaded still writes), compared by the readers alone
+//   values  of the song's values (model/base/internal/SongValues.h), each area on its own: the clips' lists agree with its
+//           clips (holdsItsLists()) and no alias group is of one clip; each clip on a track of the song that holds clips
+//           (not a folder or a return); every MIDI clip has a value of notes, an audio clip none, and no value belongs to a
+//           clip that isn't a MIDI clip of the song's; the clips of an alias group hold ONE value of notes, or audio clips
+//           ONE sound (the same, not two alike); each kind of the tempo map not empty and in the order of its beats; every
+//           number within its description's range (Schema.h); and what each other area holds as its readers keep it
+//   state   the state read back from the song's whole copy is the state the song holds
+//   reopened the song's file's text, opened as a project opens it (the loader, then SongState.h: readSongTree()), writes
+//           the same text, word for word, and that text opened again is the same state; but for a song whose IDs reach the
+//           mark the loader renumbers from (Schema.h: renumberMark). Of findSongProblems() alone (a song as it would open),
+//           never of findValueProblems(), whose songs hold what they keep while open
 #pragma once
 
 #include "TestHelpers.h"
@@ -57,20 +57,30 @@ inline constexpr double maxBeat = 1.0e6;
 std::vector<std::string> findSongProblems (const Song&);
 std::vector<std::string> findSongProblems (const Song&, const schema::Tables&);
 
+// The problems of a song's file as it is, before the loader (a damaged file, a file from elsewhere): the rules that walk the
+// song whole (place, id, key, kind, range, path, alias, and names but a parameter's, which only a song can tell), on the
+// tree itself; for a path, the project's folder given, if any.
+std::vector<std::string> findFileProblems (const juce::ValueTree& file, const schema::Tables& = schema::getTables(),
+                                           const juce::File& projectFolder = {});
+
 // The same, each problem a failed check.
 void checkSong (const Song&);
 
 // The problems of the rule values alone (above), which findSongProblems() finds too: for a song an edit, an undo or a redo
 // left, which holds what it keeps while it is open (the lanes of devices gone, view state), and so is checked whole only as
-// it would open (copyAsOpened()). None for a song that holds no values.
+// it would open (copyAsOpened()). With the rule state: the song whole read back from its file's form, and made of its file's
+// text as a project opens it, is the song.
 std::vector<std::string> findValueProblems (const Song&);
 void checkValues (const Song&); // each a failed check
 
-// What differs between two states of a song (SongState.h), an area at a time, each by its own == (identity aside), and the
-// places of the root a whole copy writes of each: a line for each that differs, naming it ("clips", "tempo map"...); none for
+// What differs between two states of a song (SongState.h), an area at a time, each by its own == (identity aside): a line for
+// each that differs, naming it ("clips", "tempo map"...); none for
 // two states that hold the same song. What the rule values compares, of the state read back from the song's whole copy and the
 // state the song holds (tests/SongStateTests.cpp too).
 std::vector<std::string> findStateDifferences (const SongState&, const SongState&);
+
+// The problems of the rule reopened alone (above), which findSongProblems() finds too.
+std::vector<std::string> findReopenedProblems (const Song&);
 
 // A copy of an edited song as a project opens it from its file: without what it keeps only while it is open (the lanes of
 // devices taken away: SongIDs.h, which the check takes for names of nothing) and where playback starts; its curves as they

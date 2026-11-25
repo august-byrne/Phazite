@@ -46,7 +46,7 @@ bool hasNote (const Song& song, const NoteRef& ref)
     // In its clip's value (ClipNotesValue.h), which a clip that isn't the song's has none of; and a song that keeps everything in
     // its tree (one made to be read or checked: Song::getValues()) none.
     const auto* values = song.getValues();
-    const auto* clip = values != nullptr ? values->findClipNotes (ref.clip) : nullptr;
+    const auto* clip = values->findClipNotes (ref.clip);
     return clip != nullptr && clip->find (ref.note) != nullptr;
 }
 
@@ -89,7 +89,7 @@ bool Selection::isThere (Item item) const
     if (item.kind == Kind::clip)
     {
         const auto* values = song->getValues();
-        return values != nullptr && values->findClip (ClipID::fromRaw (item.id)) != nullptr;
+        return values->findClip (ClipID::fromRaw (item.id)) != nullptr;
     }
 
     if (item.kind == Kind::device)
@@ -224,7 +224,7 @@ int Selection::getNumObjectsSelected() const
     if (auto* song = getSong(); song != nullptr && ! pointKeys.empty())
     {
         const auto* values = song->getValues();
-        const auto* curve = values != nullptr ? values->findCurve (pointsParameter) : nullptr;
+        const auto* curve = values->findCurve (pointsParameter);
 
         if (curve != nullptr && (holdsCurveOwner (*song, pointsParameter.device.getRaw()) || holdsSend (*song, pointsParameter.device)))
             for (const auto& point : curve->points)

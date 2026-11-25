@@ -451,28 +451,8 @@ juce::ValueTree makeMasterFile()
     return file;
 }
 
-// Each write to a song's tree, as a listener of its root hears it.
-struct TreeWrites final : juce::ValueTree::Listener
-{
-    explicit TreeWrites (const juce::ValueTree& rootToHear)
-        : root (rootToHear)
-    {
-        root.addListener (this);
-    }
-
-    ~TreeWrites() override { root.removeListener (this); }
-
-    void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { ++writes; }
-    void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override { ++writes; }
-    void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override { ++writes; }
-    void valueTreeChildOrderChanged (juce::ValueTree&, int, int) override { ++writes; }
-
-    juce::ValueTree root;
-    int writes = 0;
-};
-
 // A song just opened: consistent, its tracks' round trip holding (tests/SongCheck.cpp: checkSong()), and a versions' pass
-// against a version saved from it at once (its text, read back) writing nothing into its tree, in no undo step.
+// against a version saved from it at once (its text, read back) making no undo step.
 void checkOpenedAsVersion (phazite::Song& song)
 {
     phazite::test::checkSong (song);
@@ -482,14 +462,12 @@ void checkOpenedAsVersion (phazite::Song& song)
 
     const auto version = parse (writeText (phazite::test::copyWholeSong (song)));
     song.getUndoManager().clearUndoHistory();
-    TreeWrites tree { song.getState() };
 
     {
         const phazite::UndoStep step (song, "Make Song Like");
         phazite::makeSongLike (song, version);
     }
 
-    CHECK (tree.writes == 0);
     CHECK_FALSE (song.getUndoManager().canUndo());
 }
 
@@ -615,15 +593,14 @@ TEST_CASE ("Tracks' values: the lenient reader reads what the getters it replace
                              R"(<TRACK id="50" kind="whatever" fader="51" colour="#FF336699" automationMode="skip"/>)"
                              R"(</TRACKS><MASTER id="1" fader="2" volume="0" automationMode="latch" pinned="1" drumMode="1"/></PHAZITE>)");
 
-    // The getters read a song's values (roadmap step S5.20, the tracks' switch; a song that holds none is read by
-    // readTracksWithoutValues() alone): a song given, outside the history, what the lenient readers read of the tree as it is.
-    const phazite::Song::Ptr asItIs (new phazite::Song (tree));
+    // The getters read a song's values (roadmap step S5.20, the tracks' switch): a song given, outside the history, what the
+    // lenient readers read of the tree as it is (TracksValue.h: readTracksValue()).
     const auto song = phazite::createSong();
 
     {
         const phazite::Song::OutsideHistory outside (*song);
         auto& values = *song->getValues();
-        values.setAllTracks (*song, phazite::readTracksWithoutValues (*asItIs));
+        values.setAllTracks (*song, phazite::readTracksValue (tree));
         values.setSwitchesOutsideHistory (*song, phazite::readTrackSwitches (tree));
         values.setTracksOutside (phazite::readTracksOutside (tree));
     }
@@ -675,7 +652,7 @@ TEST_CASE ("Tracks' values: the lenient reader reads what the getters it replace
     CHECK_FALSE (phazite::hasTrack (*song, id (40)));
 
     // The lenient reader reads the same.
-    const auto tracks = phazite::readTracksWithoutValues (*asItIs);
+    const auto tracks = phazite::readTracksValue (tree);
     REQUIRE (tracks.find (id (10)) != nullptr);
     const auto& ten = *tracks.find (id (10));
     CHECK (juce::exactlyEqual (ten.volume, 0.0f));

@@ -54,26 +54,9 @@ juce::var getTrackProperty (const Song& song, TrackID id, const juce::Identifier
     return copyTrack (song, id)[property];
 }
 
-bool treeHolds (const Song& song, const juce::Identifier& type)
-{
-    const std::function<bool (const juce::ValueTree&)> holds = [&] (const juce::ValueTree& element)
-    {
-        for (const auto& child : element)
-            if (child.hasType (type) || holds (child))
-                return true;
-
-        return false;
-    };
-
-    return holds (song.getState());
-}
-
 bool holdsExactTrackOrder (const Song& song)
 {
     const auto* values = song.getValues();
-
-    if (values == nullptr)
-        return true;
 
     const auto& tracks = values->tracks.get();
     const auto fresh = makeTrackOrder (tracks);

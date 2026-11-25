@@ -72,29 +72,4 @@ immer::map<Key, Entry, Hash, Equal, MemoryPolicy, bits> withMapChanges (immer::m
 
     return std::move (moved).persistent();
 }
-
-// The map without the entries whose item's ID (idOf (key): the key itself, or a plug-in value's device) is at or above first,
-// in one walk; the very map where it holds none. What the values that keep the entries of items the song no longer holds drop
-// as the song's count of IDs is set back (model/versions/ApplySong.cpp: makeSongAsCopied()), so that an item made next can't
-// take what one of a version's kept under its ID.
-template <typename Key, typename Entry, typename Hash, typename Equal, typename MemoryPolicy, auto bits, typename IDOf>
-immer::map<Key, Entry, Hash, Equal, MemoryPolicy, bits> withoutIDsFrom (const immer::map<Key, Entry, Hash, Equal, MemoryPolicy, bits>& map,
-                                                                        std::uint64_t first, IDOf idOf)
-{
-    auto kept = map;
-
-    for (const auto& entry : map)
-        if (idOf (entry.first) >= first)
-            kept = kept.erase (entry.first);
-
-    return kept;
-}
-
-// The same of a map by the items' IDs themselves.
-template <typename Entry, typename Hash, typename Equal, typename MemoryPolicy, auto bits>
-immer::map<std::uint64_t, Entry, Hash, Equal, MemoryPolicy, bits>
-    withoutIDsFrom (const immer::map<std::uint64_t, Entry, Hash, Equal, MemoryPolicy, bits>& map, std::uint64_t first)
-{
-    return withoutIDsFrom (map, first, [] (std::uint64_t id) { return id; });
-}
 } // namespace phazite

@@ -283,19 +283,6 @@ bool holdSameEntriesOf (const DeviceStore& a, const DeviceStore& b, DeviceID id)
            && ! haveDifferentSongsValues (a, b, id);
 }
 
-DeviceStore withoutIDsFrom (const DeviceStore& store, std::uint64_t first)
-{
-    auto kept = store;
-    kept.pluginValues = withoutIDsFrom (store.pluginValues, first, [] (const PluginValueKey& key) { return key.device.getRaw(); });
-    kept.states = withoutIDsFrom (store.states, first);
-    kept.programs = withoutIDsFrom (store.programs, first);
-    kept.formatIDs = withoutIDsFrom (store.formatIDs, first);
-    kept.versions = withoutIDsFrom (store.versions, first);
-    kept.chainMutes = withoutIDsFrom (store.chainMutes, first);
-    kept.chainSolos = withoutIDsFrom (store.chainSolos, first);
-    return kept;
-}
-
 //==============================================================================
 namespace
 {
@@ -531,21 +518,6 @@ namespace
         return isSameValue (held, juce::var (toWhole<int> (held)));
     }
 } // namespace
-
-bool holdsStoreIn (const juce::ValueTree& element)
-{
-    if (element.hasType (schema::CHAIN))
-        return element.hasProperty (schema::chainMute) || element.hasProperty (schema::chainSolo);
-
-    if (! element.hasType (schema::DEVICE))
-        return false;
-
-    for (const auto* property : getDeviceStoreProperties())
-        if (element.hasProperty (*property))
-            return true;
-
-    return element.getChildWithName (schema::VALUE).isValid();
-}
 
 void takeStoreOutOf (juce::ValueTree element, juce::UndoManager* undo)
 {

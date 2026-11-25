@@ -3,11 +3,10 @@
 // (Schema.h: TRACK) and the master (MASTER) as a TrackValue, its fields that are written in the undo history alone; every
 // one of a song (SongTracks) by its ID, with each folder's list and the top list that order them, the master a member, and
 // the helpers that alone write it; the song's order made of those lists (TrackOrder); and the conversion between those
-// elements and the values, the one place that reads and writes a TRACK's and the MASTER's own properties by name. Since the
-// tracks' switch the song's values hold them (SongValues.h: tracks; TracksArea.h), its tree's TRACKS and MASTER empty: the
-// conversion reads a tree that holds tracks (a file as the song opens, a version's, a whole copy) and writes a whole copy's
-// (WholeState.h); the area's readers read the area (model/arrangement/internal/Tracks.h: getTracksValue(), findTrack()), and
-// read a song that holds no values (the loader's, a check's copy) from its tree through this conversion.
+// elements and the values, the one place that reads and writes a TRACK's and the MASTER's own properties by name. The song's
+// values hold them (SongValues.h: tracks; TracksArea.h): the conversion reads a tree that holds tracks (a file as the song is
+// made of it, a version's, a whole copy) and writes a whole copy's (WholeState.h); the area's readers read the area
+// (model/arrangement/internal/Tracks.h: getTracksValue(), findTrack()).
 //
 // What the value covers, and what it doesn't. A TRACK's trackID, trackKind, trackName, trackColour, folderBus,
 // channelVolume, channelPan, channelFader, channelVCA, keyRoot, keyScale, trackInput, trackMonitoring, trackPadDevice and
@@ -199,8 +198,8 @@ TrackOrder makeTrackOrder (const SongTracks&);
 // for tests. Counted (countTracksReadAsValues()).
 std::optional<TrackValue> readTrackValue (const juce::ValueTree& element);
 
-// The same as the song holds it: what enters the tracks' area (from the tracks' switch: the adoption, a version's tracks and
-// a merge's choice). Each property by its description where it is described on the element's type (Schema.h), nothing
+// The same as the song holds it: what enters the tracks' area (a file's as the song is made of its state, a version's tracks
+// and a merge's choice). Each property by its description where it is described on the element's type (Schema.h), nothing
 // else: its ID one the song can count on from (more than 0, below schema::maxID), else none; its kind one of its words, or
 // as the loader makes an unknown one (a folder where it holds a TRACK, else a track); a volume and a pan within their
 // ranges, their defaults for none and for what is no finite number (readDescribed()); a key's root within its range, made
@@ -224,9 +223,12 @@ void writeMasterInto (juce::ValueTree& master, const TrackValue&);
 
 // Every track of a song's tree (PHAZITE), read as readTrackValue() reads one: each TRACK in the track list and, in a folder,
 // the TRACKs in it (a folder's before them), each list in its element's order; of two with one ID (which the loader leaves
-// none of), the first, without what is in it; and the MASTER. What reads the tracks of a song that holds no values (the
-// loader's, a check's copy: model/arrangement/internal/Tracks.h, readTracksWithoutValues()), and the tests.
+// none of), the first, without what is in it; and the MASTER. And their order, from the elements alone, each read by its ID
+// and its kind (each number as makeTrackOrder() gives it; of two of one ID, the first's place). What the loader's checks read
+// the tracks of a file's song by (model/project/Project.cpp: makeConsistent(); model/mixer/internal/Sidechain.h:
+// forgetSidechainLoopsIn()), and the tests.
 SongTracks readTracksValue (const juce::ValueTree& song);
+TrackOrder readTrackOrder (const juce::ValueTree& song);
 
 // A track with one of its own properties given a value as readHeldTrack() reads one, or taken away (a void value: as if the
 // element hadn't it): what a merge's clash on such a property sets; false, changing nothing, for a property the value
@@ -267,9 +269,8 @@ std::optional<TrackValue::Kind> readTrackKind (const juce::ValueTree& element); 
 
 // A song's tree's (PHAZITE) TRACK elements in the song's order, each folder before the tracks in it (only a folder's TRACKs
 // looked through, as readTracksValue() reads them); and the first of them of an ID (invalid for none): what reads the tracks
-// of a song that holds no values one element at a time (the loader's, a check's copy: model/arrangement/internal/Tracks.h,
-// findTrack(), readTrackOrderWithoutValues(), getTrackView(); SendsValue.cpp: holdsSend()). Each a walk of the tree at the
-// call, each TRACK looked at counted (Visits.h).
+// of a tree one element at a time (the loader's checks: readTrackOrder(); the versions' and the tests' readers of a tree). Each
+// a walk of the tree at the call, each TRACK looked at counted (Visits.h).
 std::vector<juce::ValueTree> listTrackElements (const juce::ValueTree& song);
 juce::ValueTree findTrackElementByID (const juce::ValueTree& song, TrackID);
 

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The devices' setters (internal/Mixer.h: setDevice() and those beside it): the one place, with the keeper and the versions'
-// pass, that sets the devices' area of the song's values (model/base/internal/SongValues.h: devices). Each finds what it
+// The devices' setters (internal/Mixer.h: setDevice() and those beside it): the one place, with the versions' pass, that
+// sets the devices' area of the song's values (model/base/internal/SongValues.h: devices). Each finds what it
 // changes by a look in the area (getDevicesValue(), findDevice(): no walk of the song), computes the area's next value and
 // sets it once, in the mode of the moment.
 #include "internal/Containers.h"
@@ -94,13 +94,6 @@ namespace
         return form != Form::chain;
     }
 
-    SongValues* findValues (Song& song)
-    {
-        auto* values = song.getValues();
-        jassert (values != nullptr); // a live song's devices are its area's: the loader's song writes none through these
-        return values;
-    }
-
     // A container's macros go with it to the channel it is put on, in the same step and the mode of the moment, as its
     // element carried them while the tree held the devices: their places name its channel (ModulationValue.h:
     // ModulatorPlace), set through modulation's setter of the whole value (model/modulation/internal/Modulation.h:
@@ -136,9 +129,9 @@ namespace
 //==============================================================================
 bool setNewDevices (Song& song, const MadeDevices& made, int index)
 {
-    auto* values = findValues (song);
+    auto* values = song.getValues();
 
-    if (made.devices.empty() || values == nullptr || ! holdsOwner (song, made.devices.front().place))
+    if (made.devices.empty() || ! holdsOwner (song, made.devices.front().place))
         return false;
 
     // What the store holds of each made, set first (model/plugins/internal/DeviceStore.h: setMadeStore(): outside the history
@@ -161,9 +154,9 @@ bool setNewDevices (Song& song, const MadeDevices& made, int index)
 
 bool setDevice (Song& song, DeviceValue value, int index)
 {
-    auto* values = findValues (song);
+    auto* values = song.getValues();
 
-    if (values == nullptr || ! value.id.isValid() || ! holdsOwner (song, value.place) || ! canBeListedAt (value.form, value.place))
+    if (! value.id.isValid() || ! holdsOwner (song, value.place) || ! canBeListedAt (value.form, value.place))
         return false;
 
     // Refused where the song holds its ID as another kind of item: a second item of the ID is none the song can hold.
@@ -195,15 +188,15 @@ bool setDevice (Song& song, DeviceValue value, int index)
 
 bool eraseDevice (Song& song, DeviceID id)
 {
-    auto* values = findValues (song);
-    return values != nullptr && values->eraseDevice (song, id);
+    auto* values = song.getValues();
+    return values->eraseDevice (song, id);
 }
 
 bool eraseDevice (Song& song, DeviceID id, const DevicePlace& at)
 {
     // Only where it is: in the list of what is at its place.
-    auto* values = findValues (song);
-    const auto* found = values != nullptr ? values->devices.get().find (id) : nullptr;
+    auto* values = song.getValues();
+    const auto* found = values->devices.get().find (id);
 
     if (found == nullptr || getDeviceListPlace (found->place, found->form) != getDeviceListPlace (at, found->form))
         return false;
@@ -213,14 +206,14 @@ bool eraseDevice (Song& song, DeviceID id, const DevicePlace& at)
 
 bool setDeviceListOrder (Song& song, const DevicePlace& owner, immer::flex_vector<DeviceID> order)
 {
-    auto* values = findValues (song);
-    return values != nullptr && values->setDeviceListOrder (song, owner, std::move (order));
+    auto* values = song.getValues();
+    return values->setDeviceListOrder (song, owner, std::move (order));
 }
 
 bool moveInDeviceList (Song& song, DeviceID id, int newIndex, ListMove move)
 {
-    auto* values = findValues (song);
-    const auto* found = values != nullptr ? values->devices.get().find (id) : nullptr;
+    auto* values = song.getValues();
+    const auto* found = values->devices.get().find (id);
 
     if (found == nullptr || (move == ListMove::chains) != (found->form == Form::chain)
         || (move == ListMove::inChain && (! found->place.chain.isValid() || found->isInstrument())))
@@ -252,9 +245,9 @@ bool moveInDeviceList (Song& song, DeviceID id, int newIndex, ListMove move)
 bool moveDevices (Song& song, const std::vector<DeviceID>& ids, const DevicePlace& from, const DevicePlace& to, int index,
                   const std::function<void (DeviceValue&)>& edit)
 {
-    auto* values = findValues (song);
+    auto* values = song.getValues();
 
-    if (values == nullptr || ! holdsOwner (song, from) || ! holdsOwner (song, to))
+    if (! holdsOwner (song, from) || ! holdsOwner (song, to))
         return false;
 
     // Each from the list at `from` into the one at `to`, with what it holds, in their order: one set of the area.
@@ -306,8 +299,8 @@ bool moveDevices (Song& song, const std::vector<DeviceID>& ids, const DevicePlac
 bool setDeviceFields (Song& song, DeviceID id, const std::function<void (DeviceValue&)>& edit)
 {
     // A device's or a container's (not a chain's), its own fields alone: its place, values and sounds kept.
-    auto* values = findValues (song);
-    const auto* found = values != nullptr ? values->devices.get().find (id) : nullptr;
+    auto* values = song.getValues();
+    const auto* found = values->devices.get().find (id);
 
     if (found == nullptr || found->form == Form::chain)
         return false;
@@ -324,8 +317,8 @@ bool setDeviceFields (Song& song, DeviceID id, const std::function<void (DeviceV
 
 bool setChainFields (Song& song, DeviceID chain, const std::function<void (DeviceValue&)>& edit)
 {
-    auto* values = findValues (song);
-    const auto* found = values != nullptr ? values->devices.get().find (chain) : nullptr;
+    auto* values = song.getValues();
+    const auto* found = values->devices.get().find (chain);
 
     if (found == nullptr || found->form != Form::chain)
         return false;
@@ -341,8 +334,8 @@ bool setChainFields (Song& song, DeviceID chain, const std::function<void (Devic
 bool setDeviceValue (Song& song, DeviceID id, int parameterIndex, float value)
 {
     // One entry of one map: the device's values', by the parameter's index, held as the song holds it.
-    auto* values = findValues (song);
-    const auto* found = values != nullptr ? values->devices.get().find (id) : nullptr;
+    auto* values = song.getValues();
+    const auto* found = values->devices.get().find (id);
     const auto* info = found != nullptr && found->form == Form::own ? findOwnDevice (std::string_view (found->type.toRawUTF8())) : nullptr;
 
     if (info == nullptr || ! juce::isPositiveAndBelow (parameterIndex, (int) info->parameters.size()))
@@ -364,8 +357,8 @@ void setDeviceSound (Song& song, DeviceID id, const juce::Identifier& property, 
 {
     // One of its type's sounds (a property it hasn't would be one the song reads none of: DevicesValue.h), one entry of one
     // map; empty for none.
-    auto* values = findValues (song);
-    const auto* found = values != nullptr ? values->devices.get().find (id) : nullptr;
+    auto* values = song.getValues();
+    const auto* found = values->devices.get().find (id);
     const auto index =
         found != nullptr && found->form == Form::own ? findSoundIndex (std::string_view (found->type.toRawUTF8()), property) : -1;
 

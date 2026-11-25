@@ -16,53 +16,6 @@ namespace
     using Change = SongValues::ModulationChange;
     using IDList = immer::flex_vector<ModulatorID>;
 
-    bool isModulatorElement (const juce::ValueTree& element)
-    {
-        return element.hasType (schema::MODULATOR) || element.hasType (schema::MACRO);
-    }
-
-    // The one channel of the song's its live tree holds, where the keeper's part acts: the MASTER of its PHAZITE element (the
-    // song's tree holds no TRACK, whose element the tracks' safety net hands whole to takeChannelModulatorsIn(), and no
-    // container: the devices' area does).
-    bool isSongMaster (const juce::ValueTree& element)
-    {
-        return element.hasType (schema::MASTER) && element.getParent().hasType (schema::PHAZITE);
-    }
-
-    // An owner's place as the song holds its modulators': a channel's, or a container's on its channel (ModulationValue.h:
-    // readModulatorPlace(), of what is in it).
-    ModulatorPlace readOwnerPlace (const juce::ValueTree& owner)
-    {
-        ModulatorPlace place;
-        auto channel = owner;
-
-        if (owner.hasType (schema::CONTAINER))
-        {
-            place.container = DeviceID::fromRaw (readID (owner[schema::deviceID]));
-            channel = owner.getParent();
-        }
-
-        if (channel.hasType (schema::MASTER))
-            place.onMaster = true;
-        else if (channel.hasType (schema::TRACK))
-            place.track = TrackID::fromRaw (readID (channel[schema::trackID]));
-
-        return place;
-    }
-
-    // Every MODULATOR and MACRO element in an element and what it holds, taken out: what the adoption leaves of a file's
-    // anywhere in the song's tree once those of the song's owners are the area's. So the song's tree holds none.
-    void dropModulatorElements (juce::ValueTree element)
-    {
-        for (auto i = element.getNumChildren(); --i >= 0;)
-        {
-            if (auto child = element.getChild (i); isModulatorElement (child))
-                element.removeChild (i, nullptr);
-            else
-                dropModulatorElements (child);
-        }
-    }
-
     bool holdSameValues (const ModulatorValue& a, const ModulatorValue& b)
     {
         if (a.values.size() != b.values.size())
@@ -267,78 +220,6 @@ void SongValues::ModulationTeller::valueAreaChanged (const SongModulation& befor
 }
 
 //==============================================================================
-SongValues::ModulationKeeper::ModulationKeeper (SongValues& v, Song& s)
-    : values (v),
-      song (s)
-{
-}
-
-void SongValues::ModulationKeeper::childAdded (juce::ValueTree& parent, juce::ValueTree& child)
-{
-    // A lone one, added to the song's master (b): refused in a step, read in and taken out outside the history.
-    if (isModulatorElement (child))
-    {
-        if (! isSongMaster (parent))
-            return;
-
-        if (! song.isWritingOutsideHistory())
-        {
-            jassertfalse; // a modulator's or a macro's element on an owner of the song's: modulation's code adds one (Modulation.h)
-            return;
-        }
-
-        if (auto value = readHeldModulator (child, readOwnerPlace (parent));
-            value.has_value() && values.modulation.get().find (value->id) == nullptr)
-        {
-            ++values.modulationAdopted;
-            values.modulation.setOutsideHistory (withHeldModulator (values.modulation.get(), std::move (*value)));
-        }
-
-        parent.removeChild (child, nullptr);
-        return;
-    }
-
-    // (a) A CONTAINER added by itself to the song's master outside the history, its macros in it, is the devices' keeper's
-    // safety net, which reads it in and takes it out after this: its macros are read in here first, at its place, in their
-    // order, and taken out of it.
-    if (! child.hasType (schema::CONTAINER) || ! isSongMaster (parent) || ! song.isWritingOutsideHistory())
-        return;
-
-    auto next = values.modulation.get();
-    const auto place = readOwnerPlace (child);
-    std::vector<juce::ValueTree> taken;
-    auto changed = false;
-
-    for (const auto& element : child)
-    {
-        if (! isModulatorElement (element))
-            continue;
-
-        if (auto value = readHeldModulator (element, place); value.has_value() && next.find (value->id) == nullptr)
-        {
-            next = withHeldModulator (next, std::move (*value));
-            ++values.modulationAdopted;
-            changed = true;
-        }
-
-        taken.push_back (element);
-    }
-
-    if (changed)
-        values.setAllModulation (song, std::move (next));
-
-    for (auto& element : taken)
-        child.removeChild (element, nullptr);
-}
-
-void SongValues::ModulationKeeper::adopt (SongValues&, Song& loaded)
-{
-    // Every MODULATOR and MACRO element out of the tree, its reader having read the song's into the area before
-    // (readHeldModulationIn(): SongValues.cpp, adopt()), those anywhere else too, which are no modulators of the song's
-    // (dropModulatorElements()).
-    dropModulatorElements (loaded.getState());
-}
-
 void readHeldModulationIn (const juce::ValueTree& song, SongState& into)
 {
     // Every modulator and macro the loader made consistent, as the song holds each, in the elements' order (each track's, the
@@ -433,43 +314,12 @@ bool SongValues::setAllModulation (Song& song, SongModulation next)
     if (next.isSameAs (modulation.get()) || next == modulation.get())
         return false;
 
-    jassert (holdsTogether (next)); // a pass's, an edit's of several and the keeper's, each held together as it was worked out
+    jassert (holdsTogether (next)); // a pass's and an edit's of several, each held together as it was worked out
     setArea (song, modulation, std::move (next));
     return true;
 }
 
 //==============================================================================
-int takeChannelModulatorsIn (SongModulation& modulation, const juce::ValueTree& channel)
-{
-    // The channel's own, then each of its containers' macros, each owner's in its order (as the keeper's safety net takes them).
-    auto taken = 0;
-
-    const auto takeOwner = [&modulation, &taken] (const juce::ValueTree& owner)
-    {
-        const auto place = readOwnerPlace (owner);
-
-        for (const auto& element : owner)
-        {
-            if (! isModulatorElement (element))
-                continue;
-
-            if (auto value = readHeldModulator (element, place); value.has_value() && modulation.find (value->id) == nullptr)
-            {
-                modulation = withHeldModulator (modulation, std::move (*value));
-                ++taken;
-            }
-        }
-    };
-
-    takeOwner (channel);
-
-    for (const auto& element : channel)
-        if (element.hasType (schema::CONTAINER))
-            takeOwner (element);
-
-    return taken;
-}
-
 bool leadsToModulation (const juce::ValueTree& parent, const juce::ValueTree& child)
 {
     if (parent.hasType (schema::PHAZITE) && child.hasType (schema::MASTER))

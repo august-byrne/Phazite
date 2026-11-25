@@ -3,8 +3,7 @@
 // in Phazite's own types, and the conversion between the value and the TEMPOMAP element with its TEMPO and TIMESIGNATURE
 // children (Schema.h), the one place that reads and writes those by name. The song holds its tempo map as this value, in an
 // area of its values (SongValues.h), which the tempo map's code (model/transport/internal/Tempo.h) reads and computes each
-// edit on; its tree holds the TEMPOMAP element alone, empty, the place a whole copy of the song writes the map in
-// (WholeState.h).
+// edit on; a whole copy of the song writes the map in its TEMPOMAP (WholeState.h).
 //
 // Its own header, beside SongValues.h (one header for each area's values): the model's base includes no other area, so these
 // are its own types; the tempo map's code converts them to TempoChange and TimeSignatureChange (model/transport/
@@ -76,19 +75,14 @@ TempoMapValue readTempoMapValue (const juce::ValueTree& tempoMapElement);
 immer::flex_vector<TempoEntry> readTempoEntries (const juce::ValueTree& tempoMapElement);
 immer::flex_vector<SignatureEntry> readSignatureEntries (const juce::ValueTree& tempoMapElement);
 
-// A tempo map's value as the song takes one in (Song::holdValues(), of a file the loader made consistent; and the song's keeper,
-// a safety net: SongValues.h): each number as its description reads it (Schema.h: an absent or unreadable bpm reads as 120, a
-// numerator and a denominator as 4, a beat as 0, a curve as 1) and kept within its range (a whole number rounded, the
-// denominator a power of two), each kind sorted stably by beat, so that two at one beat keep the element's order, and a kind
-// the element has none of holding one from the song's start (makeDefaultTempoMap()'s). Nothing else is made to hold together:
-// a first tempo or time signature not at the song's start (another tool's file) reads as the first, as readTempoMapValue()
-// reads it. A property or a child Phazite doesn't know is no part of it.
+// A tempo map's value as the song takes one in (SongState.h: readSongTree(), of a file the loader made consistent): each number
+// as its description reads it (Schema.h: an absent or unreadable bpm reads as 120, a numerator and a denominator as 4, a beat as
+// 0, a curve as 1) and kept within its range (a whole number rounded, the denominator a power of two), each kind sorted stably by
+// beat, so that two at one beat keep the element's order, and a kind the element has none of holding one from the song's start
+// (makeDefaultTempoMap()'s). Nothing else is made to hold together: a first tempo or time signature not at the song's start
+// (another tool's file) reads as the first, as readTempoMapValue() reads it. A property or a child Phazite doesn't know is no
+// part of it.
 TempoMapValue readHeldTempoMap (const juce::ValueTree& tempoMapElement);
-
-// A tempo map's value with one more entry, read from its TEMPO or TIMESIGNATURE element as readHeldTempoMap() reads one, after
-// those of its kind at its beat, as the element appended to the map would be read: the song's keeper's safety net
-// (SongValues.h). The same value for an element of another type.
-TempoMapValue withEntryTaken (const TempoMapValue&, const juce::ValueTree& entryElement);
 
 // Whether a tempo map's value holds what the song holds of one: each kind not empty and in the order of its beats, and each
 // number within its description's range, as readHeldTempoMap() keeps it (Schema.h). What a merge's choice may set into the

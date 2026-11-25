@@ -47,25 +47,12 @@ namespace phazite
 {
 namespace
 {
-    // An element's counted children, each named by its type and key, or, without a key, by its type and its place among
-    // those of its type (a curve's points).
-    struct Child
-    {
-        juce::ValueTree tree;
-        juce::String name;
-    };
-
     // Which of an element's parts making it like another takes: what is counted, or everything (switching in place).
     enum class Taken
     {
         counted,
         everything
     };
-
-    bool isTaken (Taken taken, const juce::ValueTree& element, const juce::ValueTree& child)
-    {
-        return taken == Taken::everything || ! schema::isUncountedElement (element, child);
-    }
 
     // An element of a version's song whose piece, or part of it, couldn't be read (SongPieces.h: joinSong()): the song keeps
     // its own as it is now, wherever it is.
@@ -106,98 +93,12 @@ namespace
         return none;
     }
 
-    // Whether an element is the tempo map's: the song's TEMPOMAP, or an element in it. The song holds its tempo map as a value
-    // (model/base/internal/SongValues.h), its TEMPOMAP an empty place for whole copies, which the tempo pass makes like the
-    // other's (makeTempoMapLike(), below), never the passes over elements.
-    bool isTempoMaps (const juce::ValueTree& parent, const juce::ValueTree& child)
-    {
-        return parent.hasType (schema::TEMPOMAP) || (child.hasType (schema::TEMPOMAP) && parent.hasType (schema::PHAZITE));
-    }
-
-    // Whether an element is the chord lane's: the song's CHORDLANE, or an element in it. The song holds its lane as a value
-    // (model/base/internal/SongValues.h), its CHORDLANE an empty placeholder that says whether it has one, which the lane pass
-    // makes like the other's, the placeholder too (makeChordLaneLike(), below), never the passes over elements.
-    bool isChordLanes (const juce::ValueTree& parent, const juce::ValueTree& child)
-    {
-        return parent.hasType (schema::CHORDLANE) || (child.hasType (schema::CHORDLANE) && parent.hasType (schema::PHAZITE));
-    }
-
-    // Whether an element is the MIDI links': the song's MIDILINKS, or an element in it. The song holds its links as a value
-    // (model/base/internal/SongValues.h), its MIDILINKS an empty placeholder written into its file, which the links pass
-    // makes like the other's, the placeholder too (makeMidiLinksLike(), below), never the passes over elements.
-    bool isMidiLinks (const juce::ValueTree& parent, const juce::ValueTree& child)
-    {
-        return parent.hasType (schema::MIDILINKS) || (child.hasType (schema::MIDILINKS) && parent.hasType (schema::PHAZITE));
-    }
-
-    // Whether an element is the curves': the song's AUTOMATION, or an element in it. The song holds its curves as a value
-    // (model/base/internal/SongValues.h), its AUTOMATION an empty place every song that holds its values has, whatever the
-    // other has; the curves pass makes the curves like the other's (makeCurvesLike(), below), through automation's functions
-    // by their parameters, never the passes over elements.
-    bool isCurves (const juce::ValueTree& parent, const juce::ValueTree& child)
-    {
-        return parent.hasType (schema::AUTOMATION) || (child.hasType (schema::AUTOMATION) && parent.hasType (schema::PHAZITE));
-    }
-
-    // Whether an element is the sections': the song's SECTIONS, or an element in it. The song holds its sections as a value
-    // (model/base/internal/SongValues.h), its SECTIONS an empty placeholder written into its file, which the sections pass
-    // makes like the other's, the placeholder too (makeSectionsLike(), below), never the passes over elements.
-    bool isSections (const juce::ValueTree& parent, const juce::ValueTree& child)
-    {
-        return parent.hasType (schema::SECTIONS) || (child.hasType (schema::SECTIONS) && parent.hasType (schema::PHAZITE));
-    }
-
     // Whether an element is modulation's: a MODULATOR or a MACRO (of a channel or a container), with what is in it. The
     // modulation pass makes the song's modulators and macros like the other's (makeModulationLike(), below), through
     // modulation's setters by their IDs (model/modulation/internal/Modulation.h), never the passes over elements.
     bool isModulation (const juce::ValueTree& element)
     {
         return element.hasType (schema::MODULATOR) || element.hasType (schema::MACRO);
-    }
-
-    // Whether an element is a device's, a container's or a chain's (with what is in it: a device's VALUES, SOUNDS and VALUEs,
-    // a container's chains, a chain's devices), which the devices pass makes like the other's (makeDevicesLike(), below),
-    // through the devices' setters by their IDs (model/mixer/internal/Mixer.h) and the store's functions
-    // (model/plugins/internal/DeviceStore.h), never the passes over elements, though the song's tree holds them still.
-    bool isDeviceItem (const juce::ValueTree& element)
-    {
-        return element.hasType (schema::DEVICE) || element.hasType (schema::CONTAINER) || element.hasType (schema::CHAIN);
-    }
-
-    // Whether an element is an entry of an area the song holds beside its tree under an element that stays in it, which its
-    // area's pass makes like the other's, never the passes over elements: modulation's (isModulation()), a track's SEND,
-    // which the sends pass makes like the other's (makeSendsLike(), below), through the sends' setters by their IDs
-    // (model/mixer/internal/Mixer.h), a device, a container or a chain (isDeviceItem()), which the devices pass alone makes
-    // like the other's, and a track's or the master's LANES, the view's (makeTrackLeavesLike(), below).
-    bool isKeptBeside (const juce::ValueTree& element)
-    {
-        return isModulation (element) || element.hasType (schema::SEND) || isDeviceItem (element) || element.hasType (schema::LANES);
-    }
-
-    // Whether an element of the song's root is the song's own (SongOwnValue.h: its LASTKEY, PIANOROLL or MERGING), which the
-    // song's own pass makes like the other's, or of a type Phazite doesn't know, which the song drops as it opens
-    // (SongOwnArea.h): the song's tree holds neither, and the passes over elements give it neither.
-    bool isSongOwnChild (const juce::ValueTree& parent, const juce::ValueTree& child)
-    {
-        return parent.hasType (schema::PHAZITE) && (isSongOwnElement (child.getType()) || ! schema::isKnownType (child.getType()));
-    }
-
-    // Whether placePlaceholdersLike() places a child among the song's elements: taken, never a clip (a track's clips are the
-    // clip pass's:
-    // ClipPass, below), nor the song's TEMPOMAP or what is in it (the tempo pass's: makeTempoMapLike()), nor
-    // its CHORDLANE or what is in it (the lane pass's: makeChordLaneLike()), nor its MIDILINKS or what is in it (the links
-    // pass's: makeMidiLinksLike()), nor its AUTOMATION or what is in it (the curves pass's: makeCurvesLike()), nor its
-    // SECTIONS or what is in it (the sections pass's: makeSectionsLike()), nor a modulator or a macro (the modulation pass's:
-    // makeModulationLike()) nor a send (the sends pass's: makeSendsLike()), which the song's tree holds none of (their areas'
-    // whole state writes them in a copy), nor a device, a container or a chain (the devices pass's: makeDevicesLike()). The
-    // song's TRACKS and MASTER are placed among the song's elements, and nothing in them (the tracks' pass's: makeTracksLike()).
-    // Nor the song's own LASTKEY, PIANOROLL or MERGING (the song's own pass's: makeSongOwnValuesLike()). The
-    // whole song's placeholders and places are put in the other's places with them, after the areas' passes.
-    bool isPlaced (const juce::ValueTree& element, const juce::ValueTree& child, Taken taken)
-    {
-        return isTaken (taken, element, child) && ! child.hasType (schema::CLIP) && ! isKeptBeside (child) && ! isTempoMaps (element, child)
-               && ! isChordLanes (element, child) && ! isMidiLinks (element, child) && ! isSections (element, child)
-               && ! isCurves (element, child) && ! isSongOwnChild (element, child);
     }
 
     //==============================================================================
@@ -222,7 +123,7 @@ namespace
     }
 
     // Whether the song holds a track (a folder, a return; not the master) of this ID, and whether it holds a folder of it, as
-    // the tracks' keeper keeps them (Tracks.h: findHeldTrack(): no element read).
+    // the tracks' area holds them (Tracks.h: findHeldTrack(): no element read).
     bool holdsTrack (const Song& song, TrackID id)
     {
         const auto held = findHeldTrack (song, id);
@@ -538,7 +439,7 @@ namespace
         int writes = 0;
 
         // Whether a track of the song holds clips: a track's, not a folder's, a return's or the master's (as the tracks'
-        // keeper keeps it: no element read).
+        // area holds it: no element read).
         bool holdsClips (TrackID track) const
         {
             const auto held = findHeldTrack (song, track);
@@ -831,7 +732,7 @@ namespace
                     continue;
 
                 const auto* values = song.getValues();
-                const auto* stored = values != nullptr ? values->findClip (value.id) : nullptr; // until the clips change: copied
+                const auto* stored = values->findClip (value.id); // until the clips change: copied
 
                 if (stored == nullptr || ! groups.insert (value.link).second)
                     continue;
@@ -862,55 +763,6 @@ namespace
         }
     };
 
-    // What gives the song's tracks their clips here is the clip pass alone, the song its tempo map the tempo pass alone, and
-    // the song its chord lane the lane pass alone, never the keeper of the song's values, which takes in the clips' elements
-    // of a track that comes into the song's tree with them, the tempo map's entries that come into its TEMPOMAP, and the
-    // chord lane's that come into its CHORDLANE (SongValues.h: a safety net): every track the tracks' pass adds is a value,
-    // its element holding nothing but its own fields (makeTracksLike(); Tracks.h: setNewTracks()), no element is added to the
-    // song but the areas' placeholders, by their passes, and the passes over elements leave the song's TEMPOMAP and
-    // CHORDLANE to the areas' passes (isPlaced()). Checked in Debug builds, as each of the functions
-    // below ends: what the keeper took in counted for every area that counts it, a line each, in the order of the areas.
-    struct NothingTakenIn
-    {
-        explicit NothingTakenIn (const Song& s)
-            : song (s),
-              before (count (s))
-        {
-        }
-
-        ~NothingTakenIn() { jassert (count (song) == before); }
-
-        static int count (const Song& s)
-        {
-            const auto* values = s.getValues();
-
-            if (values == nullptr)
-                return 0;
-
-            return values->countTempoMapAdopted()      // the tempo map's (the clips' and the sends': as a track, below)
-                   + values->countChordLaneAdopted()   // the chord lane's
-                   + values->countMidiLinksAdopted()   // the MIDI links'
-                   + values->countCurvesAdopted()      // the curves'
-                   + values->countSectionsAdopted()    // the sections'
-                   + values->countModulationAdopted()  // modulation's: no track or copy the passes add holds one
-                   + values->countDeviceStoreAdopted() // the store's: the devices pass sets an item's entries in the store
-                   + values->countDevicesAdopted()     // the devices': no track or copy the passes add holds a device, a
-                                                       // container or a chain, which the devices pass alone sets
-                                                       // (makeDevicesLike())
-                   + values->countTrackLeavesAdopted() // the tracks' switches and view: nor a switch, a view property or a
-                                                       // LANES, which their pass sets (makeTrackLeavesLike())
-                   + values->countTracksAdopted()      // the tracks': nor a TRACK or the MASTER's own, which their pass
-                                                       // sets (makeTracksLike())
-                   + values->countSongOwnAdopted();    // the song's own: nor a property of the song's root or its count, nor a
-                                                       // LASTKEY, PIANOROLL or MERGING (makeSongOwnValuesLike(), countIDsFrom())
-        }
-
-        const Song& song;
-        const int before;
-
-        JUCE_DECLARE_NON_COPYABLE (NothingTakenIn)
-    };
-
     // The song's tempo map made the other song's (its TEMPOMAP's, read as the song holds a map, as everything that enters the
     // tempo map's area is: TempoMapValue.h, readHeldTempoMap(); the map a song without one plays, 120 BPM in 4/4, where it has
     // none), through the tempo map's one setter, in the mode of the moment (SongValues.h: setTempoMap(), which writes nothing for the map the song holds already). The rule for what the
@@ -924,7 +776,7 @@ namespace
         auto* values = song.getValues();
         const auto then = other.getChildWithName (schema::TEMPOMAP);
 
-        if (values == nullptr || (then.isValid() && (isStandIn (then) || ! findStandIns (then).empty())))
+        if (then.isValid() && (isStandIn (then) || ! findStandIns (then).empty()))
             return false;
 
         const auto before = values->tempoMap.get();
@@ -942,7 +794,7 @@ namespace
     {
         const auto then = other.getChildWithName (schema::CHORDLANE);
 
-        if (song.getValues() == nullptr || (then.isValid() && (isStandIn (then) || ! findStandIns (then).empty())))
+        if (then.isValid() && (isStandIn (then) || ! findStandIns (then).empty()))
             return false;
 
         return makeChordLaneAs (song, then);
@@ -960,12 +812,12 @@ namespace
     {
         auto then = other.getChildWithName (schema::MIDILINKS);
 
-        if (song.getValues() == nullptr || (then.isValid() && isStandIn (then)))
+        if (then.isValid() && isStandIn (then))
             return false;
 
         if (then.isValid() && ! findStandIns (then).empty())
         {
-            const auto live = copyWhole (song, song.getState().getChildWithName (schema::MIDILINKS));
+            const auto live = writeSongPart (getSongState (song), schema::MIDILINKS);
             then = then.createCopy();
 
             for (int i = then.getNumChildren(); --i >= 0;)
@@ -1005,12 +857,12 @@ namespace
     {
         auto then = other.getChildWithName (schema::SECTIONS);
 
-        if (song.getValues() == nullptr || (then.isValid() && isStandIn (then)))
+        if (then.isValid() && isStandIn (then))
             return false;
 
         if (then.isValid() && ! findStandIns (then).empty())
         {
-            const auto live = copyWhole (song, song.getState().getChildWithName (schema::SECTIONS));
+            const auto live = writeSongPart (getSongState (song), schema::SECTIONS);
             then = then.createCopy();
 
             for (int i = then.getNumChildren(); --i >= 0;)
@@ -1070,9 +922,6 @@ namespace
         // those the song holds): those it has that the other hasn't taken out; the other's given the keys of the song's points
         // by their places (keyByPlace()), in place or after the others; for the whole song, in the other's order.
         auto* values = song.getValues();
-
-        if (values == nullptr)
-            return 0;
 
         const auto before = values->curves.get();
         auto next = before;
@@ -1446,9 +1295,6 @@ namespace
     int makeSendsLike (Song& song, const juce::ValueTree& other, const SendTracksTaken& which)
     {
         auto* values = song.getValues();
-
-        if (values == nullptr)
-            return 0;
 
         const OtherSends theirs (other);
         const auto ours = values->sends.get();
@@ -2031,17 +1877,17 @@ namespace
     }
 
     // The song's devices as the devices' area holds them (SongValues.h: devices; none read), a copy the pass keeps up to date
-    // as it writes; read from its tree only for a song that holds no values.
+    // as it writes.
     SongDevices getSongDevices (const Song& song)
     {
         return getDevicesValue (song);
     }
 
     // The song's devices, containers and chains, and what the store holds of them, made like the other song's, through the
-    // devices' pass (makeDeviceItemsLike()) and then the store's (makeDeviceStoreLike()): the song's devices as its keeper
+    // devices' pass (makeDeviceItemsLike()) and then the store's (makeDeviceStoreLike()): the song's devices as its area
     // holds them (getSongDevices(): none read), the other's read once, whole of the channels which takes alone
     // (OtherDevices); for those channels, in the mode of the moment, what the other's version couldn't read left as the song
-    // has it. After the passes over elements, which leave the devices alone (isKeptBeside()), and before modulation's pass (a
+    // has it. After the tracks' pass, and before modulation's pass (a
     // container's macros need their container) and the curves'. How many writes each made: the devices' (written in the undo
     // history alone, but as a song opens), and the store's (written outside it too: a plug-in's own window, its state stored
     // as the song saves, a chain soloed, a window moved).
@@ -2073,7 +1919,7 @@ namespace
         return clips.run();
     }
 
-    // The areas the song holds as values beside its tree made like the other's, once the rest of the song is (its tracks
+    // The areas the song holds as values made like the other's, once the rest of the song is (its tracks
     // first: makeTracksLike(), whose tracks the clip pass gives their clips), each through its pass, a line each, in this
     // order: the clips with their notes (makeClipsLike()), then the devices with what the
     // store holds of them (makeDevicesLike(), every channel's: before modulation's pass, which gives a container's macros
@@ -2101,100 +1947,6 @@ namespace
         return writes;
     }
 
-    // Whether an element is the placeholder or the place of an area the song holds as a value, which the passes over elements
-    // leave where it is (isPlaced()): the song's CHORDLANE, MIDILINKS or SECTIONS, which the area's pass adds or takes away
-    // (makeChordLaneLike(), makeMidiLinksLike(), makeSectionsLike()), and its TEMPOMAP and AUTOMATION, places every song that
-    // holds its values has (a whole copy writes the AUTOMATION only while the song has a curve: CurvesArea.h).
-    bool isPlaceholder (const juce::ValueTree& parent, const juce::ValueTree& child)
-    {
-        return parent.hasType (schema::PHAZITE)
-               && (child.hasType (schema::TEMPOMAP) || child.hasType (schema::CHORDLANE) || child.hasType (schema::MIDILINKS)
-                   || child.hasType (schema::AUTOMATION) || child.hasType (schema::SECTIONS));
-    }
-
-    // The song's placeholders and places (isPlaceholder()), put where the other song has them among its elements (the song's own
-    // LASTKEY, PIANOROLL and MERGING are its values', which whole state writes after the others: SongOwnArea.h), once the
-    // areas' passes (makeValuesLike(), which add one after the others) are done, in the same history (the song's step, or
-    // none while the song is written outside it), so that the song's file writes its elements in the other's order, the
-    // song's TRACKS and MASTER among them (isPlaced()). In the other's order, each of its elements that it places, and
-    // each placeholder or place, is put at the next place among the song's that are such and that the other has, past those
-    // that aren't (its uncounted ones) and those the other hasn't (its AUTOMATION where the other, a whole copy of a song
-    // without curves, has none: left where it is), the song's own of that name (named by type and key, or by type and
-    // place among those of its type); one the song hasn't (a stand-in's) takes no place. A second pass moves nothing. Only
-    // for the whole song (makeSongLike(),
-    // makeSongTheSame(), makeSongAsCopied()): the song's own line adds its SECTIONS after the others, as it always did.
-    void placePlaceholdersLike (Song& song, const juce::ValueTree& other, juce::UndoManager* undo, Taken taken)
-    {
-        jassert ((undo == nullptr) == song.isWritingOutsideHistory());
-        auto live = song.getState();
-        const auto isOrdered = [taken] (const juce::ValueTree& parent, const juce::ValueTree& child)
-        { return isPlaced (parent, child, taken) || isPlaceholder (parent, child); };
-
-        const auto getOrdered = [&isOrdered] (const juce::ValueTree& element)
-        {
-            std::vector<Child> children;
-            std::map<juce::String, int> numUnkeyed;
-            std::set<juce::String> names;
-
-            for (const auto& child : element)
-            {
-                if (! isOrdered (element, child))
-                    continue;
-
-                const auto type = child.getType().toString();
-                const auto key = schema::getElementKey (child);
-                auto name = type + ":" + key;
-
-                if (key.isEmpty() || names.count (name) > 0)
-                    name = type + "#" + juce::String (numUnkeyed[type]++);
-
-                names.insert (name);
-                children.push_back ({ child, name });
-            }
-
-            return children;
-        };
-
-        const auto wanted = getOrdered (other);
-        std::set<juce::String> wantedNames;
-
-        for (const auto& child : wanted)
-            wantedNames.insert (child.name);
-
-        // The song's own of each name the other has; those of a name the other hasn't take no place, left where they are.
-        std::map<juce::String, juce::ValueTree> held;
-        std::vector<juce::ValueTree> notWanted;
-
-        for (const auto& child : getOrdered (live))
-        {
-            if (wantedNames.count (child.name) > 0)
-                held.emplace (child.name, child.tree);
-            else
-                notWanted.push_back (child.tree);
-        }
-
-        const auto takesPlace = [&isOrdered, &live, &notWanted] (const juce::ValueTree& child)
-        { return isOrdered (live, child) && std::find (notWanted.begin(), notWanted.end(), child) == notWanted.end(); };
-
-        int place = 0;
-
-        for (const auto& child : wanted)
-        {
-            while (place < live.getNumChildren() && ! takesPlace (live.getChild (place)))
-                ++place;
-
-            const auto found = held.find (child.name);
-
-            if (found == held.end())
-                continue;
-
-            if (const auto index = live.indexOf (found->second); index != place)
-                live.moveChild (index, place, undo);
-
-            ++place;
-        }
-    }
-
     // The song's count of IDs brought past every ID it holds now and past the other's count: what it took from the other
     // can hold IDs past its own count (a song opened again as it was saved before they were given), and the next item it
     // makes gets an ID that nothing of either has. The other's IDs counted in its whole tree, its clips' too. Not an undo
@@ -2208,7 +1960,7 @@ namespace
     // that folder (else in the track list), right after the track before it there that the song holds there
     // (findTrackPlaceLike()), in the other's order (depth first: a folder put in its place before the tracks in it, so that
     // none goes into a folder in itself), each as the same element (Tracks.h: setTrackPlace(), which writes nothing for one
-    // where it goes already; the other areas' keepers carry what it holds while the song's tree is the tracks' storage). One
+    // where it goes already). One
     // the other's version couldn't read (a stand-in) too: the song's, in its place among the other's. How many it moved. The
     // song's own line's (makeSongOwnLikeIn()), and the whole song's (makeTracksLike()).
     int makeTrackOrderLike (Song& song, const juce::ValueTree& other)
@@ -2290,7 +2042,7 @@ namespace
     // The whole song's tracks, folders, returns and master made like the other's (their own fields, which folder each is in
     // and its place there: TracksValue.h, TrackValue), through the tracks' setters (model/arrangement/internal/Tracks.h:
     // setTrack(), setNewTracks(), setTrackPlace(), eraseTrack()), in the mode of the moment, each writing nothing where the
-    // song holds what it would set: the first of the passes of what the song holds beside its tree, as a track must be in the
+    // song holds what it would set: the first of the passes of what the song holds, as a track must be in the
     // song before the clip pass gives it its clips (ClipPass: addTrack()). The song's tracks as its area holds them
     // (findHeldTrack(), getHeldTracks(): none read), the other's read once each, as the song holds one (readHeldTrack()). In
     // this order, so that what goes frees its IDs before what comes takes them (a merge gives IDs anew):
@@ -2298,7 +2050,7 @@ namespace
     //   2. a track of both in a folder the other hasn't put at the end of the track list, as the same element, so that it
     //      stays as the folder goes (it goes where the other has it in step 6);
     //   3. each the other hasn't (a folder with what is left in it) taken away, what it holds in the song's areas erased first
-    //      (Tracks.h: eraseTrackHoldings()), so that nothing is left to a keeper; but one in a folder the other's version
+    //      (Tracks.h: eraseTrackHoldings()); but one in a folder the other's version
     //      couldn't read (a stand-in), whose piece held the tracks in it, which stays as it is;
     //   4. each of both given the other's fields (setTrack()), in the folder it is in now, and the master its fields, its ID
     //      too (a version may give the master another);
@@ -2574,9 +2326,6 @@ namespace
     {
         auto* values = song.getValues();
 
-        if (values == nullptr)
-            return false;
-
         // The elements of the tracks it takes, each new one without an entry in the switches first, outside the history.
         std::vector<juce::ValueTree> inStep, outsideHistory;
         const auto held = values->trackSwitches.get();
@@ -2679,15 +2428,11 @@ namespace
 
 void makeSongLike (Song& song, const juce::ValueTree& other)
 {
-    jassert (other != song.getState()); // a whole copy (WholeState.h), never the song's live tree, which holds no track
-    const NothingTakenIn byThePassesAlone (song);
-    auto* undo = &song.getUndoManager();
     const auto standIns = findStandIns (other);
     const auto tracks = makeTracksLike (song, other, Taken::counted, standIns);
     makeSongOwnValuesLike (song, other, Taken::counted, MergingTaken::taken);
     makeValuesLike (song, other, true, Taken::counted, standIns);
     makeTrackLeavesLike (song, other, isEveryTrack, true, Taken::counted, tracks.cameIn);
-    placePlaceholdersLike (song, other, undo, Taken::counted);
     countIDsPast (song, other);
 
     // The song's tracks the other's, and no ID held twice: what the tracks' pass put in beside another area's item of its ID
@@ -2698,10 +2443,7 @@ void makeSongLike (Song& song, const juce::ValueTree& other)
 
 void makeSongTheSame (Song& song, const juce::ValueTree& other)
 {
-    jassert (other != song.getState()); // as makeSongLike()'s
-    const NothingTakenIn byThePassesAlone (song);
-
-    // Outside the history, as what the song keeps beside its tree is written too (Song::OutsideHistory).
+    // Outside the history (Song::OutsideHistory).
     const Song::OutsideHistory outside (song);
 
     // Its count of IDs the larger of the two: what either branch made keeps an ID of its own.
@@ -2710,18 +2452,16 @@ void makeSongTheSame (Song& song, const juce::ValueTree& other)
     makeSongOwnValuesLike (song, other, Taken::everything, MergingTaken::taken);
     makeValuesLike (song, other, false, Taken::everything, noStandIns());
     makeTrackLeavesLike (song, other, isEveryTrack, true, Taken::everything, {});
-    placePlaceholdersLike (song, other, nullptr, Taken::everything);
     countIDsFrom (song, next);
     song.getUndoManager().clearUndoHistory();
     jassert (holdsTracksAsRead (song, tracks)); // as makeSongLike()'s
     jassert (findIDHeldTwice (song) == 0);
 }
 
-void makeSongAsCopied (Song& song, const juce::ValueTree& copy)
+void makeSongAsCopied (Song& song, const SongState& now)
 {
-    jassert (copy != song.getState()); // as makeSongLike()'s
-    const NothingTakenIn byThePassesAlone (song);
     const Song::OutsideHistory outside (song);
+    const auto copy = writeSongTree (now);
 
     // Everything, outside the history, and its count of IDs as the copy's: what the history holds is the copy's already, so
     // that only what changed without it differs (a property set without a step, view state, the count of IDs). Its clips, its
@@ -2736,23 +2476,18 @@ void makeSongAsCopied (Song& song, const juce::ValueTree& copy)
     [[maybe_unused]] const auto valueWrites = makeValuesLike (song, copy, false, Taken::everything, noStandIns());
     jassert (tracks.writes + valueWrites + ownWrites == 0);
     makeTrackLeavesLike (song, copy, isEveryTrack, true, Taken::everything, {}); // written outside the history too
-    placePlaceholdersLike (song, copy, nullptr, Taken::everything);
 
-    // Its count of IDs the copy's, as it was: never a change. What the song keeps of items it no longer holds for an Undo that
-    // may bring one back (the tracks' switches and view, the devices' store and windows' places) is kept below it alone: every
-    // step its history holds was made while the count was below it, so none brings back an item of an ID at or above it, and
-    // the next item made, given such an ID, would take what a version's kept under it (known bug 246 until 2026-11-24).
-    const auto next = readID (copy[schema::nextID]);
-
-    if (auto* values = song.getValues())
-    {
-        values->setSwitchesOutsideHistory (song, withoutIDsFrom (values->trackSwitches.get(), next));
-        values->setTracksOutside (withoutIDsFrom (values->tracksOutside.get(), next));
-        values->storeOutsideHistory (song, withoutIDsFrom (values->deviceStore.get(), next));
-        values->devicesOutside.set (values->devicesOutside.get().withoutIDsFrom (next));
-    }
-
-    countIDsFrom (song, next);
+    // What the song keeps of items it no longer holds for an Undo that may bring one back (the tracks' switches and view, the
+    // devices' store and windows' places) put back whole as it was when the state was taken, outside the history: so what the
+    // passes wrote of a track or a device the song doesn't hold now (a version's track of an ID Now deleted, which an Undo
+    // brings back with its own) is gone, and so is all a version's kept under IDs past the state's count (known bugs 246 and
+    // 248). Then its count of IDs the state's, as it was: never a change.
+    auto* values = song.getValues();
+    values->setSwitchesOutsideHistory (song, now.trackSwitches);
+    values->setTracksOutside (now.tracksOutside);
+    values->storeOutsideHistory (song, now.deviceStore);
+    values->devicesOutside.set (now.devicesOutside);
+    countIDsFrom (song, now.nextID);
     jassert (holdsTracksAsRead (song, tracks)); // as makeSongLike()'s
     jassert (findIDHeldTwice (song) == 0);
 }
@@ -2775,7 +2510,7 @@ namespace
 
     LineTracks readLineTracks (const Song& song, TrackID id, const juce::ValueTree& other)
     {
-        // The song's as the tracks' keeper holds it (no element read), the other's element in its whole copy.
+        // The song's as the tracks' area holds it (no element read), the other's element in its whole copy.
         LineTracks line { .id = id, .live = findHeldTrack (song, id), .then = findTrackIn (other, id.getRaw()) };
 
         // The master's line by its kind: the master in each song, whichever of their IDs for it the line names (a version may
@@ -2919,7 +2654,7 @@ namespace
                     setTrackPlace (song, track, live->parent, place++);
 
             // What it holds itself in the song's areas, its tracks out of it now, erased before it goes (Tracks.h:
-            // eraseTrackHoldings()): the keeper of the song's values finds nothing to remember. Then a clip on another track
+            // eraseTrackHoldings()). Then a clip on another track
             // left the only one of its alias group (an alias of one of its clips) leaves the group, as deleteTracks() unlinks it.
             eraseTrackHoldings (song, { id });
             eraseTrack (song, id);
@@ -3014,7 +2749,6 @@ namespace
 
 bool makeTrackLike (Song& song, TrackID id, const juce::ValueTree& other)
 {
-    const NothingTakenIn byThePassesAlone (song);
     auto line = readLineTracks (song, id, other);
 
     // Refused before anything is written, the song's count of IDs too.
@@ -3033,7 +2767,6 @@ bool givesTrackIDsHeldElsewhere (const Song& song, TrackID id, const juce::Value
 
 void makeSongOwnLike (Song& song, const juce::ValueTree& other)
 {
-    const NothingTakenIn byThePassesAlone (song);
     makeSongOwnLikeIn (song, other);
     countIDsPast (song, other);
 }
@@ -3117,7 +2850,7 @@ AreaChoice chooseSongOwnClash (Song& song, const MergeClash& clash, int value, c
 int removeBrokenReferences (Song& song)
 {
     // The IDs of what the song holds that something can name: its tracks' (each track's, its fader's and its VCA's, and the
-    // master's), from what the tracks' keeper holds (no element read), and those its other areas hold (IDsHeld.h:
+    // master's), from what the tracks' area holds (no element read), and those its other areas hold (IDsHeld.h:
     // forEachNameableIDHeld(): a modulator's, a macro's, a send's and a device's).
     const auto held = getHeldTracks (song);
     std::set<std::uint64_t> items, tracks;

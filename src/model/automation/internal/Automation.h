@@ -152,7 +152,7 @@ void selectPoints (Selection&, const ParameterRef&, const std::vector<int>& indi
 // (a reference valid until the area's next change: none is kept across a set); a parameter's curve in place, none for one
 // without; the parameters they automate, in that order; those of the curves with points; a parameter's curve as a copy
 // (cheap: it shares what it holds), none for one without; and its points' keys, in its order (CurveValues.h: PointValue).
-// A song that holds no values (one made of a tree alone, as a check's copy) has none. A parameter has one curve: the loader
+// A parameter has one curve: the loader
 // keeps the first of a file's curves of one parameter, its device's ID read as a number however it is written ("14",
 // "0014"), and the song's area holds one of each.
 const SongCurves& getCurvesValue (const Song&);
@@ -173,8 +173,7 @@ juce::ValueTree copyWholeCurve (const Song&, const ParameterRef&);
 // model/versions/ApplySong.cpp; a merge's choice: chooseCurveClash()), the point edits above through their own (a curve made
 // by its first point, gone with its last). Each sets the curves' area (SongValues.h: setCurve(), eraseCurve(),
 // renameCurve(), setCurveOrder()), joining the caller's undo step, as the song is written now: in the history's step in
-// progress, or outside it while the song is written outside it (Song::OutsideHistory). Whether it wrote. Nothing for a song
-// that holds no values.
+// progress, or outside it while the song is written outside it (Song::OutsideHistory). Whether it wrote.
 //   - setCurveValue(): the parameter's whole curve made this value, where setCurve() (above) bends one point of it. One the
 //     song hasn't is added after the others. One it has keeps its place, and its points are made the value's by their
 //     places, as a version's are: a point at a place both have keeps its key (which the selection of points holds), those
@@ -211,12 +210,11 @@ void removeAutomationPointsIn (Song&, BeatRange);
 void addAutomationPoints (Song&, const std::vector<ParameterPoint>&);
 
 // Forgets the curves of owners the song hasn't (a file's, which whoever wrote it may have left), and any child of its
-// AUTOMATION that is no curve, as a project opens: without an undo step, on the tree of a song that holds no values yet
-// (model/project/internal/Project.h: makeSong(), before it holds them; asserted), which no one else hears, whose AUTOMATION
-// holds its curves as its file does. A curve's owner is there as for the form below (model/mixer/internal/Mixer.h:
-// getItemIDs()): a device, a chain, a fader or a VCA, a send, a modulator or a macro. A device keeps those of parameters it
-// hasn't, as a plug-in that isn't installed. A song that holds its values forgets them through the form below.
-void forgetCurvesOfGoneDevices (Song&);
+// AUTOMATION that is no curve, as a project opens: on a file's song's tree, before the song is made of it
+// (model/project/internal/Project.h: makeSong()). A curve's owner is there as for the form below (model/mixer/internal/Mixer.h:
+// getItemIDsIn()): a device, a chain, a fader or a VCA, a send, a modulator or a macro. A device keeps those of parameters it
+// hasn't, as a plug-in that isn't installed. A song forgets them through the form below.
+void forgetCurvesOfGoneDevices (juce::ValueTree& song);
 
 // The curves of what the song no longer holds taken out, in the caller's undo step (or outside the history while the song is
 // written outside it), so that its Undo brings them back: each curve whose owner's ID (Schema.h: curveDevice, a device's, a
@@ -225,7 +223,7 @@ void forgetCurvesOfGoneDevices (Song&);
 // after every apply of a song from the versions: model/versions/internal/ApplySong.h, removeBrokenReferences()). The
 // curves' order walked by their parameters alone, each owner looked for among the items: no curve's points read, and
 // nothing allocated while none is gone; those gone taken out of one next value of the curves' area, set once, so that what
-// hears the curves is told once. Nothing for a song that holds no values.
+// hears the curves is told once.
 void forgetCurvesOfTheGone (Song&, const std::set<std::uint64_t>& items);
 
 //==============================================================================

@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The tracks are values beside the song's tree (roadmap step S5.20, the tracks' switch: model/base/internal/SongValues.h,
-// tracks; TracksArea.h): the tree keeps its TRACKS and MASTER as empty places. The tracks' part of the keeper keeps them so:
-// a TRACK added to the TRACKS, or a property written to the MASTER, is refused in a step (a JUCE assertion) and outside the
-// history read in, with what a track holds through each area's reader, taken out and counted (countTracksAdopted()); no path
-// of Phazite's leaves a track to it. And what takes, moves, copies or renders a track is one exact undo step, its Undo and
-// Redo putting every area back with it (UndoCheck.h); a drag rolled back and a trial put back leave the tracks as they were;
-// and what plays follows a folder moved.
+// The tracks are values of the song (roadmap step S5.20, the tracks' switch: model/base/internal/SongValues.h, tracks;
+// TracksArea.h). What takes, moves, copies or renders a track is one exact undo step, its Undo and Redo putting every area
+// back with it (UndoCheck.h); a drag rolled back and a trial put back leave the tracks as they were; and what plays follows
+// a folder moved.
 //   phazite_tests.exe --test-case="Song values' tracks' keeper*"
 #include "EnginePlayback.h"
 #include "SongCheck.h"
@@ -48,29 +45,6 @@ namespace
 namespace schema = phazite::schema;
 using phazite::TrackID;
 
-// The song's TRACKS and MASTER hold nothing: places alone.
-bool placesAreEmpty (const phazite::Song& song)
-{
-    const auto list = song.getState().getChildWithName (schema::TRACKS);
-    const auto master = song.getState().getChildWithName (schema::MASTER);
-    return list.getNumChildren() == 0 && master.getNumChildren() == 0 && master.getNumProperties() == 0;
-}
-
-// A run of steps through the model that each take a track in some way, counted: whether the tracks' safety net took any.
-struct NothingLeftToTheKeeper
-{
-    explicit NothingLeftToTheKeeper (const phazite::Song& s)
-        : song (s),
-          before (s.getValues()->countTracksAdopted())
-    {
-    }
-
-    ~NothingLeftToTheKeeper() { CHECK (song.getValues()->countTracksAdopted() == before); }
-
-    const phazite::Song& song;
-    const int before;
-};
-
 // A song with a track that holds a clip, a synth, an effect, a modulator and a send to a return, beside a folder with another.
 struct Held
 {
@@ -97,178 +71,6 @@ struct Held
     }
 };
 } // namespace
-
-TEST_CASE ("Song values' tracks' keeper: the song's tree holds no track, and its MASTER no property, as it opens and as it is "
-           "edited")
-{
-    Held h;
-    CHECK (placesAreEmpty (h.song));
-    CHECK_FALSE (phazite::test::treeHolds (h.song, schema::TRACK));
-
-    // Opened from its text: the tracks read once each into their area, the places emptied, what it holds the same.
-    const auto whole = phazite::test::copyWholeSong (h.song);
-    const auto opened = phazite::makeSong (whole.createCopy()); // a song takes the tree it is made of as its own
-    REQUIRE (opened != nullptr);
-    CHECK (placesAreEmpty (*opened));
-    CHECK (phazite::getTracksValue (*opened) == phazite::getTracksValue (h.song));
-    CHECK (phazite::holdTheSame (phazite::test::copyWholeSong (*opened), whole));
-    phazite::test::checkSong (*opened);
-}
-
-TEST_CASE ("Song values' tracks' keeper: a lone TRACK added to the song's TRACKS in a step is refused, and outside the history read "
-           "in with all it holds, a folder's tracks too, taken out and counted")
-{
-    Held h;
-    auto& song = h.song;
-    auto& values = *song.getValues();
-    const auto adoptedBefore = values.countTracksAdopted();
-
-    // A folder made a copy of, with the tracks in it, each with new IDs: a whole copy of what the song holds.
-    auto incoming = phazite::test::copyTrack (song, h.folder);
-    REQUIRE (incoming.isValid());
-    auto trackCopy = phazite::test::copyTrack (song, h.track);
-    REQUIRE (trackCopy.isValid());
-    incoming.appendChild (trackCopy, nullptr);
-    phazite::giveNewIDs (song, incoming);
-    const auto folder = phazite::readTrackElementID (incoming);
-    REQUIRE (incoming.getNumChildren() > 0);
-
-    // In a step: refused, the song's tracks as they were; its Undo takes the element out again.
-    const auto tracksBefore = values.tracks.get();
-
-    {
-        const phazite::test::ExpectedAssertion refused ("TracksArea.cpp");
-        const phazite::UndoStep step (song, "A Lone Track");
-        song.getState().getChildWithName (schema::TRACKS).appendChild (incoming.createCopy(), &song.getUndoManager());
-#if JUCE_DEBUG
-        CHECK (refused.getCount() == 1);
-#endif
-    }
-
-    CHECK (values.tracks.get().isSameAs (tracksBefore));
-    CHECK (values.countTracksAdopted() == adoptedBefore);
-    phazite::undo (song);
-    CHECK (placesAreEmpty (song));
-    phazite::test::checkSong (song);
-
-    // Outside the history: the folder and its two tracks read in, each where the copy has it, with their clips, devices,
-    // containers, modulators, sends, switches and view; none of it left in the tree.
-    const auto clipsBefore = phazite::getAllClips (song).size();
-
-    {
-        const phazite::Song::OutsideHistory outside (song);
-        song.getState().getChildWithName (schema::TRACKS).appendChild (incoming, nullptr);
-    }
-
-    CHECK (values.countTracksAdopted() == adoptedBefore + 3);
-    CHECK (placesAreEmpty (song));
-    REQUIRE (phazite::isFolder (song, folder));
-    const auto inside = phazite::getTracksInFolder (song, folder);
-    REQUIRE (inside.size() == 2);
-    CHECK (phazite::isTrackMuted (song, inside[0], false));                       // the other track's mute
-    CHECK (phazite::getSavedTrackHeight (song, inside[1]) == std::optional (96)); // the track's height
-    CHECK (phazite::getAllClips (song).size() == clipsBefore + 1);
-    CHECK (phazite::getClips (song, inside[1]).size() == 1);
-    CHECK (phazite::getDevices (song, inside[1]).size() == phazite::getDevices (song, h.track).size());
-    CHECK (phazite::getModulators (song, inside[1]).size() == phazite::getModulators (song, h.track).size());
-    CHECK (phazite::getSends (song, inside[1]).size() == 1);
-    CHECK (phazite::getTrackIDs (song).back() == inside[1]); // after the others of the top list
-    phazite::test::checkSong (song);
-}
-
-TEST_CASE ("Song values' tracks' keeper: a property written to the song's MASTER is refused in a step, and outside the history read "
-           "into the master's value, its mode or its view, one Phazite doesn't know dropped, and taken away")
-{
-    Held h;
-    auto& song = h.song;
-    auto& values = *song.getValues();
-    auto master = song.getState().getChildWithName (schema::MASTER);
-    const auto adoptedBefore = values.countTracksAdopted();
-    const auto volumeBefore = phazite::getChannelVolume (song, {});
-
-    {
-        const phazite::test::ExpectedAssertion refused ("TracksArea.cpp");
-        const phazite::UndoStep step (song, "A Master's Property");
-        master.setProperty (schema::channelVolume, -9.0, &song.getUndoManager());
-#if JUCE_DEBUG
-        CHECK (refused.getCount() == 1);
-#endif
-    }
-
-    CHECK (juce::exactlyEqual (phazite::getChannelVolume (song, {}), volumeBefore));
-    phazite::undo (song);
-    CHECK (placesAreEmpty (song));
-
-    {
-        const phazite::Song::OutsideHistory outside (song);
-        master.setProperty (schema::channelVolume, -9.0, nullptr);
-        master.setProperty (schema::trackAutomationMode, schema::automationLatch, nullptr);
-        master.setProperty (schema::trackHeight, 80, nullptr);
-        master.setProperty ("later", 1, nullptr);
-    }
-
-    CHECK (placesAreEmpty (song));
-    CHECK (juce::exactlyEqual (phazite::getChannelVolume (song, {}), -9.0f));
-    CHECK (phazite::getAutomationMode (song, phazite::getMasterID (song)) == phazite::AutomationMode::latch);
-    CHECK (phazite::getSavedTrackHeight (song, phazite::getMasterID (song)) == std::optional (80));
-    CHECK (values.countTracksAdopted() == adoptedBefore + 4);
-    phazite::test::checkSong (song);
-}
-
-TEST_CASE ("Song values' tracks' keeper: a duplicate, a version applied, a line put back and a merge's choice of a whole track leave "
-           "nothing to the safety net")
-{
-    Held h;
-    auto& song = h.song;
-    const auto version = phazite::test::copyWholeSong (song);
-
-    {
-        const NothingLeftToTheKeeper none (song);
-
-        {
-            const phazite::UndoStep step (song, "Duplicate");
-            phazite::duplicateTracks (song, { h.folder, h.track }, nullptr);
-        }
-
-        {
-            const phazite::UndoStep step (song, "Delete");
-            phazite::deleteTracks (song, { h.track }, nullptr);
-        }
-
-        {
-            const phazite::UndoStep step (song, "Line");
-            phazite::makeTrackLike (song, h.track, version);
-        }
-
-        REQUIRE (phazite::hasTrack (song, h.track));
-
-        {
-            const phazite::UndoStep step (song, "Bring Back");
-            phazite::makeSongLike (song, version);
-        }
-
-        phazite::makeSongTheSame (song, phazite::test::copyWholeSong (song));
-
-        // A merge's choice of a whole track: the version's.
-        phazite::renameTrack (song, h.track, "Since");
-        const auto now = phazite::test::copyWholeSong (song);
-        phazite::MergeClash clash;
-        clash.line = "Track";
-        clash.trackID = h.track.getRaw();
-        clash.path = { juce::String ("TRACKS:TRACKS"), "TRACK:" + juce::String ((juce::int64) h.track.getRaw()) };
-        clash.baseElement = phazite::test::findTrackIn (version, h.track);
-        clash.oursElement = phazite::test::findTrackIn (now, h.track);
-        clash.theirsElement = clash.baseElement;
-
-        {
-            const phazite::UndoStep step (song, "Take the Other Branch's");
-            CHECK (phazite::chooseTrackClash (song, clash, 2, { version, now, version }) == phazite::AreaChoice::chosen);
-        }
-    }
-
-    CHECK (placesAreEmpty (song));
-    phazite::test::checkSong (song);
-}
 
 TEST_CASE ("Song values' tracks' keeper: a track moved into a folder and back, a folder ungrouped, a folder of two duplicated, a "
            "track with what it holds deleted, each one exact undo step")

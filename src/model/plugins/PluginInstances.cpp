@@ -844,7 +844,7 @@ void PluginInstances::takeAnswers()
         const auto found = entries.find (waiting.id);
         const auto now = found != entries.end() ? found->second.instance : nullptr;
         const auto* values = song.getValues();
-        const auto* held = values != nullptr ? values->deviceStore.get().states.find (waiting.id.getRaw()) : nullptr;
+        const auto* held = values->deviceStore.get().states.find (waiting.id.getRaw());
         const auto heldBytes = held != nullptr ? *held : PluginBytes();
         const auto isTheSongs = heldBytes.bytes == waiting.stateAsked.bytes;
 
@@ -863,7 +863,7 @@ void PluginInstances::takeAnswers()
         {
             write (waiting.id, waiting.identity, *waiting.instance);
 
-            if (now != nullptr && values != nullptr)
+            if (now != nullptr)
                 takeFromSong (waiting.id, values->deviceStore.get());
         }
 
@@ -987,7 +987,7 @@ void PluginInstances::takeFromSong (DeviceID id, const DeviceStore& store)
 
 void PluginInstances::giveSongState (DeviceID id)
 {
-    if (const auto* values = song.getValues(); values != nullptr && isPlugin (song, id))
+    if (const auto* values = song.getValues(); isPlugin (song, id))
         takeFromSong (id, values->deviceStore.get());
 }
 

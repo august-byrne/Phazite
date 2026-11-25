@@ -71,7 +71,7 @@ inline const Element WARP          { "WARP", under (CLIP), Kind::song };
 inline constexpr double maxBeats = 1.0e6, maxSeconds = 1.0e7, moreThanZero = 1.0e-9;
 
 //==============================================================================
-// The song's own element, and what it keeps for the whole song (Song::getState()).
+// The song's own element, and what it keeps for the whole song.
 
 // The song (model/base/Song.h): the element a project file holds, with everything below in it. song
 // (PHAZITE, with the elements above.)
@@ -136,15 +136,13 @@ inline const Property<juce::String> notes { "notes", on (PHAZITE), Kind::song };
 // (model/transport/TempoValues.h). The playlist's tempo lane adds tempos along the song, each held until the next or
 // ramping to it; for now a song has one time signature, from its start. song
 
-// Child of PHAZITE, which every project has (Project adds it as the project opens): the song's tempos (TEMPO) and time
-// signatures (TIMESIGNATURE), read in any order, each kind sorted by beat, one of a kind for a beat as a song opens (an
-// entry's key is its beat: of two at one beat the loader keeps the first; the open song can come to hold two at one beat,
-// known bug 240 in docs/known-bugs.md), and written tempos first, then time signatures, each kind by beat. Without one,
-// the song is at 120 BPM in 4/4. A song's tempo map is a value beside its tree while it is open
-// (model/base/internal/TempoMapValue.h), each property below as its description reads it, at least one of each kind, and
-// its tree's TEMPOMAP an empty place for it: so the song keeps no property or element Phazite doesn't know on a TEMPOMAP,
-// a TEMPO or a TIMESIGNATURE, and writes a tempo's curve only while it isn't 1.
-// (TEMPOMAP, with the elements above.)
+// Child of PHAZITE, which every project has (Project adds it as the project opens): the song's tempos (TEMPO) and time signatures
+// (TIMESIGNATURE), read in any order, each kind sorted by beat, one of a kind for a beat as a song opens (an entry's key is its
+// beat: of two at one beat the loader keeps the first; the open song can come to hold two at one beat, known bug 240 in
+// docs/known-bugs.md), and written tempos first, then time signatures, each kind by beat. Without one, the song is at 120 BPM in
+// 4/4. A song's tempo map is a value while it is open (model/base/internal/TempoMapValue.h), each property below as its
+// description reads it, at least one of each kind: so the song keeps no property or element Phazite doesn't know on a TEMPOMAP, a
+// TEMPO or a TIMESIGNATURE, and writes a tempo's curve only while it isn't 1. (TEMPOMAP, with the elements above.)
 
 // Child of TEMPOMAP: a tempo, from where it starts (mapBeat) to the next one's start, in quarter notes per minute (bpm, 20..300,
 // to a hundredth), and how it goes on to the next (tempoCurve, float -1..1, as an automation point's pointCurve; without
@@ -330,10 +328,9 @@ inline const Property<juce::String> drumHidden { "drumHidden", on (TRACK), Kind:
 // view), with an ID of the song's (trackID) like a track's. song, but for its lanes
 // (MASTER, with the elements above.)
 
-// Child of TRACK and of MASTER, while the track keeps a lane: its automation lanes (LANE), in an element of their own. Lanes
-// are view state, held outside the undo history with the rest of a track's view (TracksOutside.h: the song's tree holds no
-// LANES), and written after the track's clips, devices and a folder's tracks, before its modulators and sends; none is
-// written for a track that keeps no lane. view
+// Child of TRACK and of MASTER, while the track keeps a lane: its automation lanes (LANE), in an element of their own. Lanes are
+// view state, held outside the undo history with the rest of a track's view (TracksOutside.h), and written after the track's
+// clips, devices and a folder's tracks, before its modulators and sends; none is written for a track that keeps no lane. view
 // (LANES, with the elements above.)
 
 // Child of LANES, one for each automation lane the playlist shows under the track, in their order (docs/design.md,
@@ -345,8 +342,9 @@ inline const Property<juce::String> drumHidden { "drumHidden", on (TRACK), Kind:
 // On LANE: the device, by its ID written as text (DeviceID: "1042").
 inline const Property<juce::String> laneDevice { "device", on (LANE), Form::idName, Kind::view };
 
-// On LANE: the parameter, by its ID in its device, as its curve names it (curveParameter).
-inline const Property<juce::String> laneParameter { "parameter", on (LANE), Kind::view };
+// On LANE, always: the parameter, by its ID in its device, as its curve names it (curveParameter); never empty, a lane without
+// one naming nothing, which goes.
+inline const Property<juce::String> laneParameter { "parameter", on (LANE), always, Kind::view };
 
 // On LANE. int 32..320, default 48: the lane's height in the playlist while it isn't collapsed, in pixels at an interface
 // scale of 100%.
@@ -548,8 +546,8 @@ inline const Property<float> modulatesAmount { "amount", on (MODULATES), within 
 // Child of PHAZITE: the curves (CURVE), in the order the song made them (a curve made goes after the others). Written
 // while the song has a curve. A curve whose owner (a device, a chain, a fader or a VCA, a send, a modulator or a macro) the
 // song hasn't any more goes with it, in the step that takes it away (model/mixer/internal/Mixer.h: forgetWhatNamesTheGone()),
-// and one a file holds goes as the project opens. The song holds its curves as values beside its tree
-// (model/base/internal/SongValues.h: the curves' area), its AUTOMATION an empty place every song that holds its values has;
+// and one a file holds goes as the project opens. The song holds its curves as values
+// (model/base/internal/SongValues.h: the curves' area), written in an AUTOMATION while it has one;
 // what Phazite doesn't know on it, a curve or a point (a property, a child of another type) goes as the song opens.
 // (AUTOMATION, with the elements above.)
 
@@ -578,10 +576,9 @@ inline const Property<float> pointCurve { "curve", on (POINT), within (-1.0, 1.0
 
 // Child of PHAZITE, added with the first link: the links (MIDILINK), in the song's order (of two of one controller or one
 // parameter, the first stays). A link of a device, a chain, a send, a fader, a modulator or a macro that goes leaves with it,
-// in its step (model/mixer/internal/Mixer.h: forgetWhatNamesTheGone()). A song's links are a value beside its tree while it is
-// open (model/base/internal/MidiLinksValue.h), each property below as its description reads it, and its tree's MIDILINKS
-// an empty placeholder, kept where the song has one: so the song keeps no property or element Phazite doesn't know on a
-// MIDILINKS or a MIDILINK.
+// in its step (model/mixer/internal/Mixer.h: forgetWhatNamesTheGone()). A song's links are a value while it is open
+// (model/base/internal/MidiLinksValue.h), each property below as its description reads it, written while it has one (an
+// empty MIDILINKS is none): so the song keeps no property or element Phazite doesn't know on a MIDILINKS or a MIDILINK.
 // (MIDILINKS, with the elements above.)
 
 // Child of MIDILINKS: a link. On MIDILINK: the controller, by its channel (int 1..16) and its number (int 0..119: 120 to
@@ -888,10 +885,10 @@ inline bool isVersionsID (const juce::String& text, int digits)
 // The song's sections (model/arrangement/internal/Sections.h; docs/design.md, section 6): named, colored parts of the
 // song over every track. song
 
-// Child of PHAZITE, added with the first section (and kept once the last goes): the sections (SECTION), in no particular
-// order. A song's sections are a value beside its tree while it is open (model/base/internal/SectionsValue.h), each property
-// below as its description reads it, and its tree's SECTIONS an empty placeholder, kept where the song has one: so the song
-// keeps no property or element Phazite doesn't know on a SECTIONS or a SECTION.
+// Child of PHAZITE, written while the song has a section (an empty SECTIONS is none): the sections (SECTION), in no
+// particular order. A song's sections are a value while it is open (model/base/internal/SectionsValue.h), each property
+// below as its description reads it: so the song keeps no property or element Phazite doesn't know on a SECTIONS or a
+// SECTION.
 // (SECTIONS, with the elements above.)
 
 // Child of SECTIONS: a section. Sections don't overlap.
@@ -929,9 +926,9 @@ inline const Property<juce::String> sectionColour { "colour", on (SECTION), Form
 
 // Child of PHAZITE, added when the first chord or key is written: the chords (CHORD) and the keys they are in (CHORDKEY),
 // in no particular order, written chords first, then keys, each kind in the lane's order. Without one, the song's keys are
-// the key set last (LASTKEY), and a lane made starts with it. A song's chords and keys are a value beside its tree while it
-// is open (model/base/internal/ChordLaneValue.h), each property below as its description reads it, and its tree's
-// CHORDLANE an empty placeholder that says it has a lane: so the song keeps no property or element Phazite doesn't know on
+// the key set last (LASTKEY), and a lane made starts with it. A song's chords and keys are a value while it is open
+// (model/base/internal/ChordLaneValue.h), each property below as its description reads it, with whether it has a lane
+// (placed), which an empty CHORDLANE says: so the song keeps no property or element Phazite doesn't know on
 // a CHORDLANE, a CHORD or a CHORDKEY, and writes a chord's accidental and inversion only while they aren't 0.
 // (CHORDLANE, with the elements above.)
 
@@ -968,7 +965,7 @@ inline const Property<int> chordInversion { "inversion", on (CHORD), whole (0.0,
 
 // Child of a TRACK that holds clips (trackIsTrack): a clip on it. A track's clips have an order, its list of them; a file's
 // CLIP elements under a TRACK are read in their order, which becomes the list's, and written first among the track's
-// children, in the list's order. A song's clips are values beside its tree while it is open (model/base/internal/
+// children, in the list's order. A song's clips are values while it is open (model/base/internal/
 // ClipsValue.h: ClipValue), each property below as its description reads it and the whole kept within what a clip holds
 // (keepWithinClip(): a file's end not before its start, a MIDI clip at least shortestClipBeats long, a take among its
 // takes), so the song keeps no property or element Phazite doesn't know on a CLIP, nor one of the other kind of clip's (a
@@ -1014,7 +1011,7 @@ inline const Property<bool> clipMute { "mute", on (CLIP), byDefault (false), Kin
 inline const Property<std::int64_t> clipLink { "link", on (CLIP), Form::songID, Kind::song };
 
 // Child of a MIDI CLIP: a note, in no particular order; written before the clip's CONTROL elements. A clip's notes and
-// controllers' values are values beside the song's tree while it is open (model/base/internal/SongValues.h), so the song
+// controllers' values are values while the song is open (model/base/internal/SongValues.h), so the song
 // keeps no property or element Phazite doesn't know on a NOTE or a CONTROL, as it keeps one elsewhere.
 // (NOTE, with the elements above.)
 
@@ -1309,13 +1306,19 @@ bool areNumberedAlike (const juce::ValueTree& song, const juce::ValueTree& other
 bool areNumberedAlike (const Song& song, const juce::ValueTree& other);
 
 // The ID a song gives next: past its count (nextID) and every ID it holds. Of a song's tree (a version's, a merge's, a whole
-// copy): what the tree holds. Of a live song: its tree's and what its values hold beside it (IDsHeld.h: findLargestIDHeld()),
-// which its tree no longer does (roadmap step S5.20); what everything that works out a live song's next ID asks.
+// copy, a file the loader reads): what the tree holds. Of a song: what its values hold (IDsHeld.h: findLargestIDHeld()); what
+// everything that works out a song's next ID asks.
 std::uint64_t findNextID (const juce::ValueTree& song);
 std::uint64_t findNextID (const Song&);
 
-// Brings the song's count there (findNextID()). As a project opens and saves.
+// Brings the song's count there (findNextID()). As a project saves; and a file's song's tree's count as the song is made of it
+// (model/project/internal/Project.h: makeSong()), before it is read.
 void countIDs (Song&);
+void countIDsIn (juce::ValueTree& song);
+
+// A new ID of a song's tree's count (nextID, from 1, as Song::makeID() gives one), the count moved on past it: what the loader
+// gives an item of a file's song before the song is made of it (model/project/internal/Project.h: makeConsistent()).
+std::uint64_t makeIDIn (juce::ValueTree& song);
 
 // The song's count of IDs (nextID), as Song::makeID() goes on from it and a whole copy writes it: the ID it gives next where
 // no ID it holds is past it (findNextID() counts those too). From 1.

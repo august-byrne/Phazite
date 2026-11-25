@@ -411,14 +411,6 @@ TEST_CASE ("Delete All of a long take's bend, its mod wheel between, is one chan
     REQUIRE (kept.size() == 50020);
     REQUIRE (song.valuesOf (bend, take).size() == 50000);
 
-    struct Heard : juce::ValueTree::Listener
-    {
-        void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override { ++changes; }
-        void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override { ++changes; }
-        void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { ++changes; }
-        int changes = 0;
-    } heard;
-
     // The changes of the notes' area, each as the clips it names.
     struct HeardValues : phazite::SongValues::Listener
     {
@@ -429,16 +421,12 @@ TEST_CASE ("Delete All of a long take's bend, its mod wheel between, is one chan
     auto* values = song.getSong().getValues();
     REQUIRE (values != nullptr);
     phazite::test::UndoCheck undo (song.song.context);
-    auto root = song.getSong().getState();
-    root.addListener (&heard);
     values->addListener (&heardValues);
     undo.check ("Delete All Pitch Bend", [&] { phazite::deleteAllControlValues (song.song.context, { take }, bend); });
     values->removeListener (&heardValues);
-    root.removeListener (&heard);
 
-    // One change of the clip's value (SongValues.h), which the tree doesn't hear, not 50,000 removals; and the check's undo
+    // One change of the clip's value (SongValues.h), not 50,000 removals; and the check's undo
     // and redo of it one change each.
-    CHECK (heard.changes == 0);
     REQUIRE (heardValues.changes.size() == 3); // the edit, its Undo and its Redo
 
     for (const auto& clips : heardValues.changes)

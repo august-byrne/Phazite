@@ -3,9 +3,9 @@
 // MACRO), by its ID, with what it modulates (MODULATES) and a modulator's values set by hand (its VALUES); each owner's in
 // their order (a track's or the master's own, a container's macros); in Phazite's own types, with the helpers that alone
 // write it, and the conversion between the elements and the value, the one place that reads and writes those elements by
-// name. The value is the storage: the song holds it as modulation's area (SongValues.h), and its tree holds no MODULATOR,
-// MACRO or MODULATES element; what a file holds is read in through this conversion (ModulationArea.h: the adoption and the
-// keeper), and a whole copy written from it (WholeState.h).
+// name. The value is the storage: the song holds it as modulation's area (SongValues.h); what a file holds is read in
+// through this conversion as the song is made of its state (ModulationArea.h), and a whole copy written from it
+// (WholeState.h).
 //
 // Its own header, beside SongValues.h and the other areas' (one header for each area's values). It includes the devices'
 // modulators (devices/modulation/Modulators.h: a modulator's kind and parameters), which every layer may, and the parameter
@@ -127,10 +127,10 @@ SongModulation withOwnerOrder (const SongModulation&, const ModulatorPlace& owne
 bool holdsItsLists (const SongModulation&);
 
 // A modulator or a macro added or changed (withModulator()) with what must hold together kept so, the one rule of the
-// adoption, the keeper and the setters (SongValues.h: setModulator()): one modulation of each parameter (the first), and a
+// song made of its state and of the setters (SongValues.h: setModulator()): one modulation of each parameter (the first), and a
 // container's macro on the channel its container's other macros are on, where it has others. And whether a song's
 // modulation holds together so (holdsItsLists() too), for the check (tests/SongCheck.cpp) and the assertions of the
-// adoption and of the setter of the whole value (ModulationArea.cpp: SongValues::setAllModulation()).
+// song made of its state and of the setter of the whole value (ModulationArea.cpp: SongValues::setAllModulation()).
 SongModulation withHeldModulator (const SongModulation&, ModulatorValue, int index = -1);
 bool holdsTogether (const SongModulation&);
 
@@ -152,12 +152,12 @@ ModulatorPlace readModulatorPlace (const juce::ValueTree& element);
 // its steps each within -1 to 1 (0 for what is no finite number), as many as it has; a macro's name and value (0 for none);
 // and every MODULATES, its device's ID as readID() reads one, its amount 0 for none. Numbers as the song reads one
 // (SongText.h: readValueNumber()). None for an element that is neither a MACRO nor a MODULATOR of a kind Phazite plays,
-// which every reader of the song left out. For a song without values (a copy as it would open), and for tests. Counted
+// which every reader of the song left out. For the tests. Counted
 // (countModulatorsRead()).
 std::optional<ModulatorValue> readModulatorValue (const juce::ValueTree& element, const ModulatorPlace&);
 
-// The same as the song holds it: what enters modulation's area (the adoption, the keeper, a version's modulators and a
-// merge's choice). Its ID one the song can count on from (more than 0 and below schema::maxID), else none; a modulator's
+// The same as the song holds it: what enters modulation's area (a file's as the song is made of its state, a version's modulators
+// and a merge's choice). Its ID one the song can count on from (more than 0 and below schema::maxID), else none; a modulator's
 // values each by its parameter's description (a choice by a name it has or its number, a number brought within its range
 // and to its steps: devices::constrain(); none at its default, and none of what is no finite number); its steps within -1
 // to 1, to a ten-thousandth (0 for what is no finite number), at most devices::Modulator::maxSteps, without the zeros at
@@ -176,14 +176,14 @@ std::optional<ModulatorValue> readHeldModulator (const juce::ValueTree& element,
 // its VALUES), its properties and children are replaced by those, each property compared as text (SongText.h:
 // isSameValue()). Nothing for one that holds nothing else, or that readHeldModulator() reads none of. Whether it changed.
 // The loader's, for every modulator and macro (model/project/internal/Project.h: makeConsistent()), so that each of a song
-// that went through it reads the same as readModulatorValue() reads it and as readHeldModulator() does, and the adoption
-// takes in what the file holds unchanged (ModulationArea.h, which asserts it: isWrittenAsHeld()). Counted
+// that went through it reads the same as readModulatorValue() reads it and as readHeldModulator() does, and the song made of
+// its state takes in what the file holds unchanged (ModulationArea.h, which asserts it: isWrittenAsHeld()). Counted
 // (countModulatorsRead()).
 bool keepModulatorAsHeld (juce::ValueTree element);
 
 // Whether an element holds nothing else than writeModulatorElement() writes of what readHeldModulator() reads of it (at the
-// place given): what keepModulatorAsHeld() leaves every modulator and macro of a song it went through. For the adoption's
-// assertion (ModulationArea.h). Counted (countModulatorsRead()).
+// place given): what keepModulatorAsHeld() leaves every modulator and macro of a song it went through. For the assertion of
+// the song made of its state (ModulationArea.h). Counted (countModulatorsRead()).
 bool isWrittenAsHeld (const juce::ValueTree& element, const ModulatorPlace&);
 
 // A modulator's or a macro's element, new, as Phazite's writers write one (model/modulation/Modulation.cpp,
@@ -196,18 +196,18 @@ juce::ValueTree writeModulatorElement (const ModulatorValue&);
 
 // Every modulator and macro of a song's tree (PHAZITE), read as readModulatorValue() reads one: each TRACK's (in the track
 // list, folders' tracks too, in the song's order of its tracks) and the MASTER's, each channel's own and then those of each of
-// its CONTAINERs, each owner's in its element's order; of two with one ID (which the loader leaves none of), the first. What
-// reads a song without values (Modulation.h: getModulationValue(), for a check's copy), and the tests.
+// its CONTAINERs, each owner's in its element's order; of two with one ID (which the loader leaves none of), the first. For the
+// tests.
 SongModulation readModulationValue (const juce::ValueTree& song);
 
 // One of them by its ID, as readModulationValue() holds it (the first of the ID that reads as one), the others not read into
-// values: what a song without values finds one with (Modulation.h: getModulatorValue(), which the loader's checks ask for each
-// parameter they look at, before the song holds its values). None for an ID no element has.
+// values: what the loader's checks find one with in a file's tree for each parameter they look at (Parameters.h:
+// locateParameterIn()). None for an ID no element has.
 std::optional<ModulatorValue> readModulatorValueIn (const juce::ValueTree& song, ModulatorID);
 
 // The same as the song holds it: each read as readHeldModulator() reads it, in the same order, held together as the setters
-// hold it (withHeldModulator()); of two with one ID, the first. What the adoption takes in (ModulationArea.h). Each element
-// read is given to `each` too (the adoption's assertion).
+// hold it (withHeldModulator()); of two with one ID, the first. What the song made of its state takes in (ModulationArea.h).
+// Each element read is given to `each` too (its assertion).
 SongModulation readHeldModulation (const juce::ValueTree& song, const std::function<void (const juce::ValueTree&)>& each = {});
 
 // A modulator or a macro with one of its own properties (Schema.h: modulatorID, modulatorType, deviceOff and modulatorSteps

@@ -116,12 +116,7 @@ bool KeyEntry::operator== (const KeyEntry& other) const noexcept
 
 bool ChordLaneValue::isSameAs (const ChordLaneValue& other) const noexcept
 {
-    return holdsSameEntriesAs (other) && placed == other.placed;
-}
-
-bool ChordLaneValue::holdsSameEntriesAs (const ChordLaneValue& other) const noexcept
-{
-    return chords.identity() == other.chords.identity() && keys.identity() == other.keys.identity();
+    return chords.identity() == other.chords.identity() && keys.identity() == other.keys.identity() && placed == other.placed;
 }
 
 bool ChordLaneValue::operator== (const ChordLaneValue& other) const
@@ -137,17 +132,6 @@ ChordLaneValue readChordLaneValue (const juce::ValueTree& lane)
 ChordLaneValue readHeldChordLane (const juce::ValueTree& lane)
 {
     return keepChordsApart (readLane (lane, readHeldChord, readHeldKey));
-}
-
-ChordLaneValue withEntryTaken (const ChordLaneValue& value, const juce::ValueTree& entry)
-{
-    if (entry.hasType (schema::CHORD))
-        return keepChordsApart (makeLane (value.chords.push_back (readHeldChord (entry)), value.keys, value.placed));
-
-    if (entry.hasType (schema::CHORDKEY))
-        return makeLane (value.chords, value.keys.push_back (readHeldKey (entry)), value.placed);
-
-    return value;
 }
 
 ChordLaneValue keepChordsApart (const ChordLaneValue& lane)

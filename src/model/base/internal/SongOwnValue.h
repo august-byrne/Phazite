@@ -12,7 +12,7 @@
 // are their writers' one way to change them, each setting the area's next value once; and what listens to the song hears
 // them change from the values' listener (SongValues.h: songOwnChanged(), songStandingChanged(), songOutsideChanged(), told
 // by each area's teller: SongOwnArea.h). The conversion below is the one place that reads and writes these names: what the
-// song takes in as it opens (SongOwnArea.h: the adoption) and what a whole copy is written from (WholeState.h).
+// song takes in as it opens (SongOwnArea.h, as it is made of its state) and what a whole copy is written from (WholeState.h).
 #pragma once
 
 #include "model/base/internal/ValueArea.h"
@@ -171,17 +171,16 @@ SavedGrid readSavedGrid (const juce::ValueTree& gridHolder);
 // What the three values hold of a song's root, by name: a property of its own (Schema.h: PHAZITE's outline, notes,
 // idNumbering, patternsKeepTheirSpeed, the versions' two names, the loop's four, playStart, metronome, punch, lastInput and
 // the playlist's grid; not nextID, a count, nor a property Phazite doesn't know); and an element of its own (LASTKEY,
-// PIANOROLL, MERGING), by its type. What the song takes in as it opens and what its keeper's safety net takes in
-// (SongOwnArea.h), what the passes over a song's elements leave to the values (model/versions/ApplySong.cpp) and what the
-// root's listeners leave to the values' listener (SongOwnArea.h: isHeardAsSongOwn()).
+// PIANOROLL, MERGING), by its type. What the song reads as it is made of a file's state
+// (SongOwnArea.h) and what the passes over a song's elements leave to the values (model/versions/ApplySong.cpp).
 bool isSongOwnProperty (const juce::Identifier& property);
 bool isSongOwnElement (const juce::Identifier& type);
 
-// Whether Phazite knows a property of a song's root, by the descriptions: one they put on PHAZITE (Schema.h: the song's own,
-// and its count of IDs, nextID); and an element there, by its type (Schema.h: isKnownType()). What it doesn't know at the
-// root, the one rule of both: dropped as the song opens (SongOwnArea.h, the adoption), and left out of a merge, neither
-// merged nor compared (model/versions/SongMerge.cpp: mergeSongs()), so that no clash is made of what the song can't hold,
-// and no change listed of it (model/versions/SongDiff.cpp: findSongChange()).
+// Whether Phazite knows a property of a song's root, by the descriptions: one they put on PHAZITE (Schema.h: the song's own, and
+// its count of IDs, nextID); and an element there, by its type (Schema.h: isKnownType()). What it doesn't know at the root, the
+// one rule of both: dropped as the song opens (the loader: model/project/internal/Project.h, makeConsistent()), and left out of a
+// merge, neither merged nor compared (model/versions/SongMerge.cpp: mergeSongs()), so that no clash is made of what the song
+// can't hold, and no change listed of it (model/versions/SongDiff.cpp: findSongChange()).
 bool isKnownRootProperty (const juce::Identifier& property);
 bool isKnownRootElement (const juce::Identifier& type);
 
@@ -189,7 +188,7 @@ bool isKnownRootElement (const juce::Identifier& type);
 // The getters: each value as the song holds it, its area's (SongValues.h: songOwn, songStanding, songOutside), by reference
 // into it, valid until the area's next change: what the readers of the song's own read, a tick's poll among them (the top
 // bar's loop, the time line's punch), with nothing allocated and nothing read but the one value. A caller that keeps one
-// across a write keeps a copy (auto, not auto&). The defaults for a song that holds no values (a song being made or read).
+// across a write keeps a copy (auto, not auto&).
 const SongOwnValue& getSongOwn (const Song&);
 const SongStanding& getSongStanding (const Song&);
 const SongOutside& getSongOutside (const Song&);
@@ -205,7 +204,7 @@ const SongOutside& getSongOutside (const Song&);
 //     standing, but for the entries that step changed, which keep its before and after (ValueArea.h: keyed).
 //   - setSongOutside(): outside the history, always (the loop, the play start, the metronome, punch, the input chosen last,
 //     the grids).
-// Nothing for a song that holds no values (asserted). In SongOwnArea.cpp.
+// In SongOwnArea.cpp.
 void setSongOwn (Song&, SongOwnValue);
 void setSongStanding (Song&, SongStanding);
 void storeStandingOutsideHistory (Song&, SongStanding);

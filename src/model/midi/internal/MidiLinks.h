@@ -32,15 +32,15 @@ struct MidiLink
 };
 
 // The song's links as a value (model/base/internal/MidiLinksValue.h), in the song's order: its area's (model/base/internal/
-// SongValues.h), without a read, which shares what it holds; a song that keeps everything in its tree (one that holds no
-// values: Song::getValues()) has them read from its MIDILINKS element.
+// SongValues.h), without a read, which shares what it holds.
 MidiLinksValue getMidiLinksValue (const Song&);
 
 // The parameter a link names, as the song names it elsewhere (ParameterRef.h): a macro's link holds the word
 // schema::midiLinkMacroValue as its parameter, which stays as a merge or a copy gives the macro a new ID. Of a link of the
-// song's value, and of a link's element (read as the value reads it: the loader's, makeConsistent()).
+// song's value; and of a link's element in a file's song's tree, the macro found by its element there (the loader's,
+// makeConsistent()), by the same rule.
 ParameterRef readMidiLinkParameter (const Song&, const MidiLinkEntry&);
-ParameterRef readMidiLinkParameter (const Song&, const juce::ValueTree& link);
+ParameterRef readMidiLinkParameterIn (const juce::ValueTree& song, const juce::ValueTree& link);
 
 // The song's links, by channel, then number; a parameter's controller; a controller's parameter.
 std::vector<MidiLink> getMidiLinks (const Song&);
@@ -49,13 +49,10 @@ std::optional<ParameterRef> findLinkedParameter (const Song&, MidiController);
 
 // The writers of the song's links, each in the caller's step (or outside the history while the song is written outside it),
 // each reading the links' value, working the next one out and setting it once (SongValues.h: setMidiLinks(), which writes
-// nothing for the links the song holds already). Each of a song that holds its values (model/project/internal/Project.h:
-// makeSong()): a song without them is written nothing.
+// nothing for the links the song holds already).
 //
 // Links a controller to a parameter: the controller's link, if it had one, and the parameter's own, if it had one, go, and
-// the link is put after the others; the song's MIDILINKS, its place, added first where it has none (an action of the tree's,
-// before the value's: so Undo takes the value back first, then the element), as it was always added with the first link.
-// The parameter the controller turned before, if it was another.
+// the link is put after the others. The parameter the controller turned before, if it was another.
 std::optional<ParameterRef> linkMidiController (Song&, MidiController, const ParameterRef&);
 void unlinkMidiController (Song&, MidiController);
 
@@ -65,15 +62,13 @@ void unlinkMidiController (Song&, MidiController);
 // take one side's link of a parameter beside the other's.
 void forgetMidiLinksOfTheGone (Song&, const std::set<std::uint64_t>& items);
 
-// One link of each controller and one of each parameter in the MIDILINKS element of a song that keeps its links in its tree
-// (the loader's, makeConsistent(), before the song holds its values; a version's song read in part): of two, the first in the
-// element's order stays, the other goes, as MidiLinksValue.h's keepOneLinkEach() keeps them, outside any history. Nothing for
-// a song that holds its values, whose MIDILINKS is empty.
-void keepOneMidiLinkEach (Song&);
+// One link of each controller and one of each parameter in a file's song's MIDILINKS element (the loader's,
+// makeConsistent(); a version's song read in part): of two, the first in the element's order stays, the other goes, as
+// MidiLinksValue.h's keepOneLinkEach() keeps them. Nothing for an invalid tree.
+void keepOneMidiLinkEach (juce::ValueTree midiLinksElement);
 
 // The song's links made those of a MIDILINKS element (another song's: a version's, a merge's), read as the song holds links
-// (MidiLinksValue.h: readHeldMidiLinks()), or none for an invalid tree, with its MIDILINKS as the other has one: added first
-// where it comes, taken away last where it goes (the value never says more than the element), in the mode of the moment.
+// (MidiLinksValue.h: readHeldMidiLinks()), or none for an invalid tree (an empty list is none), in the mode of the moment.
 // What the versions' links pass gives the song (model/versions/ApplySong.cpp). Whether it wrote anything.
 bool makeMidiLinksAs (Song&, const juce::ValueTree& midiLinksElement);
 

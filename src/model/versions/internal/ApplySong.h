@@ -21,6 +21,7 @@
 
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
+#include "model/base/internal/SongState.h"
 
 #include <juce_data_structures/juce_data_structures.h>
 
@@ -37,11 +38,13 @@ void makeSongLike (Song&, const juce::ValueTree& other);
 // the song it was. Its count of IDs is the larger of the two.
 void makeSongTheSame (Song&, const juce::ValueTree& other);
 
-// The song made what a copy of it taken earlier was, outside its undo history, which stays as it is: what changed in it
-// without an undo step since (mute and solo, the loop, view state, a plug-in's settings stored, its count of IDs), once what
-// the history holds is the copy's again (a version open put back: VersionsModel.cpp, backToNow()). With the fewest edits, so
-// that only those are made; a song whose history doesn't hold the copy's would lose what that history refers to.
-void makeSongAsCopied (Song&, const juce::ValueTree& copy);
+// The song made what a state of it taken earlier was (SongState.h), outside its undo history, which stays as it is: what
+// changed in it without an undo step since (mute and solo, the loop, view state, a plug-in's settings stored, its count of IDs),
+// once what the history holds is the state's again (a version open put back: VersionsModel.cpp, backToNow()); and what it
+// keeps of items it no longer holds (the switches, the view, the store, the windows' places) as the state held it. With the
+// fewest edits, so that only those are made; a song whose history doesn't hold the state's would lose what that history
+// refers to.
+void makeSongAsCopied (Song&, const SongState& now);
 
 // One track (a folder's own part, a return, or the master: named by either song's ID for it, the master is found as the
 // master in each, as a version may give it another ID) like the other's, with what it holds and its devices'

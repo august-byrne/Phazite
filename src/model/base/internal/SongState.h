@@ -3,7 +3,7 @@
 // (SongValues.h) as it was when it was taken, and the two converters between it and the file's form of the song, a tree of
 // elements (Schema.h): writeSongTree(), the tree a whole copy of the song is (WholeState.h: copyWholeSong()), and
 // readSongTree(), the areas read from a tree the loader made consistent (model/project/internal/Project.h: makeConsistent()),
-// as the song reads its file as it holds its values (Song::holdValues()).
+// which a song is made of (Song.h: Song (SongState); Project.h: makeSong()).
 //
 // Any thread may read a state once taken, while the message thread goes on changing the song: each member is a value that
 // shares what it holds and changes none of it (immer's containers, juce::String, the store's bytes behind a std::shared_ptr to
@@ -31,101 +31,62 @@
 
 #include <juce_data_structures/juce_data_structures.h>
 
-#include <array>
 #include <cstdint>
-#include <optional>
 
 namespace phazite
 {
 class Song;
 
-// A place the song's root holds for an area: an empty element of its own in the song's tree (SongValues.h: its TEMPOMAP, its
-// AUTOMATION, its TRACKS and its MASTER always; its CHORDLANE, its MIDILINKS and its SECTIONS where it has them), which a whole
-// copy writes the area into. None, for the end of a state's list of them.
-enum class RootPlace : std::uint8_t
-{
-    none,
-    tempoMap,
-    tracks,
-    master,
-    automation,
-    midiLinks,
-    sections,
-    chordLane
-};
-
-// A place's element type (Schema.h), and the place an element type is (none for any other: the root's LASTKEY, PIANOROLL and
-// MERGING are the song's own, which whole state writes after them).
-const juce::Identifier& getRootPlaceType (RootPlace);
-RootPlace findRootPlace (const juce::Identifier& type);
-
 // The song whole, as values, at one moment: each area's value (SongValues.h's recipe, a member for each area, which
-// getSongState() and readSongTree() take, a line each) and the places its root holds, in the root's order.
+// getSongState() and readSongTree() take, a line each). What its root holds in a file follows from the values alone: its
+// TEMPOMAP, TRACKS and MASTER always; its AUTOMATION while it holds a curve; its MIDILINKS and its SECTIONS while it holds a
+// link or a section (an empty list is none); its CHORDLANE while its lane is placed (ChordLaneValue.h: placed).
 struct SongState
 {
     NotesByClip notes {};
     SongClips clips {};
-    TempoMapValue tempoMap {};        // none (no entry of either kind) of a song that holds no values
-    ChordLaneValue chordLane {};      // empty of a song that holds no values, and of one without chords or keys; and
-                                      // whether the song has a lane at all (ChordLaneValue.h: placed)
-    MidiLinksValue midiLinks {};      // none of a song that holds no values, and of one without links
-    SongCurves curves {};             // none of a song that holds no values, and of one without automation
-    SectionsValue sections {};        // none of a song that holds no values, and of one without sections
-    SongModulation modulation {};     // none of a song that holds no values, and of one without modulators or macros
-    SongSends sends {};               // none of a song that holds no values, and of one without sends
-    DeviceStore deviceStore {};       // none of a song that holds no values, and of one without what devices store
-    DevicesOutside devicesOutside {}; // none of a song that holds no values, and of one whose windows never moved
-    SongDevices devices {};           // none of a song that holds no values, and of one without devices
-    TrackSwitches trackSwitches {};   // none of a song that holds no values, and of one without a switch on
-    TracksOutside tracksOutside {};   // none of a song that holds no values, and of one whose rows were never set
-
-    // None of a song that holds no values (its tree holds its tracks); else every track and the master, which whole state
-    // writes into the TRACKS and the MASTER (WholeState.cpp: writeTracksIn()).
-    std::optional<SongTracks> tracks {};
-
-    SongOwnValue songOwn {}; // the song's own (SongOwnValue.h): the defaults of a song that holds no values
+    TempoMapValue tempoMap {};        // none (no entry of either kind) of a state made empty
+    ChordLaneValue chordLane {};      // empty of a song without chords or keys; and whether the song has a lane at all (placed)
+    MidiLinksValue midiLinks {};      // none of a song without links
+    SongCurves curves {};             // none of a song without automation
+    SectionsValue sections {};        // none of a song without sections
+    SongModulation modulation {};     // none of a song without modulators or macros
+    SongSends sends {};               // none of a song without sends
+    DeviceStore deviceStore {};       // none of a song without what devices store
+    DevicesOutside devicesOutside {}; // none of a song whose windows never moved
+    SongDevices devices {};           // none of a song without devices
+    TrackSwitches trackSwitches {};   // none of a song without a switch on
+    TracksOutside tracksOutside {};   // none of a song whose rows were never set
+    SongTracks tracks {};             // every track and the master, which whole state writes into the TRACKS and the MASTER
+    SongOwnValue songOwn {};          // the song's own (SongOwnValue.h)
     SongStanding songStanding {};
     SongOutside songOutside {};
-    std::uint64_t nextID = 0; // the song's count of IDs (Song.h: makeID()): 0, none written, for a song that holds no values
-
-    // The places its root holds, in the root's order, the first none ending them (a place once each): those of the song's
-    // tree as it was taken (getSongState()), or of the tree read (readSongTree()), so that writeSongTree() writes the root's
-    // children in the order the song's tree holds them, the elements of its own after them. Until the song's tree goes (the
-    // end of roadmap step S5.20, which writes them in its description's order) the order of a song's root is its history's:
-    // a CHORDLANE, a MIDILINKS or a SECTIONS added where the song's first chord, link or section added it. Whether the song
-    // has a MIDILINKS or a SECTIONS at all is said here alone (each, added with the first link or section, stays once the last
-    // goes); whether it has a CHORDLANE, its value's too (ChordLaneValue.h: placed), which a song keeps equal to this
-    // (tests/SongCheck.cpp). Those every song that holds its values has, as a new state starts.
-    std::array<RootPlace, 7> rootPlaces { RootPlace::tempoMap, RootPlace::tracks, RootPlace::master, RootPlace::automation };
-
-    // Whether the root holds a place (rootPlaces).
-    bool holdsPlace (RootPlace) const noexcept;
+    std::uint64_t nextID = 0; // the song's count of IDs (Song.h: makeID()): 0, none written, for a state made empty
 };
 
 // The song whole, as it is now: a copy of each area's value (cheap: a count of what shares it raised for each, never an area
-// read or walked: nothing allocated, whatever the song's size: tests/PerformanceGateTests.cpp) and its root's places. For a
-// song that holds no values, the defaults (and the places its tree holds). Message thread; any thread may read it after.
+// read or walked: nothing allocated, whatever the song's size: tests/PerformanceGateTests.cpp). Message thread; any thread may
+// read it after.
 SongState getSongState (const Song&);
 
-// The song's file form, written from a state alone (no song read): a root (PHAZITE) with the places the state names, in its
-// order (its CHORDLANE only where its lane is placed; its TEMPOMAP where the state names none, and its AUTOMATION where it holds
-// curves, after the others), each area's elements written into it by the area's own writer as whole state writes them
-// (WholeState.h: the song's own's properties, its count of IDs, then its LASTKEY, PIANOROLL and MERGING after the places; its
-// AUTOMATION left out while it holds no curve), exactly what a whole copy of the song gave while its tree was the song's
-// storage (copyWholeSong()). A tree no one else holds. Any thread.
+// The song's file form, written from a state alone (no song read): a root (PHAZITE) with the song's own properties and its
+// count of IDs, and its children in one fixed order, its description's (Schema.h: PHAZITE's elements in the order they are
+// described: LASTKEY, TEMPOMAP, PIANOROLL, TRACKS, MASTER, AUTOMATION, MIDILINKS, MERGING, SECTIONS, CHORDLANE), each written
+// where the state holds it (SongState, above), each area's elements written into it by the area's own writer (WholeState.h).
+// A file whose root's children came in another order is written in this one. A tree no one else holds. Any thread.
 juce::ValueTree writeSongTree (const SongState&);
 
-// One of the root's places written whole from a state, as writeSongTree() writes it (its TRACKS with every track, its TEMPOMAP
-// with the map...): an invalid tree for a place the state's root doesn't hold. What asks a part of the song whole that is one
-// of them asks it here (the changes' worker, on the history's thread: model/versions/ChangesWorker.cpp, makeSkeleton()), or
-// through WholeState.h's copyWhole() (a version's MIDI links and sections, model/versions/ApplySong.cpp). Any thread.
-juce::ValueTree writeSongPart (const SongState&, RootPlace);
+// One of the root's elements written whole from a state, as writeSongTree() writes it (its TRACKS with every track, its
+// TEMPOMAP with the map, its SECTIONS with the sections...): an invalid tree for one the state's root doesn't hold (a MIDILINKS
+// without links, a CHORDLANE not placed) or one that isn't the root's own place (LASTKEY, PIANOROLL and MERGING are the song's
+// own, written by writeSongTree() alone). What asks a part of the song whole that is one of them asks it here (the changes'
+// worker, on the history's thread: model/versions/ChangesWorker.cpp, makeSkeleton(); a version's MIDI links and sections
+// compared with the song's: model/versions/ApplySong.cpp). Any thread.
+juce::ValueTree writeSongPart (const SongState&, const juce::Identifier& type);
 
 // A state read from a song's tree as the loader made it consistent (model/project/internal/Project.h: makeConsistent()), each
 // area by its reader as the song holds it (the areas' readHeld<Area>In(), a line each, in the order of the areas, the song's
-// own first: each element read once, and no tree changed), its root's places in their order, and its curves' points given keys
-// from 1 (CurveValues.h: PointValue; never saved nor compared). What the song takes its values from as it opens
-// (Song::holdValues(), whose keys count on from those it gave: the second form). Any thread.
+// own first: each element read once, and no tree changed), and its curves' points given keys from 1 (CurveValues.h:
+// PointValue; never saved nor compared). What a song is made of as it opens (Project.h: makeSong()). Any thread.
 SongState readSongTree (const juce::ValueTree& consistent);
-SongState readSongTree (const juce::ValueTree& consistent, std::uint64_t& nextPointKey);
 } // namespace phazite

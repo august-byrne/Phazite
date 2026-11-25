@@ -134,26 +134,6 @@ phazite::Song& getSong (phazite::test::TestSong& s)
     return *song;
 }
 
-// How many notifications a song's tree gave, of any kind, while this listened to its root.
-struct TreeHeardCount final : juce::ValueTree::Listener
-{
-    explicit TreeHeardCount (juce::ValueTree root)
-        : tree (std::move (root))
-    {
-        tree.addListener (this);
-    }
-
-    ~TreeHeardCount() override { tree.removeListener (this); }
-
-    void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { ++count; }
-    void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override { ++count; }
-    void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override { ++count; }
-    void valueTreeChildOrderChanged (juce::ValueTree&, int, int) override { ++count; }
-
-    juce::ValueTree tree;
-    int count = 0;
-};
-
 const phazite::engine::Plan& getPlan()
 {
     const auto* plan = phazite::getPlaybackHost (phazite::test::getEngineContext()).getEngine().getPlan();
@@ -1392,19 +1372,6 @@ TEST_CASE ("Performance gate: a version that differs from a song of 40 tracks by
     const auto version = phazite::copyWholeSong (*song);
     turn (-6.0f);
 
-    // What the pass writes into the song's tree, which holds no device.
-    struct Writes : public juce::ValueTree::Listener
-    {
-        int properties = 0, children = 0;
-        void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { ++properties; }
-        void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override { ++children; }
-        void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override { ++children; }
-        void valueTreeChildOrderChanged (juce::ValueTree&, int, int) override { ++children; }
-    };
-
-    Writes writes;
-    auto state = song->getState(); // a listener belongs to the tree object it was added to
-    state.addListener (&writes);
     const auto whole = phazite::countDevicesReadAsValues();
     const auto looks = phazite::countDeviceLooks();
 
@@ -1415,18 +1382,12 @@ TEST_CASE ("Performance gate: a version that differs from a song of 40 tracks by
 
     const auto readWhole = phazite::countDevicesReadAsValues() - whole;
     const auto looked = phazite::countDeviceLooks() - looks;
-    state.removeListener (&writes);
     const auto devices = (std::uint64_t) phazite::getDevicesValue (*song).devices.size();
-    MESSAGE ("A version a knob apart on 40 tracks: properties written " << writes.properties
-                                                                        << ", elements added, taken out or "
-                                                                           "moved "
-                                                                        << writes.children << ", devices read whole " << readWhole
-                                                                        << " (of " << devices << " on each side), looks " << looked);
-    // Measured 2026-11-23 after the devices' switch: nothing written into the tree, the version's 80 devices read once each
-    // and none of the song's, no look (the pass's setter finds the device in the value it holds); before it, one property
-    // written, 81 read whole (the one set once more as the tree held it) and one walk.
-    CHECK (writes.properties == 0);
-    CHECK (writes.children == 0);
+    MESSAGE ("A version a knob apart on 40 tracks: devices read whole " << readWhole << " (of " << devices << " on each side), looks "
+                                                                        << looked);
+    // Measured 2026-11-23 after the devices' switch: the version's 80 devices read once each and none of the song's, no look
+    // (the pass's setter finds the device in the value it holds); before it, 81 read whole (the one set once more as the tree
+    // held it) and one walk.
     CHECK (readWhole == devices); // the version's once each; the song's none
     CHECK (looked == 0);
     CHECK (phazite::getValueSetByHand (*song, knob) == doctest::Approx (3.0f));
@@ -1578,15 +1539,6 @@ TEST_CASE ("Performance gate: a version a track's name apart from a song of 40 t
     const auto version = phazite::copyWholeSong (*song);
     rename ("Now");
 
-    struct Writes : public juce::ValueTree::Listener
-    {
-        int properties = 0, children = 0;
-        void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { ++properties; }
-        void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override { ++children; }
-        void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override { ++children; }
-        void valueTreeChildOrderChanged (juce::ValueTree&, int, int) override { ++children; }
-    };
-
     // The tracks the values' listener is told changed.
     struct TracksTold final : phazite::SongValues::Listener
     {
@@ -1601,7 +1553,6 @@ TEST_CASE ("Performance gate: a version a track's name apart from a song of 40 t
 
     struct Taken
     {
-        Writes writes {};
         std::uint64_t tracksRead = 0, devicesRead = 0;
         size_t tracksTold = 0;
     };
@@ -1609,8 +1560,6 @@ TEST_CASE ("Performance gate: a version a track's name apart from a song of 40 t
     const auto measure = [&song, line] (const std::function<void()>& apply)
     {
         Taken taken;
-        auto state = song->getState(); // a listener belongs to the tree object it was added to
-        state.addListener (&taken.writes);
         TracksTold told;
         song->getValues()->addListener (&told);
         const auto tracksBefore = phazite::countTracksReadAsValues();
@@ -1623,7 +1572,6 @@ TEST_CASE ("Performance gate: a version a track's name apart from a song of 40 t
 
         taken.tracksRead = phazite::countTracksReadAsValues() - tracksBefore;
         taken.devicesRead = phazite::countDevicesReadAsValues() - devicesBefore;
-        state.removeListener (&taken.writes);
         song->getValues()->removeListener (&told);
         taken.tracksTold = told.count;
         CHECK (phazite::getTrackName (*song, line) == "Then");
@@ -1635,24 +1583,17 @@ TEST_CASE ("Performance gate: a version a track's name apart from a song of 40 t
     const auto songTaken = measure ([&song, &version] { phazite::makeSongLike (*song, version); });
     const auto lineTaken = measure ([&song, line, &version] { phazite::makeTrackLike (*song, line, version); });
     const auto devices = (std::uint64_t) phazite::getDevicesValue (*song).devices.size();
-    MESSAGE ("A version a track's name apart on 40 tracks: properties written "
-             << songTaken.writes.properties << ", elements added, taken out or moved " << songTaken.writes.children
-             << ", tracks read whole " << songTaken.tracksRead << " (40 and the master on each side), devices read whole "
-             << songTaken.devicesRead << " (of " << devices << " on each side); the line's: properties written "
-             << lineTaken.writes.properties << ", tracks read whole " << lineTaken.tracksRead << ", devices read whole "
+    MESSAGE ("A version a track's name apart on 40 tracks: tracks read whole "
+             << songTaken.tracksRead << " (40 and the master on each side), devices read whole " << songTaken.devicesRead << " (of "
+             << devices << " on each side); the line's: tracks read whole " << lineTaken.tracksRead << ", devices read whole "
              << lineTaken.devicesRead);
-    // Measured 2026-11-24 with the tracks' switch: no property written (one before the switch), nothing added, taken out or
-    // moved, one track told changed, the
-    // version's 40 tracks and its master read once each and none of the song's, the version's 80 devices once each by the
-    // devices pass (none for the tracks); the line's the same, its one track read, its two devices.
-    CHECK (songTaken.writes.properties == 0);
+    // Measured 2026-11-24 with the tracks' switch: one track told changed, the version's 40 tracks and its master read once
+    // each and none of the song's, the version's 80 devices once each by the devices pass (none for the tracks); the line's
+    // the same, its one track read, its two devices.
     CHECK (songTaken.tracksTold == 1);
-    CHECK (songTaken.writes.children == 0);
     CHECK (songTaken.tracksRead == 41);
     CHECK (songTaken.devicesRead == devices);
-    CHECK (lineTaken.writes.properties == 0);
     CHECK (lineTaken.tracksTold == 1);
-    CHECK (lineTaken.writes.children == 0);
     CHECK (lineTaken.tracksRead == 1);
     CHECK (lineTaken.devicesRead <= 3); // the version's of the line's channel
 }
@@ -2374,7 +2315,6 @@ TEST_CASE ("Performance gate: an ID made allocates nothing and tells no one, so 
     plans.take();
 
     constexpr int numIDs = 1000;
-    TreeHeardCount heard (song.getState());
     auto changes = versions->countSongChanges();
     const auto made = phazite::test::countAllocations (
         [&song]
@@ -2384,7 +2324,6 @@ TEST_CASE ("Performance gate: an ID made allocates nothing and tells no one, so 
         });
 
     phazite::test::dispatchPendingMessages();
-    CHECK (heard.count == 0);
     CHECK (versions->countSongChanges() == changes);
     CHECK (plans.take() == 0);
 
@@ -3423,14 +3362,9 @@ TEST_CASE ("Performance gate: a step of a drag in a controller lane reads no not
         int changes = 0;
     };
 
-    // Each change of the tree, and each controller's value a change of the clips' values took away or brought.
-    struct Heard : juce::ValueTree::Listener,
-                   phazite::ValueArea<phazite::NotesByClip>::Listener
+    // Each controller's value a change of the clips' values took away or brought.
+    struct Heard : phazite::ValueArea<phazite::NotesByClip>::Listener
     {
-        void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override { ++changes; }
-        void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override { ++changes; }
-        void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { ++changes; }
-
         void valueAreaChanged (const phazite::NotesByClip& before, const phazite::NotesByClip& after) override
         {
             for (const auto& [id, value] : after.clips)
@@ -3487,8 +3421,6 @@ TEST_CASE ("Performance gate: a step of a drag in a controller lane reads no not
 
         step (4.0);
         Heard heard;
-        auto root = song->getState();
-        root.addListener (&heard);
         song->getValues()->notes.addListener (&heard);
         const auto clipBefore = phazite::getClipValue (*song, clip);
         const auto inTheBeat = [&]
@@ -3503,7 +3435,6 @@ TEST_CASE ("Performance gate: a step of a drag in a controller lane reads no not
         const auto visitedBefore = phazite::countElementsVisited();
         step (8.0);
         const Counts counts { phazite::countNotesRead() - notesBefore, phazite::countElementsVisited() - visitedBefore, heard.changes };
-        root.removeListener (&heard);
         song->getValues()->notes.removeListener (&heard);
 
         // The clip as it was (a controller's values are its notes' value's); and what was heard, each value of the lane's in the
@@ -4162,7 +4093,7 @@ TEST_CASE ("Performance gate: the loader's checks of a song read from its text m
     phazite::writeProjectText (text, phazite::test::copyWholeSong (*made));
     const auto xml = juce::parseXML (text.toString());
     REQUIRE (xml != nullptr);
-    phazite::Song song (juce::ValueTree::fromXml (*xml));
+    auto song = juce::ValueTree::fromXml (*xml);
     const auto allocations = phazite::test::countAllocations ([&song] { phazite::makeConsistent (song); });
 
     if (! allocations.has_value())
@@ -4184,24 +4115,23 @@ TEST_CASE ("Performance gate: the loader's checks of a song read from its text m
         return count;
     };
 
-    const auto many = countMany (phazite::test::copyWholeSong (song));
+    const auto many = countMany (song);
     INFO ("Allocations: " << *allocations << " for " << many << " notes, controllers, points and warp markers (" << notes << " notes)");
     CHECK (*allocations * 10 < many);
 
     // And Phazite's own song is left as it was written.
     juce::MemoryOutputStream after;
-    phazite::writeProjectText (after, phazite::test::copyWholeSong (song));
+    phazite::writeProjectText (after, song);
     CHECK (after.toString() == text.toString());
 }
 
 TEST_CASE ("Performance gate: a song of 40 modulators and 200 automated parameters opened reads a few of its modulators for each, "
            "not all of them for each curve")
 {
-    // The loader's checks look up each curve's parameter (Project.cpp, makeConsistent(): Parameters.h, locateParameter()),
-    // which looks in modulation's area first; a song the loader makes consistent holds no values yet, and a look there reads
-    // its tree (Modulation.h: getModulatorValue()): the one element of the ID alone, never every modulator of the song.
-    // Counted as the modulators read from elements (ModulationValue.h: countModulatorsRead()), through the loader and the
-    // adoption (makeSong()).
+    // The loader's checks look up each curve's parameter in the file's tree (Project.cpp, makeConsistent(): Parameters.h,
+    // locateParameterIn()), which reads a modulator's element by its ID alone (ModulationValue.h: readModulatorValueIn()),
+    // never every modulator of the song. Counted as the modulators read from elements (ModulationValue.h:
+    // countModulatorsRead()), through the loader and the song made of its state (makeSong()).
     constexpr auto numTracks = 40;
     phazite::test::TestSong s;
     std::vector<phazite::TrackID> tracks { s.firstTrack };
@@ -4245,9 +4175,9 @@ TEST_CASE ("Performance gate: a song of 40 modulators and 200 automated paramete
     REQUIRE (opened != nullptr);
     CHECK (phazite::getModulationValue (*opened).modulators.size() == (size_t) numTracks);
 
-    // Measured 2026-11-22: 240 in a Debug build, 6 for each modulator: one for each curve of its own 3 parameters, the
-    // loader's keeping of it as held, the adoption's and the adoption's Debug assertion's. 8,120 while a look in a song
-    // without values read its whole modulation, all 40 for each curve.
+    // Measured 2026-11-22 and again 2026-11-24 (the song made of its state): 240 in a Debug build, 6 for each modulator: one
+    // for each curve of its own 3 parameters, the loader's keeping of it as held, the state's reading and that reading's
+    // Debug assertion's. 8,120 while a look read the song's whole modulation, all 40 for each curve.
     INFO ("Modulators read: " << read << " for " << numTracks << " modulators and " << curves << " curves");
     CHECK (read <= 8 * (std::uint64_t) numTracks);
 }
@@ -4255,9 +4185,9 @@ TEST_CASE ("Performance gate: a song of 40 modulators and 200 automated paramete
 TEST_CASE ("Performance gate: a drawn lane of 10,000 points taken into the song's values as it opens makes far fewer allocations "
            "than points")
 {
-    // Roadmap step S5.20, automation's switch: the song takes its file's curves into the curves' area as it holds its values
-    // (Song::holdValues(): CurvesArea.h, readHeldCurves()), each point given a key, the points put into the value's leaves
-    // many at a time.
+    // Roadmap step S5.20, automation's switch: a song made of its file's state (SongState.h: readSongTree()) reads its
+    // file's curves into the curves' value (CurvesArea.h, readHeldCurves()), each point given a key, the points put into the
+    // value's leaves many at a time.
     constexpr auto numPoints = 10000;
     auto state = phazite::test::copyWholeSong (*phazite::createSong());
     const phazite::ParameterRef volume { phazite::DeviceID::fromRaw (2), "master volume" };
@@ -4272,16 +4202,18 @@ TEST_CASE ("Performance gate: a drawn lane of 10,000 points taken into the song'
     juce::ValueTree automation (phazite::schema::AUTOMATION);
     automation.appendChild (curve, nullptr);
     state.appendChild (automation, nullptr);
-    phazite::Song song (state);
-    const auto allocations = phazite::test::countAllocations ([&song] { song.holdValues(); });
+    phazite::Song::Ptr song;
+    const auto allocations =
+        phazite::test::countAllocations ([&state, &song] { song = new phazite::Song (phazite::readSongTree (state)); });
 
     if (! allocations.has_value())
-        return; // nothing counted on this build, and nothing run: the song holds no values
+        return; // nothing counted on this build
 
-    REQUIRE (phazite::getPoints (song, volume).size() == (size_t) numPoints);
+    REQUIRE (phazite::getPoints (*song, volume).size() == (size_t) numPoints);
 
-    // Measured (2026-11-22, Windows, Debug): 1,338 allocations for 10,000 points (the value's leaves and nodes, the elements
-    // taken out of the tree, the other areas' adoption): fewer than one for five points.
+    // Measured (2026-11-24, Windows, Debug): 1,439 allocations for 10,000 points, the state read and the song made of it (the
+    // value's leaves and nodes, the other areas, the song's own parts); 1,338 on 2026-11-22 for the adoption alone, the song
+    // made before: fewer than one for five points.
     MESSAGE ("Allocations: " << *allocations << " for " << numPoints << " points");
     CHECK (*allocations * 5 < numPoints);
 }
@@ -4857,7 +4789,6 @@ TEST_CASE ("Performance gate: the song whole taken as a value allocates nothing 
         std::optional<phazite::SongState> taken;
         const auto allocations = phazite::test::countAllocations ([&] { taken.emplace (phazite::getSongState (*song)); });
         REQUIRE (taken.has_value());
-        CHECK (taken->tracks.has_value());
         CHECK (phazite::countTracksReadAsValues() == tracksRead);
         CHECK (phazite::countTrackElementsWalked() == elementsWalked);
         CHECK (phazite::countModulatorsRead() == modulatorsRead);
@@ -4933,6 +4864,28 @@ TEST_CASE ("Performance gate: an autosave's work on the message thread allocates
         return; // nothing counted on this build
 
     MESSAGE ("An autosave's allocations on the message thread: " << *small << " on 4 tracks, " << *big << " on 40");
+
+    // Where they come from: each part of that work a test can call alone, on songs of both sizes, so that a system whose
+    // count grows with the song says which part grew (another standard library counts differently: PerformanceCounts.h).
+    const auto partsFor = [] (int numTracks)
+    {
+        phazite::test::TestSong s;
+        phazite::test::buildBenchmarkSong (s, numTracks, 16.0);
+        auto& song = getSong (s);
+        const auto count = [] (const std::function<void()>& work) { return phazite::test::countAllocations (work).value_or (-1); };
+        const auto stored = count ([&song] { song.storeDeviceStates(); });
+        const auto counted = count ([&song] { phazite::countIDs (song); });
+        phazite::SongState state;
+        const auto taken = count ([&song, &state] { state = phazite::getSongState (song); });
+        phazite::SongState other;
+        const auto moved = count ([&state, &other] { other = std::move (state); });
+        const auto compared = count ([&s] { juce::ignoreUnused (s.getProject().hasChangesToAutosave()); });
+        return juce::String (numTracks) + " tracks: the states stored " + juce::String (stored) + ", the IDs counted "
+               + juce::String (counted) + ", the state taken " + juce::String (taken) + ", moved " + juce::String (moved)
+               + ", compared with the saved " + juce::String (compared);
+    };
+
+    MESSAGE ("Its parts: " << partsFor (4) << "; " << partsFor (40));
 
     // Measured 2026-11-24 on MSVC's Debug build, 4 tracks / 40: 619 / 5,432 while the song's tree was written whole on the
     // message thread; 35 / 41 since it hands over its state.

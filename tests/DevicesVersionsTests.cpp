@@ -296,10 +296,11 @@ TEST_CASE ("The versions make the song's devices a version's through the devices
     // The song as copied after an edit undone: nothing of its devices written (asserted in Debug builds: ApplySong.cpp), and a
     // window moved since put back.
     const auto copy = phazite::test::copyWholeSong (song);
+    const auto copyState = phazite::getSongState (song);
     phazite::setDeviceOn (song, delay, false);
     phazite::undo (song);
     phazite::setWindowPlace (song, delay, { .x = 1, .y = 2 });
-    phazite::makeSongAsCopied (song, copy);
+    phazite::makeSongAsCopied (song, copyState);
     checkHoldsAsIn (song, copy);
     CHECK_FALSE (phazite::getWindowPlace (song, delay).has_value());
 }
@@ -1025,28 +1026,7 @@ void checkAsSaved (phazite::Project& project, const phazite::Song& song, const j
     phazite::test::checkSong (song);
 }
 
-// What is written into a song's tree while it listens (a listener belongs to the tree object it was added to).
-struct TreeWrites : public juce::ValueTree::Listener
-{
-    explicit TreeWrites (const juce::ValueTree& tree)
-        : state (tree)
-    {
-        state.addListener (this);
-    }
-
-    ~TreeWrites() override { state.removeListener (this); }
-
-    void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { ++count; }
-    void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override { ++count; }
-    void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override { ++count; }
-    void valueTreeChildOrderChanged (juce::ValueTree&, int, int) override { ++count; }
-
-    juce::ValueTree state;
-    int count = 0;
-};
-
-// What is written into a song's devices' store while it listens (SongValues.h: deviceStoreChanged()), which holds what the
-// tree held of a plug-in's values set by hand until the store's switch: each entry told.
+// What is written into a song's devices' store while it listens (SongValues.h: deviceStoreChanged()): each entry told.
 struct StoreWrites final : phazite::SongValues::Listener
 {
     explicit StoreWrites (const phazite::Song& s)
@@ -1336,7 +1316,7 @@ TEST_CASE ("What the store holds of a plug-in of 200 values set by hand: a versi
     REQUIRE (phazite::getPluginValues (song, plugin).size() == (size_t) numValues);
     const auto version = phazite::test::copyWholeSong (song);
 
-    // Applied in the history, or outside it: what it wrote into the tree, how many undo actions, how many times the values'
+    // Applied in the history, or outside it: what it wrote into the store, how many undo actions, how many times the values'
     // places were listed, how many writes the store's pass counted.
     struct Applied
     {
@@ -1347,7 +1327,6 @@ TEST_CASE ("What the store holds of a plug-in of 200 values set by hand: a versi
     const auto apply = [&song, &version] (bool inHistory)
     {
         Applied applied;
-        const TreeWrites writes (song.getState());
         const StoreWrites stored (song);
         const auto places = phazite::countPluginValuePlacesBuilt();
         const auto storeWrites = phazite::countDeviceStorePassWrites();
@@ -1363,7 +1342,7 @@ TEST_CASE ("What the store holds of a plug-in of 200 values set by hand: a versi
             phazite::makeSongTheSame (song, version);
         }
 
-        applied.written = writes.count + stored.count;
+        applied.written = stored.count;
         applied.placesBuilt = phazite::countPluginValuePlacesBuilt() - places;
         applied.storeWrites = phazite::countDeviceStorePassWrites() - storeWrites;
         return applied;

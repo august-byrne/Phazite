@@ -103,7 +103,7 @@ AreaChoice chooseClipClash (Song&, const MergeClash&, int value, const MergeSide
 //     clash of: the song's taken out with what it holds in the song's areas (Tracks.h: eraseTrackHoldings()), and the side
 //     chosen's put in its place, its values, its clips with their notes, its devices, containers and chains, its modulators
 //     and macros, its sends, what its devices hold of the store and its tracks' switches and view (the master's mode and row)
-//     given through each area's code, so that nothing is left to the keeper; refused where the song couldn't hold the side's
+//     given through each area's code; refused where the song couldn't hold the side's
 //     there (an ID it holds elsewhere; the master taken away);
 //   - anything deeper in a track or the master (an element Phazite doesn't know): refused.
 // Asked after the clips' (a path through a TRACK to a CLIP is theirs) and the other areas'. Nothing through a TRACK or the

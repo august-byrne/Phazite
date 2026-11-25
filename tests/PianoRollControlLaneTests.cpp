@@ -103,29 +103,17 @@ bool isSpacedAtLeastAGap (const Values& values)
     return true;
 }
 
-// The changes of the song its listeners hear: each change of its tree, counted at its root, and each of its clips' values
-// (model/base/internal/SongValues.h), as the speed gates count them; and how many controllers' values each change of the
-// values took away or brought, clip by clip.
-struct Heard : juce::ValueTree::Listener,
-               phazite::ValueArea<phazite::NotesByClip>::Listener
+// The changes of the song its listeners hear: each of its clips' values (model/base/internal/SongValues.h), as the speed
+// gates count them; and how many controllers' values each change of the values took away or brought, clip by clip.
+struct Heard : phazite::ValueArea<phazite::NotesByClip>::Listener
 {
     explicit Heard (phazite::Song& song)
-        : root (song.getState()),
-          values (*song.getValues())
+        : values (*song.getValues())
     {
-        root.addListener (this);
         values.notes.addListener (this);
     }
 
-    ~Heard() override
-    {
-        values.notes.removeListener (this);
-        root.removeListener (this);
-    }
-
-    void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override { ++changes; }
-    void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override { ++changes; }
-    void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { ++changes; }
+    ~Heard() override { values.notes.removeListener (this); }
 
     void valueAreaChanged (const phazite::NotesByClip& before, const phazite::NotesByClip& after) override
     {
@@ -158,7 +146,6 @@ struct Heard : juce::ValueTree::Listener,
         }
     }
 
-    juce::ValueTree root;
     phazite::SongValues& values;
     int changes = 0, valuesChanged = 0;
 };

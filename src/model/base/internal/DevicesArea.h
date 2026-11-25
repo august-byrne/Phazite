@@ -4,13 +4,11 @@
 // conversion of its elements are DevicesValue.h's. It holds IDs (each device's, container's and chain's). Message thread,
 // but for whole state's parts and the comparisons, which read only the values they are given.
 //
-// The song's devices, containers and chains are the area's (ValueArea<SongDevices>, plain: undone whole): the song's tree
-// holds no DEVICE, CONTAINER, CHAIN, VALUES or SOUNDS element. What is the devices' and what isn't: everything a DEVICE, a
-// CONTAINER or a CHAIN of a file holds, but a plug-in's VALUE children, its state, program, format ID and version, a chain's
-// mute and solo (the keyed store's, DeviceStoreArea.h) and a window's place (the value outside the history's), and a
-// container's macros (modulation's, ModulationArea.h). The area sits under elements that stay in the song's tree (a TRACK,
-// the MASTER), as the sends' do, and holds the rest of its owners itself (a container, a chain): so its keeper follows a
-// track as it comes and goes (alone, a folder with its tracks, the track list), and nothing else.
+// The song's devices, containers and chains are the area's (ValueArea<SongDevices>, plain: undone whole). What is the
+// devices' and what isn't: everything a DEVICE, a CONTAINER or a CHAIN of a file holds, but a plug-in's VALUE children, its
+// state, program, format ID and version, a chain's mute and solo (the keyed store's, DeviceStoreArea.h) and a window's place
+// (the value outside the history's), and a container's macros (modulation's, ModulationArea.h). Each item names its channel
+// by its ID, and the area holds the rest of its owners itself (a container, a chain).
 #pragma once
 
 #include "model/base/IDs.h"
@@ -44,40 +42,6 @@ struct SongValues::DevicesTeller final : ValueArea<SongDevices>::Listener
     JUCE_DECLARE_NON_COPYABLE (DevicesTeller)
 };
 
-// The devices' part of the keeper (SongValues.h), in the mode of the moment, nothing while the history undoes or redoes: a
-// DEVICE, a CONTAINER, a CHAIN, a VALUES or a SOUNDS added by itself to an element of the song's: refused in a step (a JUCE
-// assertion: the step can't take it out again, as its Undo, taking the tree's change back first, would find it gone; JUCE
-// workaround W62 (docs/juce-workarounds.md)); outside the history, a DEVICE or a CONTAINER added to the master (the one
-// channel whose element the song's tree holds) read in as the song holds it (DevicesValue.h: readHeldDevice(); what the store
-// holds of it taken in before by the store's part, DeviceStoreArea.h, and a container's macros by modulation's), after its
-// others there, and counted (countDevicesAdopted()), and each of them taken out (a safety net no path of Phazite's relies
-// on). No track is in the song's tree: the tracks' safety net reads a TRACK's devices (takeChannelDevicesIn(), below), and
-// every function that removes a track erases its devices first (model/arrangement/internal/Tracks.h: eraseTrackHoldings()).
-// The store's entries stay as a device leaves (the store's own rule: DeviceStoreArea.h). And the adoption from the loaded
-// tree, which the song's holdValues() asks.
-struct SongValues::DevicesKeeper
-{
-    DevicesKeeper (SongValues&, Song&);
-
-    // A child added to an element of the song's tree (the keeper's callback, but while the history undoes or redoes, for every
-    // element, whoever's it is): nothing, at once, but for what is the devices' (a DEVICE, a CONTAINER, a CHAIN, a VALUES or a
-    // SOUNDS in the song's tree).
-    void childAdded (juce::ValueTree& parent, juce::ValueTree& child);
-
-    // Every DEVICE, CONTAINER and CHAIN element out of the tree the loader made consistent, those anywhere else too, once its
-    // reader read the song's into the area as the song holds them (readHeldDevicesIn(): each read once by readHeldDevice(),
-    // each of which the loader left as the song holds it; SongValues.cpp: adopt()).
-    static void adopt (SongValues& into, Song& loaded);
-
-    SongValues& values;
-    Song& song;
-    juce::ValueTree state;
-
-    bool isInSong (const juce::ValueTree& element) const;
-
-    JUCE_DECLARE_NON_COPYABLE (DevicesKeeper)
-};
-
 // The place of the list an item at a place is in, as SongDevices::findList() names one (its owner): a chain's for a device in
 // one, a container's for a chain, else its channel's.
 DevicePlace getDeviceListPlace (const DevicePlace&, DeviceValue::Form);
@@ -104,12 +68,6 @@ void writeDevicesIn (juce::ValueTree& element, const SongState&);
 // The devices' reader of a song's tree (SongState.h: readSongTree(), a line of it): every device, container and chain of its
 // channels into the state, as the song holds them; no tree changed. Any thread.
 void readHeldDevicesIn (const juce::ValueTree& song, SongState&);
-
-// The DEVICE and CONTAINER elements of a channel's element (a TRACK or the MASTER that comes into the song with them: the
-// tracks' safety net, TracksArea.h), each with what it holds (a container's CHAINs, a chain's DEVICEs), read as the song holds
-// one (DevicesValue.h: readHeldDevice()) at the channel's place given, an owner before what it holds; one of an ID the area
-// holds already left out with what it holds. How many it read.
-int takeChannelDevicesIn (SongDevices&, const juce::ValueTree& channel, const DevicePlace&);
 
 // The devices' part of the comparison of two states (WholeState.h: holdSameChannels()): a channel's devices and containers (a
 // track's, the master's: makeChannelPlace()), the same in the same order, each the same value with what it holds (a container's

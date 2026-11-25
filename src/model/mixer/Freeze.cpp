@@ -268,16 +268,6 @@ namespace
         return holdSameTrackClips (getSongState (song), frozen.values, track);
     }
 
-    // The element of a type a tree is in (itself, if it is one), or an invalid one.
-    juce::ValueTree findEnclosing (juce::ValueTree tree, const juce::Identifier& type)
-    {
-        for (; tree.isValid(); tree = tree.getParent())
-            if (tree.hasType (type))
-                return tree;
-
-        return {};
-    }
-
     // Where a track's sound ends in the song, before its tails: the end of its last clip, or of the last clip of a track
     // whose sound reaches it (the source of one of its sidechains), which plays through it in its render.
     BeatPosition getTrackEnd (const Song& song, TrackID track)
@@ -440,33 +430,10 @@ std::vector<TrackID> getFrozenTracks (const Song& song)
 //==============================================================================
 void forgetMissingFrozenFiles (Song& song)
 {
-    // The loader's (model/project/internal/Project.h: makeSong()), on the tree before the song holds its values; on the
-    // switches, outside the history, once it does.
-    if (song.getValues() != nullptr)
-    {
-        for (const auto track : getFrozenTracks (song))
-            if (! getFrozenFile (song, track).existsAsFile())
-                unfreeze (song, track);
-
-        return;
-    }
-
-    // Each TRACK of the tree, a folder's too, as the loader left it.
-    const std::function<void (juce::ValueTree)> forget = [&song, &forget] (juce::ValueTree list)
-    {
-        for (auto state : list)
-        {
-            if (! state.hasType (schema::TRACK))
-                continue;
-
-            if (readTrackFrozen (state) && ! getFrozenFile (song, readTrackElementID (state)).existsAsFile())
-                state.removeProperty (schema::trackFrozen, nullptr);
-
-            forget (state);
-        }
-    };
-
-    forget (song.getState().getChildWithName (schema::TRACKS));
+    // The loader's (model/project/internal/Project.h: makeSong()), on the switches, outside the history, as the song is made.
+    for (const auto track : getFrozenTracks (song))
+        if (! getFrozenFile (song, track).existsAsFile())
+            unfreeze (song, track);
 }
 
 void purgeCache (Song& song)
@@ -487,15 +454,11 @@ void purgeCache (Song& song)
 
 //==============================================================================
 FreezeKeeper::FreezeKeeper (Song& s)
-    : song (s),
-      state (s.getState())
+    : song (s)
 {
     takeFrozenTracks();
-    state.addListener (this);
 
-    if (auto* values = song.getValues())
-        values->addListener (this);
-
+    song.getValues()->addListener (this);
     song.addPendingWriter (this);
 }
 
@@ -504,10 +467,7 @@ FreezeKeeper::~FreezeKeeper()
     cancelPendingUpdate();
     song.removePendingWriter (this);
 
-    if (auto* values = song.getValues())
-        values->removeListener (this);
-
-    state.removeListener (this);
+    song.getValues()->removeListener (this);
 }
 
 void FreezeKeeper::writePending()
@@ -953,36 +913,6 @@ void FreezeKeeper::compare (TrackID track)
     curvesAsFrozen.erase (track);
     modulatorsAsFrozen.erase (track);
     unfreeze (song, track);
-}
-
-void FreezeKeeper::check (const juce::ValueTree& changed, bool cameIn)
-{
-    if (checking)
-        return;
-
-    // What the change asks to compare waits for the next turn (the class's comment), or for the song's being stored or
-    // compiled, which writes what is pending first: a tree's callback reads no clip of the song's, with no exception
-    // (SongValues.h: there is no order among the song's tree listeners, so the keeper of the song's values may not have
-    // given a track it moved its clips back yet, and an undo puts the clips back after the tree).
-    const juce::ScopedValueSetter<bool> busy (checking, true);
-    triggerAsyncUpdate();
-    const auto track = findEnclosing (changed, schema::TRACK);
-
-    // What changed of the song itself, or of a track, that its values don't tell (a property Phazite doesn't know): the
-    // frozen tracks noted again at the later moment, as a change of the tracks asks (markTrack(): taken again after an undo
-    // or a redo), never here, which reads the song (tracksChanged(), trackSwitchesChanged() tell the rest: design J.4).
-    if (changed == state || changed.hasType (schema::TRACKS) || (track.isValid() && changed == track))
-        markTrack ({}, cameIn, true);
-
-    if (track.isValid())
-    {
-        waiting.tracks.insert (readTrackElementID (track));
-        return;
-    }
-
-    // The song's element: every frozen track. Its tempos: tempoMapChanged(); its curves: curvesChanged().
-    if (changed == state)
-        waiting.all = true;
 }
 
 //==============================================================================

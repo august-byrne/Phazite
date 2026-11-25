@@ -110,14 +110,6 @@ MidiLinksValue readHeldMidiLinks (const juce::ValueTree& midiLinks)
     return keepOneLinkEach ({ links.persistent() });
 }
 
-MidiLinksValue withLinkTaken (const MidiLinksValue& value, const juce::ValueTree& link)
-{
-    if (auto entry = readHeldMidiLink (link))
-        return keepOneLinkEach ({ value.links.push_back (std::move (*entry)) });
-
-    return value;
-}
-
 MidiLinksValue keepOneLinkEach (const MidiLinksValue& value)
 {
     OneLinkEach rule;

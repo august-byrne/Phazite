@@ -5,8 +5,8 @@
 // one of a song (SongDevices) with the lists that order them, and the helpers that alone write it; and the conversion between
 // those elements and the values, the one place that reads and writes them by name. The values are the storage: the song holds
 // them in its devices' area (SongValues.h: devices), which its readers read by reference (model/mixer/internal/Mixer.h:
-// getDevicesValue(), findDevice()), and its tree holds no DEVICE, CONTAINER or CHAIN; the conversion reads what enters the area
-// (a file's devices as the song opens, a version's, a merge's choice, the keeper's safety net), writes a whole copy's
+// getDevicesValue(), findDevice()); the conversion reads what enters the area (a file's devices as the song is made of
+// its state, a version's, a merge's choice), writes a whole copy's
 // elements (DevicesArea.h: writeDeviceWhole()), and reads a copy's elements (a preset's, a version's compared).
 //
 // What the value covers, and what it doesn't. A DEVICE's deviceID, deviceType, deviceOff, deviceSidechain, pluginFormat to
@@ -213,7 +213,7 @@ std::optional<DeviceValue::Form> readDeviceForm (const juce::ValueTree& element)
 // (countDevicesReadAsValues()).
 std::optional<DeviceValue> readDeviceValue (const juce::ValueTree& element, const DevicePlace&);
 
-// The same as the song holds it: what enters the devices' area (from the devices' switch: the adoption, the keeper, a
+// The same as the song holds it: what enters the devices' area (a file's as the song is made of its state, a
 // version's devices and a merge's choice). Its ID one the song can count on from (more than 0 and below schema::maxID), else
 // none; Phazite's own device's values each by its parameter's description (SavedValues.h: readHeldSavedValue(): a choice by
 // a name it has, or by its number where it is held as a number, any other number brought within its range and to its steps,
@@ -268,8 +268,8 @@ bool keepDeviceAsHeld (juce::ValueTree element);
 SongDevices readDevicesValue (const juce::ValueTree& song);
 
 // The same items in the same lists, each read as readHeldDeviceFields() reads it, without its values set by hand and its
-// sounds (not counted: countDevicesReadAsValues()): what the outline of a song that holds no values reads (Mixer.h:
-// getSongDeviceOutline(), which the loader asks for the sidechains' loops), never a device's values whole.
+// sounds (not counted: countDevicesReadAsValues()): what the loader's check of the sidechains' loops reads of a
+// file's tree (Sidechain.h: forgetSidechainLoopsIn()), never a device's values whole.
 SongDevices readDevicesFields (const juce::ValueTree& song);
 
 // A device, a container or a chain with one of its own properties given a value as readHeldDevice() reads one, or taken
@@ -282,9 +282,9 @@ bool setDeviceProperty (DeviceValue&, const juce::Identifier& element, const juc
 
 //==============================================================================
 // One field of one element read as readDeviceValue() reads it, without reading the rest (none counted:
-// countDevicesReadAsValues()): what reads one field of a copy's element (a preset's, a version's compared, the store's and
-// the keeper's safety net). Each of an element that isn't one it is on reads as one without it. (The conversion's readers
-// of the other fields are its own, in DevicesValue.cpp.)
+// countDevicesReadAsValues()): what reads one field of a copy's element (a preset's, a version's compared, the store's). Each of
+// an element that isn't one it is on reads as one without it. (The conversion's readers of the other fields are its own, in
+// DevicesValue.cpp.)
 DeviceID readDeviceElementID (const juce::ValueTree& element); // a DEVICE's, a CONTAINER's (deviceID), a CHAIN's (chainID)
 juce::String readDeviceType (const juce::ValueTree& device);   // deviceType, as written (deviceIsPlugin for a plug-in)
 PluginIdentity readPluginIdentity (const juce::ValueTree& device);
@@ -306,8 +306,7 @@ std::vector<DeviceID> readDeviceList (const juce::ValueTree& owner);
 // Whether a song holds a device or a container with this ID, and with chainsToo a container's chain too (an invalid ID: no),
 // without a value made of its devices and without an allocation: what the selection asks of the devices it names and of an
 // automation point's owner (Selection.h), and what the readers outside the devices' own code ask of a device by its ID
-// (Mixer.h: hasDevice(), which counts a chain). A look in the devices' area; for a song that holds no values (the loader's),
-// a walk of each track's and the master's devices and containers and of each container's chains in its tree.
+// (Mixer.h: hasDevice(), which counts a chain). A look in the devices' area.
 bool holdsDevice (const Song&, DeviceID, bool chainsToo = false);
 
 //==============================================================================

@@ -32,8 +32,7 @@ class AudioRecorder;
 class PlaybackHost;
 class Take;
 
-class PlaybackSession : private juce::ValueTree::Listener,
-                        private Song::ParameterListener,
+class PlaybackSession : private Song::ParameterListener,
                         private Song::HistoryListener,
                         private SongValues::Listener,
                         private PluginInstances::Listener,
@@ -158,7 +157,7 @@ public:
     // next turn of the message loop (midiLinksChanged(), which only marks: a listener of the song's values reads nothing as it
     // is told), and as it gives the engine the song (update()); what makes a link that must be diverted before it goes on asks
     // at once (MidiLinker::learn(), before learning ends, so that the knob that made the link never reaches the instrument).
-    // Message thread, at a moment that is no callback of the song's tree: it reads the links' area.
+    // Message thread, at a moment that is no listener's call: it reads the links' area.
     void followMidiLinks();
 
     // The piano roll's guide notes into a track, on a MIDI channel (1 to 16), and a preset's tried in the browser; and their
@@ -179,7 +178,6 @@ public:
 private:
     Song::Ptr song;
     PlaybackHost& host;
-    juce::ValueTree songState;
     bool lentToRender = false;
     bool latencyWaits = false; // a new plan for a device's latency waits for the gesture that drags it (valueTreePropertyChanged())
     // An undo or a redo set a value by hand that plays at once: what writes automation follows it once the move is whole
@@ -233,40 +231,30 @@ private:
     void timerCallback() override;
     void jump (BeatPosition, bool keepsPlace); // locate() and returnTo()
 
-    // A change of the song's own elements (a placeholder that came or went, its elements in another order; an element a safety
-    // net refused in a step), but its MIDILINKS: a new plan. Not the areas', which the song's values tell (SongValues.h:
-    // isHeardAsKept()). No property is written to a
-    // live song's tree but a safety net's, which the areas take.
-    void changed (const juce::ValueTree& parent, const juce::ValueTree& child);
-    void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override { changed (parent, child); }
-    void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override { changed (parent, child); }
-    void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override { changed (parent, {}); }
-
     void handleAsyncUpdate() override { update(); }
 
-    // A clip's notes changed, or clips, or the tempo map, or curves (SongValues.h): a new plan, as a change in the song's tree
-    // makes one. What plays it hears which itself.
+    // A clip's notes changed, or clips, or the tempo map, or curves (SongValues.h): a new plan.
+    // What plays it hears which itself.
     void clipNotesChanged (const std::vector<ClipID>&) override { triggerAsyncUpdate(); }
     void clipsChanged (const std::vector<SongValues::ClipChange>&, const std::vector<TrackID>&) override { triggerAsyncUpdate(); }
     void tempoMapChanged() override { triggerAsyncUpdate(); }
 
-    // The chord lane (SongValues.h; its tree callbacks above leave what is in its CHORDLANE alone, isHeardAsKept()): a
+    // The chord lane (SongValues.h; a lane placed or taken away too): a
     // new plan, as a change in its element made one, though no plan holds chords (kept so until a piece lowers the counts of
     // plans on purpose, roadmap step S5.20).
     void chordLaneChanged() override { triggerAsyncUpdate(); }
 
-    // The sections (SongValues.h; its tree callbacks above leave what is in the song's SECTIONS alone, isHeardAsKept()): a new
+    // The sections (SongValues.h): a new
     // plan, as a change in their element made one, though no plan holds sections, as the chord lane's (kept so until a piece
     // lowers the counts of plans on purpose, roadmap step S5.20).
     void sectionsChanged (const std::vector<SectionID>&) override { triggerAsyncUpdate(); }
 
-    // What the song holds of its own (SongValues.h; its tree callbacks above leave the root's own properties and its LASTKEY,
-    // PIANOROLL and MERGING alone, isHeardAsKept()): a new plan only where what plays changed, the loop's four or the
+    // What the song holds of its own (SongValues.h):
+    // a new plan only where what plays changed, the loop's four or the
     // metronome, which a plan holds (SongPlayer.cpp: compile(), getLoop(), isMetronomeOn()). Nothing else of it makes one:
     // the notes, an outline applied, patterns' speed (which a tempo edit reads as it is made, no plan), the numbering, a merge
     // waiting, the key set last, the versions' names, the play start (movePlayhead() locates the engine itself), punch, the
-    // input chosen last and the grids, each of which made one while the tree's callbacks heard them (but the play start, the
-    // grids and the names).
+    // input chosen last and the grids.
     void songOutsideChanged (bool plays) override
     {
         if (plays)
@@ -275,8 +263,8 @@ private:
 
     void curvesChanged (const std::vector<ParameterRef>&) override { triggerAsyncUpdate(); } // the curves: a new plan, as above
 
-    // The modulators and macros (SongValues.h; its tree callbacks above leave the song's MODULATOR and MACRO elements and what
-    // is in them alone, isHeardAsKept()), by the parts that changed, as the tree's changes of them were taken: one changed in
+    // The modulators and macros (SongValues.h),
+    // by the parts that changed, as the tree's changes of them were taken: one changed in
     // place in its values set by hand, its steps, its switch or a macro's value plays at once, from the value it is told
     // (SongPlayer::takeModulator()), and while the history undoes or redoes, what a pass writing it writes from then follows
     // (known bug 174) once the move is whole (historyMoved()), as for a macro's name, which plays nothing; one added, taken
@@ -284,15 +272,15 @@ private:
     // default (as its VALUES came or went), and modulators in another order: a new plan.
     void modulationChanged (const std::vector<SongValues::ModulationChange>&, const std::vector<ModulatorPlace>& reordered) override;
 
-    // The sends (SongValues.h; the song's tree holds none), by the parts that changed, as the tree's changes of them were
+    // The sends (SongValues.h), by the parts that changed, as the tree's changes of them were
     // taken while it held them: a level changed in place plays at once, from the value it is
     // told (SongPlayer::takeSendLevel()), and while the history undoes or redoes, what a pass writing it writes from then
     // follows once the move is whole (historyMoved()); one added, taken out, come to another track or routed elsewhere,
     // and sends in another order: a new plan.
     void sendsChanged (const std::vector<SongValues::SendChange>&, const std::vector<TrackID>& reordered, const SongSends& now) override;
 
-    // The devices, containers and chains (SongValues.h; its tree callbacks above leave what the devices' value covers alone,
-    // isHeardAsKept(); the store's: deviceStoreChanged(), below), by the parts that changed, as the tree's changes of them were
+    // The devices, containers and chains (SongValues.h;
+    // the store's: deviceStoreChanged(), below), by the parts that changed, as the tree's changes of them were
     // taken: one changed in place in its values set by hand, its sounds, a container's mix or a chain's volume, pan, crossover
     // or notes plays at once, from the values before and after it is told (SongPlayer::takeDevice()), and while the history
     // undoes or redoes, what a pass writing it writes from then follows once the move is whole (historyMoved()), as for a name
@@ -304,14 +292,14 @@ private:
     void devicesChanged (const std::vector<SongValues::DeviceChange>&, const std::vector<DevicePlace>& reordered,
                          const SongDevices& now) override;
 
-    // The devices' store (SongValues.h; the song's tree holds none of it), as the tree's changes of it were taken while it held
+    // The devices' store (SongValues.h), as the tree's changes of it were taken while it held
     // it: a plug-in's value set by hand and a chain's mute and solo play at once (SongPlayer::takeStoreEntry()), and while the
     // history undoes or redoes, what a pass writing them writes from then follows once the move is whole (historyMoved()); a
     // plug-in's first value set by hand or its last set back to its default (as its VALUE came or went): a new plan too. A
     // plug-in's state, program, format ID and version: nothing (its instance takes them: PluginInstances.h).
     void deviceStoreChanged (const std::vector<SongValues::DeviceStoreChange>&, const DeviceStore& now) override;
 
-    // The tracks (SongValues.h; its tree callbacks above leave what the tracks' values cover alone, isHeardAsKept()), as the
+    // The tracks (SongValues.h), as the
     // tree's changes of them were taken: a volume or a pan changed in place plays at once, from the value it is told
     // (SongPlayer::takeTracks()), and while the history undoes or redoes, what a pass writing it writes from then follows once
     // the move is whole (historyMoved()); anything else of a track (added, taken out, renamed, coloured, a bus switch, a key,
@@ -323,12 +311,12 @@ private:
 
     // The song's history moved by hand, and the move is whole (Song.h: HistoryListener): what a pass writing automation writes
     // follows the values the move set by hand that play at once (AutomationWriter::followValuesSetByHand()), where the
-    // tree's callbacks or the values' listener heard one meanwhile (followAfterMove), for every area alike. Read here, never
+    // values' listener heard one meanwhile (followAfterMove), for every area alike. Read here, never
     // as they are told: during an undo the rest of its step may not be back yet.
     void historyMoved() override;
 
-    // The MIDI links (SongValues.h; its tree callbacks above leave what is in the song's MIDILINKS alone, isHeardAsKept(), and
-    // the MIDILINKS's own coming and going too): no plan, as no plan holds them, but what the MIDI tap diverts, marked and
+    // The MIDI links (SongValues.h):
+    // no plan, as no plan holds them, but what the MIDI tap diverts, marked and
     // followed at the next turn of the message loop (followMidiLinks(), which reads them: never as a listener is told).
     void midiLinksChanged() override
     {

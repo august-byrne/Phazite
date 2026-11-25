@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Clips in the playlist: which are selected, the color they show, and the edits the Smart Tool makes. The song holds its
-// clips as values beside its tree, in its clips' area (model/base/internal/ClipsValue.h: SongClips), each track's in their
+// clips as values, in its clips' area (model/base/internal/ClipsValue.h: SongClips), each track's in their
 // order: where each is, in beats, its name, mute and alias group, and a MIDI clip's notes (model/notes/internal/Notes.h) or
 // an audio clip's part of its file (AudioClips.h), by their IDs.
 #pragma once
@@ -24,7 +24,7 @@ namespace phazite
 //==============================================================================
 // The song's clips by their IDs, as plain values (model/base/internal/ClipsValue.h: ClipValue), read from the song's clips'
 // area: a lookup in a map, a copy of a small value. What reads many clips often without a copy finds them in the area itself
-// (SongValues::findClip()). A song that holds no values (one made to be read or checked: Song::getValues()) has no clips here.
+// (SongValues::findClip()).
 
 // A clip's value: none for a clip that isn't the song's (gone).
 std::optional<ClipValue> getClipValue (const Song&, ClipID);
@@ -121,15 +121,14 @@ void eraseClip (Song&, ClipID);
 
 // What a track's removal takes of the clips (Tracks.h: eraseTrackHoldings()): every clip of these tracks, with its notes, in
 // one set of each area (SongValues.h: eraseClips()), each track's list looked in alone. An alias group left with one clip
-// keeps it linked: the remover unlinks it after (unlinkLoneClips()), as it did after the keeper erased them.
+// keeps it linked: the remover unlinks it after (unlinkLoneClips()).
 void eraseTrackClips (Song&, const std::vector<TrackID>&);
 
-// The clips a track's element holds (its CLIP children, not those of the tracks in it) given to the song's track of its ID
-// (a merge's choice of a whole track: Tracks.h, chooseTrackClash()), as the keeper takes in those of a track that comes into
-// the song with them (model/base/internal/ClipsArea.h): each read as the song holds a clip (readClipValue(), keepWithinClip()),
-// in their order, after the track's others; a MIDI clip with the notes of the alias group it joins where another clip of it
-// holds some, else its own; an audio clip with the sound of its group's where it holds one alike; one of an ID the song holds
-// on another track moved here. Nothing for a track that holds no clips (a folder's, a return's).
+// The clips a track's element holds (its CLIP children, not those of the tracks in it) given to the song's track of its ID (a
+// merge's choice of a whole track: Tracks.h, chooseTrackClash()): each read as the song holds a clip (readClipValue(),
+// keepWithinClip()), in their order, after the track's others; a MIDI clip with the notes of the alias group it joins where
+// another clip of it holds some, else its own; an audio clip with the sound of its group's where it holds one alike; one of an ID
+// the song holds on another track moved here. Nothing for a track that holds no clips (a folder's, a return's).
 void takeClipsOf (Song&, const juce::ValueTree& track);
 
 // The value a clip of the song would hold were setClip() to give it this one, changing nothing: what a clip takes of it

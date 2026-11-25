@@ -119,8 +119,8 @@ CurveValue readCurveValue (const juce::ValueTree& curve);
 // the longest song (0 where it has none), its value within 0 and 1, its bend within -1 and 1 (0 where it has none), in the
 // element's order; a point without a value that is a finite number left out; what Phazite doesn't know of the curve and its
 // points (a property, a child that is no point) no part of it. Each point given the next key from nextKey where it is given
-// (SongValues.h: the song's point keys, which the song's adoption and its keeper give: CurvesArea.h), else none. What
-// enters the song's curves reads a curve so: the song's own as it opens (Song::holdValues()), a version's
+// (SongValues.h: the song's point keys, which the song made of its state gives: CurvesArea.h), else none. What
+// enters the song's curves reads a curve so: the song's own as it opens (SongState.h: readSongTree()), a version's
 // (model/versions/ApplySong.cpp: makeCurvesLike()) and a merge's choice (model/automation/internal/Automation.h:
 // chooseCurveClash()).
 CurveValue readHeldCurve (const juce::ValueTree& curve, std::uint64_t* nextKey = nullptr);

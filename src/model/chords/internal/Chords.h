@@ -20,21 +20,19 @@ namespace phazite
 struct Progression;
 
 // The song's chord lane as a value (model/base/internal/ChordLaneValue.h): its chords and keys, each kind in the song's
-// order. The area's value, cheap to copy; for a song that keeps everything in its tree (one made to be read or checked,
-// without values: Song::getValues()), read from its CHORDLANE element (readChordLaneValue()). Empty for a song without a lane.
+// order. The area's value, cheap to copy. Empty for a song without a lane.
 ChordLaneValue getChordLaneValue (const Song&);
 
-// Whether the song has a chord lane: one is added with its first chord or key, starting with the key new tracks get at that
+// Whether the song has a chord lane: one is placed with its first chord or key, starting with the key new tracks get at that
 // moment (the edits below); until then its keys are that key (getLaneKeys()). The lane's value says so (ChordLaneValue.h:
-// placed), which the writers below set in the step that adds or takes away its element in the song's tree (Schema.h:
-// CHORDLANE, an empty placeholder beside it); for a song without values, that element.
+// placed), which the writers below set in the step that places the lane, before its first entry, and takes it away.
 bool hasChordLane (const Song&);
 
-// The song's lane made the one an element holds (a CHORDLANE, read as the song holds one: ChordLaneValue.h,
-// readHeldChordLane()), or none for an invalid tree: its element in the song's tree added or taken out where it has one and
-// the other none, and its value set, in the mode of the moment (the step in progress, or outside the history while the song
-// is written outside it). What gives the song a version's lane and a merge's choice of one (model/versions/ApplySong.cpp,
-// chooseChordLaneClash()). Whether it wrote anything.
+// The song's lane made the one an element holds (a CHORDLANE, read as the song holds one: ChordLaneValue.h, readHeldChordLane()),
+// or none for an invalid tree: the lane placed first where the song has none and the element comes, taken away last where the
+// song has one and none comes, its value set between, in the mode of the moment (the step in progress, or outside the history
+// while the song is written outside it). What gives the song a version's lane and a merge's choice of one
+// (model/versions/ApplySong.cpp, chooseChordLaneClash()). Whether it wrote anything.
 bool makeChordLaneAs (Song&, const juce::ValueTree& chordLaneOrNone);
 
 // The lane's chords, by their starts, each with the key it is in.

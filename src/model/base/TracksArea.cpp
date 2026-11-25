@@ -38,34 +38,6 @@ namespace
         listEntriesCompared.fetch_add ((std::uint64_t) entries, std::memory_order_relaxed);
     }
 
-    //==============================================================================
-    // Where an element is: the song's root, its track list, its master, the master's LANES.
-    bool isSongRoot (const juce::ValueTree& element)
-    {
-        return element.hasType (schema::PHAZITE) && ! element.getParent().isValid();
-    }
-
-    bool isSongTrackList (const juce::ValueTree& element)
-    {
-        return element.hasType (schema::TRACKS) && isSongRoot (element.getParent());
-    }
-
-    bool isSongMaster (const juce::ValueTree& element)
-    {
-        return element.hasType (schema::MASTER) && isSongRoot (element.getParent());
-    }
-
-    bool isMasterLanes (const juce::ValueTree& element)
-    {
-        return element.hasType (schema::LANES) && isSongMaster (element.getParent());
-    }
-
-    bool isLaneProperty (const juce::Identifier& property)
-    {
-        return property == schema::laneDevice.getName() || property == schema::laneParameter.getName()
-               || property == schema::laneHeight.getName() || property == schema::laneCollapsed.getName();
-    }
-
     // An ID as the song holds it (readHeldTrack()): none for one it can't count on from.
     std::uint64_t readHeldIDOf (const juce::var& held)
     {
@@ -99,7 +71,7 @@ namespace
         }
     }
 
-    // A song's tracks, read once from its tree (readHeldTracks(), the adoption).
+    // A song's tracks, read once from its tree (readHeldTracks()), as the song is made of its state.
     SongTracks readHeldAll (const juce::ValueTree& song)
     {
         SongTracks tracks;
@@ -127,7 +99,7 @@ namespace
     }
 
     // Each TRACK an element is or holds (a folder's tracks, the track list's), and the MASTER, in the tree's order, a folder
-    // before the tracks in it: what the switches' and the view's part of the keeper looks through.
+    // before the tracks in it: what the switches and the view are read from.
     void forEachChannelIn (const juce::ValueTree& element, const std::function<void (juce::ValueTree)>& each)
     {
         if (element.hasType (schema::TRACK) || element.hasType (schema::MASTER))
@@ -270,19 +242,6 @@ namespace
         else
             area.set (std::move (next));
     }
-
-    // The TRACK elements a TRACK coming into the song is (itself first, then a folder's, each before those in it, depth first),
-    // each with the folder it goes in: those the keeper's safety net reads (TracksKeeper).
-    void collectComing (const juce::ValueTree& track, TrackID folder, std::vector<std::pair<juce::ValueTree, TrackID>>& coming)
-    {
-        coming.emplace_back (track, folder);
-        const auto id = TrackID::fromRaw (readHeldIDOf (track[schema::trackID]));
-
-        if (id.isValid() && track[schema::trackKind].toString() == schema::trackIsFolder) // one of no ID is left out with them
-            for (const auto& child : track)
-                if (child.hasType (schema::TRACK))
-                    collectComing (child, id, coming);
-    }
 } // namespace
 
 //==============================================================================
@@ -377,209 +336,6 @@ void SongValues::TracksTeller::valueAreaChanged (const SongTracks& before, const
     if (! changes.empty() || ! reordered.empty())
         listeners.call ([&changes, &reordered, &now] (SongValues::Listener& listener)
                         { listener.tracksChanged (changes, reordered, now); });
-}
-
-//==============================================================================
-SongValues::TracksKeeper::TracksKeeper (SongValues& v, Song& s)
-    : values (v),
-      song (s)
-{
-}
-
-bool SongValues::TracksKeeper::childAdded (juce::ValueTree& parent, juce::ValueTree& child)
-{
-    const auto isTrack = child.hasType (schema::TRACK) && isSongTrackList (parent);
-    const auto isPlace = (child.hasType (schema::TRACKS) || child.hasType (schema::MASTER)) && parent == song.getState();
-
-    if (! isTrack && ! isPlace)
-        return false;
-
-    // A place with nothing in it (no property, no child) is no track's.
-    if (isPlace && child.getNumProperties() == 0 && child.getNumChildren() == 0)
-        return true;
-
-    // (a) in a step: refused, where it was put (W62).
-    if (! song.isWritingOutsideHistory())
-    {
-        jassertfalse; // a track's element in the song's tree: the tracks' setters set one (model/arrangement/internal/Tracks.h)
-        return true;
-    }
-
-    // (a) outside the history: each TRACK (a folder's too) read in with what it holds, or the MASTER.
-    std::vector<std::pair<juce::ValueTree, TrackID>> coming;
-
-    if (child.hasType (schema::TRACK))
-        collectComing (child, {}, coming);
-    else if (child.hasType (schema::TRACKS))
-        for (const auto& each : child)
-            if (each.hasType (schema::TRACK))
-                collectComing (each, {}, coming);
-
-    auto nextTracks = values.tracks.get();
-    auto switches = values.trackSwitches.get();
-    auto outside = values.tracksOutside.get();
-    auto nextClips = values.clips.get();
-    auto nextNotes = values.notes.get();
-    auto nextDevices = values.devices.get();
-    auto store = values.deviceStore.get();
-    auto windows = values.devicesOutside.get();
-    auto nextModulation = values.modulation.get();
-    auto nextSends = values.sends.get();
-    std::vector<std::uint64_t> refused;
-
-    // What a channel's element holds, through each area's reader of a whole element: its devices, store, modulators, switches
-    // and view each counted as that area's part of the keeper counts what it takes in (SongValues.h: countDevicesAdopted() and
-    // those beside it), its clips and sends as the track (countTracksAdopted()).
-    const auto takeHoldings = [&] (const juce::ValueTree& element, TrackID id, bool onMaster)
-    {
-        values.trackLeavesAdopted += holdsSwitchesIn (element) || holdsViewIn (element) ? 1 : 0;
-        readLeavesOf (element, switches, outside);
-
-        if (! onMaster)
-            takeTrackClipsIn (nextClips, nextNotes, element, id);
-
-        values.devicesAdopted += takeChannelDevicesIn (nextDevices, element, makeChannelPlace (id, onMaster));
-        values.deviceStoreAdopted += takeChannelStoreIn (store, windows, element);
-        values.modulationAdopted += takeChannelModulatorsIn (nextModulation, element);
-
-        if (! onMaster)
-            takeTrackSendsIn (nextSends, element, id);
-    };
-
-    for (const auto& [element, folder] : coming)
-    {
-        auto value = readHeldTrack (element);
-        const auto id = value.has_value() ? value->id.getRaw() : 0;
-
-        // One of an ID the song holds, of none, in a folder left out, or that the song can't hold, is left out with the tracks
-        // in it.
-        if (! value.has_value() || id == 0 || nextTracks.find (value->id) != nullptr
-            || (folder.isValid() && std::find (refused.begin(), refused.end(), folder.getRaw()) != refused.end()))
-        {
-            refused.push_back (id);
-            continue;
-        }
-
-        value->parent = folder;
-        auto next = withTrack (nextTracks, std::move (*value), -1);
-
-        if (next.isSameAs (nextTracks))
-        {
-            refused.push_back (id);
-            continue;
-        }
-
-        nextTracks = std::move (next);
-        takeHoldings (element, TrackID::fromRaw (id), false);
-        ++values.tracksAdopted;
-    }
-
-    if (child.hasType (schema::MASTER))
-    {
-        if (auto value = readHeldTrack (child); value.has_value() && value->isMaster() && value->id.isValid())
-        {
-            value->parent = {};
-            nextTracks.master = std::move (*value);
-        }
-
-        takeHoldings (child, nextTracks.master.id, true);
-        ++values.tracksAdopted;
-    }
-
-    // Set: the tracks first, so that what the other areas hold names a track the song holds.
-    values.tracks.setOutsideHistory (std::move (nextTracks));
-    values.trackSwitches.setOutsideHistory (std::move (switches));
-    values.tracksOutside.set (std::move (outside));
-    values.clips.setOutsideHistory (std::move (nextClips));
-    values.notes.setOutsideHistory (std::move (nextNotes));
-    values.devices.setOutsideHistory (std::move (nextDevices));
-    values.deviceStore.setOutsideHistory (std::move (store));
-    values.devicesOutside.set (std::move (windows));
-    values.modulation.setOutsideHistory (std::move (nextModulation));
-    values.sends.setOutsideHistory (std::move (nextSends));
-
-    // Taken out: a TRACK whole; what a place holds, the place staying where the song had none other.
-    takingOut = child;
-
-    if (child.hasType (schema::TRACK) || ! (parent.getChildWithName (child.getType()) == child))
-    {
-        parent.removeChild (child, nullptr);
-    }
-    else
-    {
-        child.removeAllChildren (nullptr);
-        child.removeAllProperties (nullptr);
-    }
-
-    takingOut = {};
-    return true;
-}
-
-bool SongValues::TracksKeeper::propertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
-{
-    if (! isSongMaster (tree))
-        return false;
-
-    // What the keeper takes away itself, and what an undo or a redo of a step puts back or takes away (a refused one's).
-    if (takingOut.isValid() || song.getUndoManager().isPerformingUndoRedo() || ! tree.hasProperty (property))
-        return true;
-
-    // (a) in a step: refused, where it was written (W62).
-    if (! song.isWritingOutsideHistory())
-    {
-        jassertfalse; // a property of the song's MASTER: the tracks' setters set the master (model/arrangement/internal/Tracks.h)
-        return true;
-    }
-
-    // (a) outside the history: read in as the song holds it, into the master's value, its switches or its view, as a MASTER
-    // element that holds it with what the song holds of the master reads (one Phazite doesn't know: dropped), and taken away.
-    auto master = values.tracks.get().master;
-    auto switches = values.trackSwitches.get();
-    auto outside = values.tracksOutside.get();
-    juce::ValueTree holder (schema::MASTER);
-    writeMasterInto (holder, master);
-    writeSwitchesInto (holder, switches);
-    writeViewInto (holder, outside.master);
-    holder.setProperty (property, tree[property], nullptr);
-
-    if (auto value = readHeldTrack (holder); value.has_value() && value->isMaster())
-    {
-        auto next = values.tracks.get();
-        next.master = std::move (*value);
-        values.tracks.setOutsideHistory (std::move (next));
-    }
-
-    readHeldSwitchesOf (holder, switches);
-    values.trackSwitches.setOutsideHistory (std::move (switches));
-    values.tracksOutside.set (withMasterView (outside, readHeldViewOf (holder)));
-    ++values.tracksAdopted;
-
-    takingOut = tree;
-    tree.removeProperty (property, nullptr);
-    takingOut = {};
-    return true;
-}
-
-void SongValues::TracksKeeper::adopt (SongValues&, Song& loaded)
-{
-    // Every TRACK out of the TRACKS, and every property and child out of the MASTER, their reader having read the song's tracks
-    // into the area before (readHeldTracksIn(): SongValues.cpp, adopt()): what the other areas take of them taken before
-    // (SongValues.cpp: adopt(), this last), what Phazite doesn't know of them dropped as the song opens.
-    auto tree = loaded.getState();
-
-    for (auto child : tree)
-    {
-        if (child.hasType (schema::TRACKS))
-        {
-            child.removeAllChildren (nullptr);
-            child.removeAllProperties (nullptr);
-        }
-        else if (child.hasType (schema::MASTER))
-        {
-            child.removeAllChildren (nullptr);
-            child.removeAllProperties (nullptr);
-        }
-    }
 }
 
 //==============================================================================
@@ -789,60 +545,6 @@ void SongValues::TracksViewTeller::outsideValueChanged (const TracksOutside& bef
 }
 
 //==============================================================================
-SongValues::TrackLeavesKeeper::TrackLeavesKeeper (SongValues& v, Song& s)
-    : values (v),
-      song (s)
-{
-}
-
-void SongValues::TrackLeavesKeeper::childAdded (juce::ValueTree& parent, juce::ValueTree& child)
-{
-    // A lone LANES added to the master, or a lone LANE to its LANES (b): refused in a step; read in outside the history, its
-    // lanes after those the master has, and taken out.
-    if ((child.hasType (schema::LANES) && isSongMaster (parent)) || (child.hasType (schema::LANE) && isMasterLanes (parent)))
-    {
-        if (! song.isWritingOutsideHistory())
-        {
-            jassertfalse; // a lane added to the song's tree: the lanes' functions change the lanes (Automation.h)
-            return;
-        }
-
-        juce::ValueTree holder (schema::MASTER);
-        juce::ValueTree lanes (schema::LANES);
-
-        if (child.hasType (schema::LANES))
-            lanes = child.createCopy();
-        else
-            lanes.appendChild (child.createCopy(), nullptr);
-
-        holder.appendChild (lanes, nullptr);
-        auto outside = values.tracksOutside.get();
-        auto view = outside.master;
-        view.lanes = view.lanes + readHeldLanesOf (holder);
-        values.setTracksOutside (withMasterView (outside, std::move (view)));
-        ++values.trackLeavesAdopted;
-        parent.removeChild (child, nullptr);
-    }
-}
-
-void SongValues::TrackLeavesKeeper::adopt (SongValues&, Song& loaded)
-{
-    // Every TRACK of the song's track list (a folder's tracks too) and the MASTER, each read as the song holds it before
-    // (readHeldTrackLeavesIn(): SongValues.cpp, adopt()); then all of it taken out of them.
-    std::vector<juce::ValueTree> channels;
-
-    for (const auto& child : loaded.getState())
-        if (child.hasType (schema::TRACKS) || child.hasType (schema::MASTER))
-            forEachChannelIn (child, [&channels] (juce::ValueTree element) { channels.push_back (element); });
-
-    for (auto& element : channels)
-    {
-        jassert (! keepSwitchesAsHeld (element.createCopy()) && ! keepViewAsHeld (element.createCopy())); // the loader's
-        takeSwitchesOutOf (element, nullptr);
-        takeViewOutOf (element, nullptr);
-    }
-}
-
 void readHeldTrackLeavesIn (const juce::ValueTree& song, SongState& into)
 {
     // Every TRACK of the song's track list (a folder's tracks too) and the MASTER, each read as the song holds it (the first
@@ -944,17 +646,14 @@ void writeTrackLeavesIn (juce::ValueTree& element, const SongState& kept)
 //==============================================================================
 bool holdSameTracks (const SongState& a, const SongState& b)
 {
-    if (! a.tracks.has_value() || ! b.tracks.has_value())
-        return a.tracks.has_value() == b.tracks.has_value();
-
-    return a.tracks->isSameAs (*b.tracks) || *a.tracks == *b.tracks;
+    return a.tracks.isSameAs (b.tracks) || a.tracks == b.tracks;
 }
 
 bool holdSameTrack (const SongState& a, const SongState& b, TrackID id)
 {
     // Its value (its folder among it), and its switches' entries; one in neither the same.
-    const auto* first = a.tracks.has_value() ? a.tracks->tracks.find (id.getRaw()) : nullptr;
-    const auto* second = b.tracks.has_value() ? b.tracks->tracks.find (id.getRaw()) : nullptr;
+    const auto* first = a.tracks.tracks.find (id.getRaw());
+    const auto* second = b.tracks.tracks.find (id.getRaw());
 
     if (first == nullptr || second == nullptr)
         return first == second;
@@ -964,53 +663,18 @@ bool holdSameTrack (const SongState& a, const SongState& b, TrackID id)
 
 bool holdSameMaster (const SongState& a, const SongState& b)
 {
-    if (! a.tracks.has_value() || ! b.tracks.has_value())
-        return a.tracks.has_value() == b.tracks.has_value();
-
-    return a.tracks->master == b.tracks->master && holdSameSwitchesOf (a.trackSwitches, b.trackSwitches, 0);
+    return a.tracks.master == b.tracks.master && holdSameSwitchesOf (a.trackSwitches, b.trackSwitches, 0);
 }
 
 bool holdSameTrackList (const SongState& a, const SongState& b, TrackID folder)
 {
-    const auto* first = a.tracks.has_value() ? a.tracks->findList (folder) : nullptr;
-    const auto* second = b.tracks.has_value() ? b.tracks->findList (folder) : nullptr;
+    const auto* first = a.tracks.findList (folder);
+    const auto* second = b.tracks.findList (folder);
 
     if (first == nullptr || second == nullptr)
         return first == second;
 
     return first->identity() == second->identity() || *first == *second;
-}
-
-//==============================================================================
-bool isHeardAsTracks (const juce::ValueTree& element)
-{
-    // Children in another order: the places' (what the keeper takes in there), the master's lanes'.
-    return isSongTrackList (element) || isSongMaster (element) || isMasterLanes (element);
-}
-
-bool isHeardAsTracks (const juce::ValueTree& element, const juce::Identifier& property)
-{
-    if (element.hasType (schema::LANE))
-        return isLaneProperty (property) && isMasterLanes (element.getParent());
-
-    return isSongMaster (element);
-}
-
-bool isHeardAsTracks (const juce::ValueTree& parent, const juce::ValueTree& child)
-{
-    if (! child.isValid())
-        return isHeardAsTracks (parent);
-
-    if (child.hasType (schema::TRACK))
-        return isSongTrackList (parent);
-
-    if (child.hasType (schema::TRACKS) || child.hasType (schema::MASTER))
-        return isSongRoot (parent);
-
-    if (child.hasType (schema::LANES))
-        return isSongMaster (parent);
-
-    return child.hasType (schema::LANE) && isMasterLanes (parent);
 }
 
 //==============================================================================

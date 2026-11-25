@@ -144,9 +144,8 @@ struct RenderHost : public TrackRenderHost
 void waitForVersionsWrites();
 
 // The song whole, as a save, a version or a comparison takes it (model/base/internal/WholeState.h: copyWholeSong()), wherever
-// a test means the whole song: never its tree alone (Song::getState().createCopy()), which is to hold less than the song
-// does as its areas move beside the tree (roadmap step S5.20). Message thread. Called by its full name: the model's has the
-// same parameters.
+// a test means the whole song as its file holds it. Message thread. Called by its full name: the model's has the same
+// parameters.
 inline juce::ValueTree copyWholeSong (const Song& song)
 {
     return phazite::copyWholeSong (song);

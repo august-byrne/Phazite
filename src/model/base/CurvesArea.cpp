@@ -11,15 +11,6 @@ namespace phazite
 {
 namespace
 {
-    // The song's AUTOMATION element once what it held is read into the song's curves as the song holds its values (adopt()):
-    // emptied, outside the history, the place a whole copy writes the curves in, its properties and children Phazite doesn't
-    // know taken out too (Schema.h, AUTOMATION).
-    void emptyAutomationElement (juce::ValueTree& automation)
-    {
-        automation.removeAllChildren (nullptr);
-        automation.removeAllProperties (nullptr);
-    }
-
     // Two entries of the curves' map alike without a look inside: one parameter's, the same value (ValueArea.h).
     struct SameCurve
     {
@@ -87,72 +78,10 @@ void SongValues::CurvesTeller::valueAreaChanged (const SongCurves& before, const
 }
 
 //==============================================================================
-SongValues::CurvesKeeper::CurvesKeeper (SongValues& v, Song& s)
-    : values (v),
-      song (s),
-      state (s.getState())
-{
-}
-
-void SongValues::CurvesKeeper::childAdded (juce::ValueTree& parent, juce::ValueTree& child)
-{
-    if (! isHeardAsCurves (parent, child))
-        return;
-
-    // The safety net (SongValues.h): a curve added to the song's AUTOMATION by itself is read in and taken out again while the
-    // song is written outside the history, and refused in a step, whose Undo, taking the tree's change back first, would find
-    // it gone (JUCE workaround W62 (docs/juce-workarounds.md)). In the mode of the moment.
-    const auto outside = song.isWritingOutsideHistory();
-
-    // An AUTOMATION added to the song is refused, in either mode, its curves left unread: the song has its own from the
-    // adoption on (adopt(), before the keeper comes), which nothing adds or takes out, so another is a second, into which a
-    // whole copy would write the curves too. Taken out again outside the history, so that the song keeps one; left to its
-    // Undo in a step, which can't take it out (W62, as above).
-    if (child.hasType (schema::AUTOMATION) && parent == state)
-    {
-        jassertfalse; // a second AUTOMATION added to the song: automation's functions change the curves (Automation.h)
-
-        if (outside)
-            parent.removeChild (child, nullptr);
-
-        return;
-    }
-
-    if (! child.hasType (schema::CURVE) || ! parent.hasType (schema::AUTOMATION) || parent.getParent() != state)
-        return;
-
-    if (! outside)
-    {
-        jassertfalse; // a curve added to the song's automation: automation's functions change it (Automation.h)
-        return;
-    }
-
-    ++values.curvesAdopted;
-    values.setCurves (song, withCurve (values.curves.get(), readCurveParameter (child), readHeldCurve (child, &values.nextPointKey)));
-    parent.removeChild (child, nullptr);
-}
-
-void SongValues::CurvesKeeper::adopt (SongValues&, Song& loaded)
-{
-    // The song's AUTOMATION, whose curves its reader read into the area before (readHeldCurvesIn(): SongValues.cpp, adopt()),
-    // emptied (emptyAutomationElement()), and kept: it is the place a whole copy writes the curves in. A song whose file had
-    // none gets one, empty, as every song that holds its values has.
-    auto root = loaded.getState();
-    auto automation = root.getChildWithName (schema::AUTOMATION);
-
-    if (! automation.isValid())
-    {
-        automation = juce::ValueTree (schema::AUTOMATION);
-        root.appendChild (automation, nullptr);
-    }
-
-    emptyAutomationElement (automation);
-}
-
 void readHeldCurvesIn (const juce::ValueTree& song, SongState& into, std::uint64_t& nextPointKey)
 {
     // The curves the loader made consistent, each as the song holds one, one for each parameter, each point given a key from
-    // the count given (CurveValues.h: readHeldCurves()); none for a song without an AUTOMATION.
+    // the count given (CurveValues.h: readHeldCurves()); none for a song without an AUTOMATION, or with an empty one.
     const auto automation = song.getChildWithName (schema::AUTOMATION);
     into.curves = readHeldCurves (automation.isValid() ? automation : juce::ValueTree (schema::AUTOMATION), nextPointKey);
 }
@@ -241,20 +170,6 @@ bool SongValues::setCurveOrder (Song& song, const std::vector<ParameterRef>& fir
     return true;
 }
 
-bool isHeardAsCurves (const juce::ValueTree& element)
-{
-    for (auto each = element; each.isValid(); each = each.getParent())
-        if (each.hasType (schema::AUTOMATION))
-            return each.getParent().hasType (schema::PHAZITE);
-
-    return false;
-}
-
-bool isHeardAsCurves (const juce::ValueTree& parent, const juce::ValueTree& child)
-{
-    return (child.hasType (schema::AUTOMATION) && parent.hasType (schema::PHAZITE)) || isHeardAsCurves (parent);
-}
-
 //==============================================================================
 bool leadsToCurves (const juce::ValueTree& parent, const juce::ValueTree& child)
 {
@@ -263,21 +178,9 @@ bool leadsToCurves (const juce::ValueTree& parent, const juce::ValueTree& child)
 
 void writeCurvesIn (juce::ValueTree& element, const SongState& kept)
 {
-    // A song without curves written without its AUTOMATION, which is their place alone (none kept of a song that keeps
-    // everything in its tree, whose AUTOMATION, where it holds anything, holds its curves).
-    if (element.hasType (schema::PHAZITE))
-    {
-        if (const auto automation = element.getChildWithName (schema::AUTOMATION);
-            kept.curves.order.empty() && automation.isValid() && automation.getNumChildren() == 0 && automation.getNumProperties() == 0)
-            element.removeChild (automation, nullptr);
-
-        return;
-    }
-
     if (! element.hasType (schema::AUTOMATION) || kept.curves.order.empty())
         return;
 
-    jassert (element.getNumChildren() == 0); // the song's tree holds none of its curves (SongValues.h)
     writeCurves (kept.curves, element);
 }
 

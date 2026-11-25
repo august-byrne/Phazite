@@ -348,9 +348,10 @@ TEST_CASE ("The versions make the song's tracks a version's through the tracks' 
 
     // The song as copied after an edit undone: nothing of its tracks written (asserted in Debug builds: ApplySong.cpp).
     const auto copy = phazite::test::copyWholeSong (song);
+    const auto copyState = phazite::getSongState (song);
     phazite::renameTrack (song, mixed, "Undone");
     phazite::undo (song);
-    phazite::makeSongAsCopied (song, copy);
+    phazite::makeSongAsCopied (song, copyState);
     checkTracksAsIn (song, copy);
 }
 

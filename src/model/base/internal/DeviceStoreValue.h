@@ -8,8 +8,7 @@
 // devices' plain value, DevicesValue.h, covers the rest of a device; a window's place is outside the history alone,
 // DevicesOutside.h). With the conversion between those properties and children of a DEVICE and a CHAIN and the store.
 //
-// The store is the storage: the song holds an area of it (SongValues.h: deviceStore, keyed) and its tree's DEVICE and CHAIN
-// elements hold none of these properties and no VALUE child (DeviceStoreArea.h: the keeper takes in what comes with one).
+// The store is the storage: the song holds an area of it (SongValues.h: deviceStore, keyed; DeviceStoreArea.h).
 // The functions by ID that read and write it are in model/plugins/internal/DeviceStore.h. Its own header, beside the other
 // areas' (one header for each area's values); immer is the model's alone (tools/check-architecture.sh: immer-outside-model).
 #pragma once
@@ -164,11 +163,6 @@ DeviceStore takeEntriesOf (const DeviceStore&, DeviceID, bool heldToo = false);
 DeviceStore withEntriesOf (const DeviceStore&, DeviceID, const DeviceStore& entries);
 bool holdSameEntriesOf (const DeviceStore&, const DeviceStore&, DeviceID);
 
-// The store without the entries of items whose IDs are at or above first (a plug-in's values by its device's, held ones too),
-// one walk of each map; the very maps where they hold none. What the song as copied drops as its count of IDs is set back to
-// the copy's (model/versions/ApplySong.cpp: makeSongAsCopied()): no step its history holds can bring such an item back.
-DeviceStore withoutIDsFrom (const DeviceStore&, std::uint64_t first);
-
 template <typename CopiedMap>
 DeviceStore copyEntriesTo (DeviceStore into, const DeviceStore& from, const CopiedMap& copied)
 {
@@ -213,8 +207,8 @@ DeviceStore copyEntriesTo (DeviceStore into, const DeviceStore& from, const Copi
 // solo each where it reads as true. Nothing for any other element, nor for one without an ID.
 void readStoreOf (const juce::ValueTree& element, DeviceStore&);
 
-// The same as the song holds it, which everything that enters the store will read (the adoption, the keeper, a version's
-// devices and a merge's choice): the same as readStoreOf() but each VALUE's value by its description (Schema.h:
+// The same as the song holds it, which everything that enters the store will read (a file's as the song is made of its state, a
+// version's devices and a merge's choice): the same as readStoreOf() but each VALUE's value by its description (Schema.h:
 // valueSetByHand, within 0 and 1, 0 for what is no finite number).
 void readHeldStoreOf (const juce::ValueTree& element, DeviceStore&);
 
@@ -238,10 +232,9 @@ bool isPluginParameterBefore (const juce::String& a, const juce::String& b);
 std::optional<WindowPlace> readWindowPlaceOf (const juce::ValueTree& device);
 void writeWindowPlaceInto (juce::ValueTree& device, WindowPlace);
 
-// Whether a DEVICE or a CHAIN holds anything of the store's or a window's place (a store's property, a VALUE child, a window's
-// left or top); and all of it taken out of it, with an undo manager or none (the keeper's, in the mode of the moment): the
-// store's properties and the window's of a DEVICE and its VALUE children, a CHAIN's mute and solo. Nothing for another element.
-bool holdsStoreIn (const juce::ValueTree& element);
+// A DEVICE's or a CHAIN's store and window's place taken out of it (keepStoreAsHeld(), before it writes them back), with
+// an undo manager or none: the store's properties and the window's of a DEVICE and its VALUE children, a CHAIN's mute and
+// solo. Nothing for another element.
 void takeStoreOutOf (juce::ValueTree element, juce::UndoManager*);
 
 // A DEVICE or a CHAIN of a file being opened made to hold what the song holds of the store and the window's place, as Phazite

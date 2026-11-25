@@ -141,16 +141,6 @@ void checkKeepsSwitchesAndView (const phazite::Song& song, TrackID original, Tra
     }
 }
 
-// What the song's values have taken in by their safety nets, every area's count (model/versions/ApplySong.cpp:
-// NothingTakenIn).
-int countTakenIn (const phazite::Song& song)
-{
-    const auto* values = song.getValues();
-    REQUIRE (values != nullptr);
-    return values->countTracksAdopted() + values->countTempoMapAdopted() + values->countChordLaneAdopted() + values->countMidiLinksAdopted()
-           + values->countCurvesAdopted() + values->countSectionsAdopted() + values->countModulationAdopted()
-           + values->countDeviceStoreAdopted() + values->countDevicesAdopted() + values->countTrackLeavesAdopted();
-}
 } // namespace
 
 TEST_CASE ("Track writers: the setters write nothing for what the song holds, refuse what it can't hold, and write outside the "
@@ -672,7 +662,6 @@ TEST_CASE ("Track writers: a folder of two tracks duplicated gives each copy its
     phazite::setPinned (song, second, true);
     phazite::showLane (song, second, { secondDelay, "mix" });
     REQUIRE (phazite::isTrackFrozen (song, first));
-    const auto takenIn = countTakenIn (song);
 
     phazite::test::UndoCheck undo (s.context);
     const auto steps = undo.getNumSteps();
@@ -708,7 +697,6 @@ TEST_CASE ("Track writers: a folder of two tracks duplicated gives each copy its
             CHECK (devices.front() != phazite::getDevices (song, original).front());
         }
 
-        CHECK (countTakenIn (song) == takenIn); // nothing left to a safety net
         phazite::test::checkSong (song);
     };
 
@@ -730,7 +718,6 @@ TEST_CASE ("Track writers: a folder of two tracks duplicated gives each copy its
     CHECK (phazite::isTrackSoloed (song, inCopy[1]));
     CHECK (phazite::getAutomationMode (song, inCopy[1]) == phazite::AutomationMode::touch);
     CHECK (phazite::getSavedTrackHeight (song, inCopy[0]) == std::optional (80));
-    CHECK (countTakenIn (song) == takenIn);
     phazite::test::checkSong (song);
 }
 

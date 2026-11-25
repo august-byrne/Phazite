@@ -12,10 +12,10 @@
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
+#include "model/base/internal/ChordLaneValue.h"
 #include "model/base/internal/ModulationValue.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongOwnValue.h"
-#include "model/base/internal/SongState.h"
 #include "model/chords/internal/Chords.h"
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/DrumKit.h"
@@ -1322,12 +1322,9 @@ void RandomEdits::editOneArea (int kind)
             break;
         }
 
-        case 13: // the song's MIDILINKS alone, put in or taken away empty, as a version's links give it (the root's places)
-            if (getMidiLinks (song).empty())
-            {
-                const auto placed = getSongState (song).holdsPlace (RootPlace::midiLinks);
-                makeMidiLinksAs (song, placed ? juce::ValueTree() : juce::ValueTree (schema::MIDILINKS));
-            }
+        case 13: // the song's chord lane alone, placed or taken away empty, as a version's lane gives it
+            if (const auto lane = getChordLaneValue (song); lane.chords.empty() && lane.keys.empty())
+                makeChordLaneAs (song, hasChordLane (song) ? juce::ValueTree() : juce::ValueTree (schema::CHORDLANE));
             break;
 
         case 14: // a controller linked to a track's volume (the MIDI links')

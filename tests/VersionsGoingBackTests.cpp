@@ -1242,37 +1242,6 @@ void takeLineChecked (phazite::Song& song, UndoCheck& undo, phazite::TrackID tra
     checkWhole (song);
 }
 
-// What a song's tree is told of while a version is made the song's: each property set (by its element's type and the
-// property's name), each element added or taken away, each moved among its parent's.
-struct TreeChanges final : juce::ValueTree::Listener
-{
-    explicit TreeChanges (phazite::Song& s)
-        : state (s.getState())
-    {
-        state.addListener (this);
-    }
-
-    ~TreeChanges() override { state.removeListener (this); }
-
-    void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override
-    {
-        properties.add (tree.getType().toString() + "@" + property.toString());
-    }
-
-    void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override { ++added; }
-    void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override { ++removed; }
-    void valueTreeChildOrderChanged (juce::ValueTree&, int, int) override { ++moved; }
-
-    void reset()
-    {
-        properties.clear();
-        added = removed = moved = 0;
-    }
-
-    juce::ValueTree state;
-    juce::StringArray properties;
-    int added = 0, removed = 0, moved = 0;
-};
 } // namespace
 
 TEST_CASE ("A clip moved to another track since a version goes back and forth with its ID, whichever of the two tracks comes first")
@@ -1473,9 +1442,8 @@ TEST_CASE ("A version that holds a track's clips in another order moves them alo
     auto renamed = before.createCopy();
     findClipElement (renamed, clips[1]).setProperty (schema::clipName, "Q2", nullptr);
 
-    // Each made the song's as one undo step, what the song's tree is told of it and what the clips' listener is told kept, its
+    // Each made the song's as one undo step, what the clips' listener is told kept, its
     // Undo and Redo exact.
-    TreeChanges heard (*song);
 
     struct ClipsTold final : phazite::SongValues::Listener
     {
@@ -1501,7 +1469,6 @@ TEST_CASE ("A version that holds a track's clips in another order moves them alo
     {
         INFO (what.toStdString());
         const auto textBefore = writeSong (*song, SongPart::undoable);
-        heard.reset();
         told.changed.clear();
         told.reordered.clear();
 
@@ -1510,8 +1477,6 @@ TEST_CASE ("A version that holds a track's clips in another order moves them alo
             phazite::makeSongLike (*song, version);
         }
 
-        const auto treeTold = heard.properties;
-        const auto added = heard.added, removed = heard.removed, moved = heard.moved;
         const auto clipsTold = told;
         checkSongIs (*song, version);
         const auto textAfter = writeSong (*song, SongPart::undoable);
@@ -1519,19 +1484,13 @@ TEST_CASE ("A version that holds a track's clips in another order moves them alo
         CHECK (describeSongDifferences (textBefore, writeSong (*song, SongPart::undoable)).isEmpty());
         phazite::redo (*song);
         CHECK (describeSongDifferences (textAfter, writeSong (*song, SongPart::undoable)).isEmpty());
-        heard.properties = treeTold;
-        heard.added = added;
-        heard.removed = removed;
-        heard.moved = moved;
         told.changed = clipsTold.changed;
         told.reordered = clipsTold.reordered;
     };
 
-    // The tree holds no clip: it hears nothing of them; the clips' listener hears the track's clips in another order.
+    // The clips' listener hears the track's clips in another order.
     apply (reversed, "Reversed");
     CHECK (phazite::getClips (*song, track) == std::vector { clips[2], clips[1], clips[0] });
-    CHECK (heard.properties.isEmpty());
-    CHECK (heard.added + heard.removed + heard.moved == 0);
     CHECK (told.changed.empty());
     CHECK (told.reordered == std::vector { track });
 
@@ -1539,9 +1498,6 @@ TEST_CASE ("A version that holds a track's clips in another order moves them alo
     CHECK (phazite::getClips (*song, track) == clips);
 
     apply (renamed, "Renamed");
-    INFO (heard.properties.joinIntoString (", ").toStdString());
-    CHECK (heard.properties.isEmpty());
-    CHECK (heard.added + heard.removed + heard.moved == 0);
     CHECK (told.changed == std::vector { clips[1] });
     CHECK (told.reordered.empty());
     CHECK (phazite::getClipValue (*song, clips[1])->name == "Q2");
@@ -1726,6 +1682,7 @@ TEST_CASE ("A song made as it was copied, after a step that changed its clips wa
     }
 
     const auto copy = phazite::test::copyWholeSong (*song);
+    const auto copyState = phazite::getSongState (*song);
 
     // A step that moves, renames and deletes clips, and adds a note, undone; and a track muted, which is no step.
     {
@@ -1740,7 +1697,7 @@ TEST_CASE ("A song made as it was copied, after a step that changed its clips wa
     phazite::setTrackMuted (*song, tracks[0], true);
 
     // The clip pass writes nothing here (its assertion: ApplySong.cpp, makeSongAsCopied()); the song is the copy, whole.
-    phazite::makeSongAsCopied (*song, copy);
+    phazite::makeSongAsCopied (*song, copyState);
     CHECK (phazite::writeElement (phazite::test::copyWholeSong (*song)).toString() == phazite::writeElement (copy).toString());
     checkWhole (*song);
 }
@@ -1800,6 +1757,7 @@ TEST_CASE ("A song made as it was copied, after a step that changed its tempo ma
     auto song = phazite::createSong();
     phazite::addTempoChange (*song, at (8.0), 140.0);
     const auto copy = phazite::test::copyWholeSong (*song);
+    const auto copyState = phazite::getSongState (*song);
 
     {
         const phazite::UndoStep step (*song, "Tempo");
@@ -1812,7 +1770,7 @@ TEST_CASE ("A song made as it was copied, after a step that changed its tempo ma
     phazite::undo (*song);
 
     // Nothing to write (ApplySong.cpp, makeSongAsCopied()); the song is the copy, whole.
-    phazite::makeSongAsCopied (*song, copy);
+    phazite::makeSongAsCopied (*song, copyState);
     CHECK (phazite::writeElement (phazite::test::copyWholeSong (*song)).toString() == phazite::writeElement (copy).toString());
     checkWhole (*song);
 }
@@ -2132,245 +2090,4 @@ TEST_CASE ("Bring Back of the version the song is, and a clip or its notes set t
     CHECK (phazite::getClipValue (*song, toneAlias)->sound.isSameAs (phazite::getClipValue (*song, tone)->sound));
     CHECK (phazite::getClipNotesValue (*song, riffAlias).isSameAs (phazite::getClipNotesValue (*song, riff)));
     phazite::test::checkValues (*song);
-}
-
-namespace
-{
-// The types of a song's elements, in their order: what a saved file writes under its PHAZITE.
-std::string getElementOrder (const juce::ValueTree& song)
-{
-    juce::StringArray types;
-
-    for (const auto& child : song)
-        types.add (child.getType().toString());
-
-    return types.joinIntoString (" ").toStdString();
-}
-
-// The song's sections, its chord lane and its MIDI links, each placeholder added with its area's first entry (SECTIONS,
-// CHORDLANE, MIDILINKS), in the order given: so a song's elements hold them in the order they were made.
-enum class Placeholder
-{
-    sections,
-    chordLane,
-    midiLinks
-};
-
-void makeInOrder (phazite::Song& song, phazite::DeviceID synth, std::initializer_list<Placeholder> order)
-{
-    const phazite::UndoStep step (song, "Make Them");
-
-    for (const auto each : order)
-    {
-        switch (each)
-        {
-            case Placeholder::sections:
-                phazite::insertSection (song, at (0.0), { .name = "Verse", .length = lasting (16.0) });
-                break;
-            case Placeholder::chordLane:
-                phazite::putLaneChord (song, { at (0.0), at (4.0) }, { 1, 0, phazite::ChordType::minor, 0 });
-                break;
-            case Placeholder::midiLinks:
-                phazite::linkMidiController (song, { 1, 21 }, { synth, "cutoff" });
-                break;
-        }
-    }
-}
-} // namespace
-
-TEST_CASE ("A version's sections, chord lane and MIDI links take the places the version gives them among the song's elements, "
-           "made like it or the same as it, and Undo puts the song's order back")
-{
-    // The placeholders of the areas held as values (SECTIONS, CHORDLANE, MIDILINKS) stand among the song's elements where it
-    // made them, which its file writes: a song made like a version's, or the same as it, puts each where the version has it, as
-    // every other element (ApplySong.cpp: placePlaceholdersLike()).
-    const auto base = phazite::createSong();
-    const auto track = phazite::ensureTracks (*base, 1).front();
-    const auto synth = phazite::test::addOwnDevice (*base, track, phazite::devices::Synth::typeID);
-    base->getUndoManager().clearUndoHistory();
-
-    const auto makeFromBase = [&base] { return phazite::makeSong (phazite::test::copyWholeSong (*base)); };
-    const auto forward = makeFromBase(), backward = makeFromBase();
-    REQUIRE (forward != nullptr);
-    REQUIRE (backward != nullptr);
-    makeInOrder (*forward, synth, { Placeholder::sections, Placeholder::chordLane, Placeholder::midiLinks });
-    makeInOrder (*backward, synth, { Placeholder::midiLinks, Placeholder::chordLane, Placeholder::sections });
-    const auto forwardSong = phazite::test::copyWholeSong (*forward), backwardSong = phazite::test::copyWholeSong (*backward);
-    REQUIRE (getElementOrder (forwardSong) != getElementOrder (backwardSong));
-
-    SUBCASE ("made like the version, both ways, and like it from a song with none of them, each one exact undo step")
-    {
-        const auto song = makeFromBase();
-        REQUIRE (song != nullptr);
-        makeInOrder (*song, synth, { Placeholder::sections, Placeholder::chordLane, Placeholder::midiLinks });
-        song->getUndoManager().clearUndoHistory();
-        UndoCheck undo (*song);
-
-        const auto makeLike = [&] (const juce::String& name, const juce::ValueTree& other)
-        {
-            INFO (name.toStdString());
-            const auto before = getElementOrder (phazite::test::copyWholeSong (*song));
-            undo.check (name,
-                        [&]
-                        {
-                            const phazite::UndoStep step (*song, name);
-                            phazite::makeSongLike (*song, other);
-                        });
-            CHECK (getElementOrder (phazite::test::copyWholeSong (*song)) == getElementOrder (other));
-            phazite::undo (*song);
-            CHECK (getElementOrder (phazite::test::copyWholeSong (*song)) == before);
-            phazite::redo (*song);
-            phazite::test::checkSong (*song);
-        };
-
-        makeLike ("The Version Backward", backwardSong);
-        makeLike ("The Version Forward", forwardSong);
-        makeLike ("None of Them", phazite::test::copyWholeSong (*base));
-        makeLike ("The Version Forward Again", forwardSong); // each placeholder added, and put in its place
-        makeLike ("The Version Backward Again", backwardSong);
-        undo.walkBackAndForth();
-    }
-
-    SUBCASE ("made the same as the version, both ways, outside the history")
-    {
-        const auto song = makeFromBase();
-        REQUIRE (song != nullptr);
-        makeInOrder (*song, synth, { Placeholder::sections, Placeholder::chordLane, Placeholder::midiLinks });
-
-        for (const auto* other : { &backwardSong, &forwardSong, &backwardSong })
-        {
-            phazite::makeSongTheSame (*song, *other);
-            CHECK (getElementOrder (phazite::test::copyWholeSong (*song)) == getElementOrder (*other));
-            phazite::test::checkSong (*song);
-        }
-
-        phazite::makeSongTheSame (*song, phazite::test::copyWholeSong (*base));
-        phazite::makeSongTheSame (*song, forwardSong);
-        CHECK (getElementOrder (phazite::test::copyWholeSong (*song)) == getElementOrder (forwardSong));
-    }
-}
-
-TEST_CASE ("A version's AUTOMATION takes the place the version gives it among the song's elements, the song's own stays where "
-           "it is for a version without curves, and the TEMPOMAP stays where both have it")
-{
-    // The song's AUTOMATION and TEMPOMAP are places every song that holds its values has (CurvesArea.h, TempoMapArea.h): a
-    // song holds its AUTOMATION from its opening on, after what its file held where the file had none (a file written while
-    // the song had no curve). So a curve drawn in a song opened before its first section was made, and one drawn in a song
-    // opened again after it, stand on either side of its SECTIONS in the songs' files. A song made like either, or the same
-    // as either, puts its AUTOMATION where that one has it (ApplySong.cpp: placePlaceholdersLike()); one made like a
-    // version without curves, whose file has no AUTOMATION, leaves its own where it is; and made like the same version
-    // again, it moves nothing.
-    const auto base = phazite::createSong();
-    const auto track = phazite::ensureTracks (*base, 1).front();
-    const auto synth = phazite::test::addOwnDevice (*base, track, phazite::devices::Synth::typeID);
-    base->getUndoManager().clearUndoHistory();
-    const phazite::ParameterRef cutoff { synth, "cutoff" };
-
-    const auto drawCurve = [&cutoff] (phazite::Song& song)
-    {
-        const phazite::UndoStep step (song, "Draw");
-        phazite::addPoint (song, cutoff, { at (0.0), 0.5f });
-    };
-
-    const auto makeSection = [] (phazite::Song& song)
-    {
-        const phazite::UndoStep step (song, "Make It");
-        phazite::insertSection (song, at (0.0), { .name = "Verse", .length = lasting (16.0) });
-    };
-
-    // The curve drawn before the first section is made: the AUTOMATION before the SECTIONS.
-    const auto drawnFirst = phazite::makeSong (phazite::test::copyWholeSong (*base));
-    REQUIRE (drawnFirst != nullptr);
-    drawCurve (*drawnFirst);
-    makeSection (*drawnFirst);
-
-    // The first section made, the song opened again, then the curve drawn: the AUTOMATION after the SECTIONS.
-    const auto sectionFirst = phazite::makeSong (phazite::test::copyWholeSong (*base));
-    REQUIRE (sectionFirst != nullptr);
-    makeSection (*sectionFirst);
-    const auto drawnLast = phazite::makeSong (phazite::test::copyWholeSong (*sectionFirst));
-    REQUIRE (drawnLast != nullptr);
-    drawCurve (*drawnLast);
-
-    const auto curveBefore = phazite::test::copyWholeSong (*drawnFirst), curveAfter = phazite::test::copyWholeSong (*drawnLast);
-    const auto noCurves = phazite::test::copyWholeSong (*sectionFirst);
-    const auto placeOf = [] (const juce::ValueTree& song, const juce::Identifier& type)
-    { return song.indexOf (song.getChildWithName (type)); };
-
-    REQUIRE (placeOf (curveBefore, schema::AUTOMATION) >= 0);
-    REQUIRE (placeOf (curveBefore, schema::AUTOMATION) < placeOf (curveBefore, schema::SECTIONS));
-    REQUIRE (placeOf (curveAfter, schema::AUTOMATION) > placeOf (curveAfter, schema::SECTIONS));
-    REQUIRE (placeOf (noCurves, schema::AUTOMATION) < 0);
-
-    const auto tempoMapPlace = placeOf (curveBefore, schema::TEMPOMAP);
-    REQUIRE (tempoMapPlace >= 0);
-    REQUIRE (placeOf (curveAfter, schema::TEMPOMAP) == tempoMapPlace);
-    REQUIRE (placeOf (noCurves, schema::TEMPOMAP) == tempoMapPlace);
-
-    SUBCASE ("made like the version, both ways, and like one without curves, each one exact undo step; again, nothing moves")
-    {
-        const auto song = phazite::makeSong (curveBefore.createCopy()); // a copy: the song holds the tree it is made of
-        REQUIRE (song != nullptr);
-        UndoCheck undo (*song);
-
-        const auto makeLike = [&] (const juce::String& name, const juce::ValueTree& other)
-        {
-            INFO (name.toStdString());
-            const auto order = getElementOrder (song->getState());
-            undo.check (name,
-                        [&]
-                        {
-                            const phazite::UndoStep step (*song, name);
-                            phazite::makeSongLike (*song, other);
-                        });
-            CHECK (getElementOrder (phazite::test::copyWholeSong (*song)) == getElementOrder (other));
-            CHECK (placeOf (song->getState(), schema::TEMPOMAP) == tempoMapPlace);
-
-            if (placeOf (other, schema::AUTOMATION) < 0)
-                CHECK (getElementOrder (song->getState()) == order); // its own AUTOMATION where it was
-
-            // The same version again moves nothing, and writes nothing: its step is none, so one Undo takes the first back.
-            const auto made = getElementOrder (song->getState());
-            {
-                const phazite::UndoStep step (*song, name + " Again");
-                phazite::makeSongLike (*song, other);
-            }
-            CHECK (getElementOrder (song->getState()) == made);
-
-            phazite::undo (*song);
-            CHECK (getElementOrder (song->getState()) == order);
-            phazite::redo (*song);
-            phazite::test::checkSong (*song);
-        };
-
-        makeLike ("The Curve After", curveAfter);
-        makeLike ("The Curve Before", curveBefore);
-        makeLike ("No Curves", noCurves);
-        makeLike ("The Curve After Again", curveAfter);
-        makeLike ("No Curves Again", noCurves);
-        makeLike ("The Curve Before Again", curveBefore);
-        undo.walkBackAndForth();
-    }
-
-    SUBCASE ("made the same as the version, both ways, outside the history; again, nothing moves")
-    {
-        const auto song = phazite::makeSong (curveBefore.createCopy()); // a copy: the song holds the tree it is made of
-        REQUIRE (song != nullptr);
-
-        for (const auto* other : { &curveAfter, &curveBefore, &noCurves, &curveAfter, &noCurves, &curveBefore })
-        {
-            const auto order = getElementOrder (song->getState());
-            phazite::makeSongTheSame (*song, *other);
-            CHECK (getElementOrder (phazite::test::copyWholeSong (*song)) == getElementOrder (*other));
-            CHECK (placeOf (song->getState(), schema::TEMPOMAP) == tempoMapPlace);
-
-            if (placeOf (*other, schema::AUTOMATION) < 0)
-                CHECK (getElementOrder (song->getState()) == order);
-
-            const auto made = getElementOrder (song->getState());
-            phazite::makeSongTheSame (*song, *other);
-            CHECK (getElementOrder (song->getState()) == made);
-            phazite::test::checkSong (*song);
-        }
-    }
 }

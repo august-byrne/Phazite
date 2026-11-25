@@ -825,56 +825,6 @@ TEST_CASE ("Song values' device store: a version applied makes the store the ver
     phazite::test::checkSong (p.song);
 }
 
-//==============================================================================
-TEST_CASE ("Song values' device store: a DEVICE that comes into the song with the store's properties and VALUEs has them taken in, "
-           "and the DEVICE out of the tree")
-{
-    const TestPlugin testPlugin;
-    phazite::test::TestSong s;
-    auto& song = *phazite::findSong (s.context);
-    auto* values = song.getValues();
-    const auto adopted = values->countDeviceStoreAdopted();
-
-    // A plug-in's element made by hand, with a state, a program and a value, put on a track outside the history (as a track a
-    // merge's choice brings in whole holds its devices).
-    juce::MemoryBlock state ("state", 5);
-    const auto id = DeviceID::fromRaw (song.makeID());
-    juce::ValueTree device (phazite::schema::DEVICE);
-    device.setProperty (phazite::schema::deviceID, (juce::int64) id.getRaw(), nullptr);
-    device.setProperty (phazite::schema::deviceType, phazite::schema::deviceIsPlugin, nullptr);
-    device.setProperty (phazite::schema::pluginName, "Test Effect", nullptr);
-    device.setProperty (phazite::schema::pluginState, phazite::writeBytes (state), nullptr);
-    device.setProperty (phazite::schema::pluginProgram, 1, nullptr);
-    device.setProperty (phazite::schema::deviceWindowX, 5, nullptr);
-    device.setProperty (phazite::schema::deviceWindowY, 6, nullptr);
-    device.appendChild (
-        juce::ValueTree (phazite::schema::VALUE, { { phazite::schema::valueParameter, "7" }, { phazite::schema::valueSetByHand, 0.5 } }),
-        nullptr);
-
-    {
-        const phazite::Song::OutsideHistory outside (song);
-        song.getState().getChildWithName (phazite::schema::MASTER).appendChild (device, nullptr); // the one channel the tree holds
-    }
-
-    CHECK (values->countDeviceStoreAdopted() == adopted + 1);
-    CHECK_FALSE (phazite::holdsStoreIn (device));
-    CHECK (phazite::getPluginState (song, id) == state);
-    CHECK (phazite::getPluginProgram (song, id) == std::optional (1));
-    CHECK (phazite::findPluginValue (song, id, "7") == std::optional (0.5f));
-    CHECK (phazite::getWindowPlace (song, id) == std::optional (phazite::WindowPlace { .x = 5, .y = 6 }));
-
-    // The DEVICE taken out of the tree as it came in (the devices' keeper's safety net, DevicesArea.h), so that nothing can be
-    // added to it in the song's tree afterwards.
-    CHECK_FALSE (device.getParent().isValid());
-
-    // In whole state, written back: its one VALUE, after its other children.
-    const auto copy = phazite::test::copyDevice (song, id);
-    REQUIRE (copy.getNumChildren() == 1);
-    CHECK (copy.getChild (0)[phazite::schema::valueParameter].toString() == "7");
-    CHECK (phazite::readBytes (copy[phazite::schema::pluginState].toString()) == std::optional (state));
-    phazite::test::checkSong (song);
-}
-
 TEST_CASE ("Song values' device store: the loader keeps a plug-in's and a chain's store as the song holds it, a file Phazite wrote "
            "left as it is")
 {

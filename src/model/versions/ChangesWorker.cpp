@@ -72,7 +72,7 @@ namespace
     // and a send by its ID, in the order of its kind.
     juce::ValueTree copyTrack (const SongState& state, TrackID id)
     {
-        const auto* track = state.tracks.has_value() ? state.tracks->find (id) : nullptr;
+        const auto* track = state.tracks.find (id);
 
         if (track == nullptr)
             return {};
@@ -100,8 +100,8 @@ namespace
     // The song's own parts (its properties, tempo map, sections, chord lane and MIDI links: all that the song's own line
     // compares, SongDiff.h: findSongChange()) and its tracks' order and names: each track with its ID, kind and name in its
     // folder, and the master's ID. What the song's own line and the lines' names and order are worked out from, without
-    // copying any track's parts. Each of the song's own parts whole, from a state (SongState.h: writeSongPart()), where its
-    // root holds the place. The tracks' three fields read from the state's tracks in the song's order (each folder before the
+    // copying any track's parts. Each of the song's own parts whole, from a state (SongState.h: writeSongPart()), where the
+    // state holds it. The tracks' three fields read from the state's tracks in the song's order (each folder before the
     // tracks in it, top to bottom), never a track copied. Each stub holds them as the writer writes them (TracksValue.h:
     // writeTrackElement()): the ID a number, the kind its word, the name where it has one. Any thread: made on the history's
     // thread (work()).
@@ -114,56 +114,46 @@ namespace
         writeSongOwnPropertiesInto (own, state.songOwn, state.songStanding, state.songOutside);
         own.setProperty (schema::nextID, (juce::int64) state.nextID, nullptr);
 
-        for (const auto place : { RootPlace::tempoMap, RootPlace::sections, RootPlace::chordLane, RootPlace::midiLinks })
-            if (state.holdsPlace (place))
-                if (auto part = writeSongPart (state, place); part.isValid())
-                    own.appendChild (part, nullptr);
+        for (const auto* type : { &schema::TEMPOMAP, &schema::SECTIONS, &schema::CHORDLANE, &schema::MIDILINKS })
+            if (auto part = writeSongPart (state, *type); part.isValid())
+                own.appendChild (part, nullptr);
 
         // The kinds' words as values, made once: a text made for each track would allocate.
         static const juce::var trackWord (schema::trackIsTrack), folderWord (schema::trackIsFolder), returnWord (schema::trackIsReturn);
         juce::ValueTree list (schema::TRACKS);
+        const auto& tracks = state.tracks;
 
-        if (state.tracks.has_value())
+        // Each list's stubs, a folder's stub holding those of the tracks in it, in each list's order.
+        const std::function<void (juce::ValueTree&, TrackID)> addList = [&tracks, &addList] (juce::ValueTree& parent, TrackID folder)
         {
-            const auto& tracks = *state.tracks;
+            const auto* ids = tracks.findList (folder);
 
-            // Each list's stubs, a folder's stub holding those of the tracks in it, in each list's order.
-            const std::function<void (juce::ValueTree&, TrackID)> addList = [&tracks, &addList] (juce::ValueTree& parent, TrackID folder)
+            if (ids == nullptr)
+                return;
+
+            for (const auto id : *ids)
             {
-                const auto* ids = tracks.findList (folder);
+                const auto* value = tracks.tracks.find (id.getRaw());
 
-                if (ids == nullptr)
-                    return;
+                if (value == nullptr)
+                    continue;
 
-                for (const auto id : *ids)
-                {
-                    const auto* value = tracks.tracks.find (id.getRaw());
+                juce::ValueTree stub (schema::TRACK);
+                stub.setProperty (schema::trackID, (juce::int64) id.getRaw(), nullptr);
+                stub.setProperty (schema::trackKind, value->isFolder() ? folderWord : value->isReturn() ? returnWord : trackWord, nullptr);
 
-                    if (value == nullptr)
-                        continue;
+                if (value->name.has_value() && value->name->isNotEmpty())
+                    stub.setProperty (schema::trackName, *value->name, nullptr);
 
-                    juce::ValueTree stub (schema::TRACK);
-                    stub.setProperty (schema::trackID, (juce::int64) id.getRaw(), nullptr);
-                    stub.setProperty (schema::trackKind,
-                                      value->isFolder()   ? folderWord
-                                      : value->isReturn() ? returnWord
-                                                          : trackWord,
-                                      nullptr);
+                addList (stub, id);
+                parent.appendChild (stub, nullptr);
+            }
+        };
 
-                    if (value->name.has_value() && value->name->isNotEmpty())
-                        stub.setProperty (schema::trackName, *value->name, nullptr);
-
-                    addList (stub, id);
-                    parent.appendChild (stub, nullptr);
-                }
-            };
-
-            addList (list, {});
-        }
-
+        addList (list, {});
         own.appendChild (list, nullptr);
 
-        if (const auto master = state.tracks.has_value() ? state.tracks->master.id : TrackID(); master.isValid())
+        if (const auto master = tracks.master.id; master.isValid())
             own.appendChild (juce::ValueTree (schema::MASTER, { { schema::trackID, (juce::int64) master.getRaw() } }), nullptr);
 
         return own;
@@ -458,7 +448,7 @@ ChangesWorker::Result ChangesWorker::work (const Request& request)
     {
         // Every part again, from the whole song.
         const auto now = writeSongTree (taken);
-        countCopied (taken.tracks.has_value() ? (juce::int64) taken.tracks->tracks.size() + 1 : 1);
+        countCopied ((juce::int64) taken.tracks.tracks.size() + 1);
         s.lines.clear();
         s.differingCurves.clear();
         s.automatableNow.clear();
@@ -503,7 +493,7 @@ ChangesWorker::Result ChangesWorker::work (const Request& request)
     {
         for (const auto id : request.tracks)
         {
-            const auto master = taken.tracks.has_value() ? taken.tracks->master.id : TrackID();
+            const auto master = taken.tracks.master.id;
             countCopied (1);
             compareTrack (id, copyTrack (taken, id == masterKey ? master : TrackID::fromRaw (id)));
         }

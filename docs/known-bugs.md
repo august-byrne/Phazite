@@ -24,7 +24,7 @@ found by reading while the automation's curves were made values (2026-11-22), an
 the review of the tempo map's listener (roadmap step S5.20, 2026-11-22), and is fixed for the tempo map but where the
 side before can't be read; what is left of it waits for the other keyed elements' areas. 240 was found by the review of
 the tempo map's switch (the same step, 2026-11-22), and waits for the owner's decision of what a tempo change moved
-onto another's beat does. 248 was found by the review of the fix of 246 (2026-11-27).
+onto another's beat does.
 
 What is open and is not a bug (quality gaps, design changes, missing features, tests and structure) is in
 [backlog.md](backlog.md).
@@ -215,14 +215,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   `chooseClash()` is told that the parting held none; the tempo map does it through its value (`chooseTempoMapClash()`),
   and each other area can as it becomes a value (roadmap step S5.20). `tests/VersionsMergeWaitingTests.cpp` checks the
   tempo map's (the case of a conflict on a tempo's bpm, ramp and a tempo both branches added, "chosen each way").
-- **248. After Back to Now, an Undo can bring back a track with the mute or row of a version's track of its ID.** A
-  version that holds a track Now deleted (its ID below Now's count of IDs), where Now kept no entry of its switches or
-  row (unmuted, never resized), has the version's mute, solo, mode and row written outside the history as it opens
-  (`makeTrackLeavesLike()`, `src/model/versions/ApplySong.cpp`); Back to Now keeps entries below the count, so the Undo
-  that brings Now's track back gives it the version's. Windows' places of devices the same. To fix: Back to Now puts
-  the four kept values (the tracks' switches and view, the devices' store's kept entries and the windows' places) back
-  as they were when the version opened (the copy taken then is a `SongState`, which holds them whole), which makes
-  `withoutIDsFrom()` unneeded; with a test in `tests/VersionsOpenTests.cpp`.
 
 ## Devices and playback
 

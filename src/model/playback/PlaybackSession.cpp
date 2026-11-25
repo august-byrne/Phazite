@@ -31,7 +31,6 @@ namespace
 PlaybackSession::PlaybackSession (Song& s, PlaybackHost& h)
     : song (&s),
       host (h),
-      songState (s.getState()),
       plugins (s, h.getPluginHost(), h.getEngine().getSampleRate()),
       player (s, &plugins),
       writer (s, *this)
@@ -45,7 +44,6 @@ PlaybackSession::PlaybackSession (Song& s, PlaybackHost& h)
     if (auto* values = song->getValues())
         values->addListener (this);
 
-    songState.addListener (this);
     getSessions().push_back (this);
     host.add (*this);
 
@@ -65,7 +63,6 @@ PlaybackSession::~PlaybackSession()
     onProblem = nullptr; // what owns the reporter may be going too
     placeTakesNow();     // ended, and kept (a fall-back: ProjectSession places them before it closes the project)
     cancelPendingUpdate();
-    songState.removeListener (this);
     song->removeParameterListener (this);
     song->removeHistoryListener (this);
 
@@ -90,21 +87,6 @@ PlaybackSession::~PlaybackSession()
 AudioIO& PlaybackSession::getAudioIO() const noexcept
 {
     return host.getAudioIO();
-}
-
-void PlaybackSession::changed (const juce::ValueTree& parent, const juce::ValueTree& child)
-{
-    if (isHeardAsKept (parent, child))
-        return; // the areas': tempoMapChanged(), chordLaneChanged(), curvesChanged(), midiLinksChanged()
-
-    // The song's MIDILINKS added or taken out, the place of its links (with the first link, or a version's): no plan holds
-    // them, and the links in it are the area's to tell (midiLinksChanged()).
-    if (child.hasType (schema::MIDILINKS))
-        return;
-
-    // What else a live song's tree tells (its CHORDLANE or SECTIONS added or taken out, its elements put in another order, an
-    // element a safety net refused in a step left where it was put until the step's Undo: SongValues.h), in a new plan.
-    triggerAsyncUpdate();
 }
 
 void PlaybackSession::tracksChanged (const std::vector<TrackChange>& tracks, const std::vector<TrackID>& reordered, const SongTracks& now)

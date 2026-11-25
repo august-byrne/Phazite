@@ -61,10 +61,6 @@ struct ChordLaneValue
     // and placed alike.
     bool isSameAs (const ChordLaneValue&) const noexcept;
     bool operator== (const ChordLaneValue&) const;
-
-    // Whether two values share both kinds of entries (placed aside): what the area's teller tells a change by
-    // (ChordLaneArea.h), a lane placed or taken away without its entries changing being the tree's to tell, as it was.
-    bool holdsSameEntriesAs (const ChordLaneValue&) const noexcept;
 };
 
 // The song's chord lane read from its CHORDLANE element (an invalid tree reads as an empty lane, not placed; a valid one is
@@ -74,25 +70,19 @@ struct ChordLaneValue
 // degree that is absent as 1, kept within 1 to 7; an accidental absent as 0, kept within -1 to 1; an inversion absent as 0
 // (the chord lane's code keeps it within its type's notes, which this knows nothing of); a key's root kept within 0 to 11,
 // or none where it has none. Nothing else is kept within a range here, which the loader does (model/project/internal/
-// Project.h, makeConsistent()). A child of another type, and a property Phazite doesn't know, are no part of it. What reads
-// the lane of a song that keeps everything in its tree (Chords.h: getChordLaneValue()), and the tests.
+// Project.h, makeConsistent()). A child of another type, and a property Phazite doesn't know, are no part of it. What the
+// tests read a lane by.
 ChordLaneValue readChordLaneValue (const juce::ValueTree& chordLaneElement);
 
-// The song's chord lane read from a CHORDLANE as the song holds one (SongValues.h: the loaded lane Song::holdValues() takes
-// in, the keeper's safety net, a version's lane and a merge's choice, ChordLaneArea.h; placed as readChordLaneValue() places
-// it): each kind's children in the
-// element's order, each property as its description reads it (SongText.h: readDescribed()): a start that is absent or no
-// finite number as 0, a length as 4, a degree as 1, an accidental and an inversion as 0, each within its range and made
-// whole where it is a whole one; a key's root within 0 to 11 where it is a finite number, else none (as the loader leaves
-// it); a chord's type and a key's scale as their words are written. A child of another type, and a property Phazite
-// doesn't know, are no part of it. Its chords kept apart (keepChordsApart(), below): a file from others may hold chords that
-// overlap, or one without a length (4 beats long, its description's fallback) before another.
+// The song's chord lane read from a CHORDLANE as the song holds one (a song made of a file's state, SongState.h: readSongTree();
+// a version's lane and a merge's choice, ChordLaneArea.h; placed as readChordLaneValue() places it): each kind's children in the
+// element's order, each property as its description reads it (SongText.h: readDescribed()): a start that is absent or no finite
+// number as 0, a length as 4, a degree as 1, an accidental and an inversion as 0, each within its range and made whole where it
+// is a whole one; a key's root within 0 to 11 where it is a finite number, else none (as the loader leaves it); a chord's type
+// and a key's scale as their words are written. A child of another type, and a property Phazite doesn't know, are no part of it.
+// Its chords kept apart (keepChordsApart(), below): a file from others may hold chords that overlap, or one without a length (4
+// beats long, its description's fallback) before another.
 ChordLaneValue readHeldChordLane (const juce::ValueTree& chordLaneElement);
-
-// The lane with an element of it taken in, as readHeldChordLane() reads one, after the others of its kind (where an element
-// appended to the lane is read), its chords kept apart (keepChordsApart()): a CHORD or a CHORDKEY; the lane as it is for any
-// other element. The keeper's safety net.
-ChordLaneValue withEntryTaken (const ChordLaneValue&, const juce::ValueTree& entry);
 
 // How near two beats of the lane are that count as one (a millionth of a beat): a chord that reaches past the next one's
 // start by no more than this doesn't overlap it, and one no longer than this has no length. The chord lane's code makes

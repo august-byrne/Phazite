@@ -58,9 +58,9 @@ public:
     // modulated by it, 4 a modulator's parameter (modulation's); 5 a device's value set by hand (the devices'); 6 a chain
     // muted or soloed (the devices' store); 7 a track muted or not (the tracks' switches); 8 an automation point moved (the
     // curves'); 9 a section renamed (the sections'); 10 a tempo change (the tempo map's); 11 a chord (the chord lane's); 12
-    // the key set last (the song's standing); 13 the song's MIDILINKS put in or taken away while it holds no link, as a
-    // version's links give it (the root's places); 14 a MIDI link (the MIDI links'); 15 the project's notes (the song's own);
-    // 16 a note added (a clip's notes); 17 a clip muted or not (the clips'); 18 a track renamed (the tracks').
+    // the key set last (the song's standing); 13 the song's chord lane placed or taken away while it holds no chord or
+    // key, as a version's lane gives it (the chord lane's); 14 a MIDI link (the MIDI links'); 15 the project's notes
+    // (the song's own); 16 a note added (a clip's notes); 17 a clip muted or not (the clips'); 18 a track renamed (the tracks').
     static constexpr int numOneAreaKinds = 19;
     void editOneArea (int kind);
 

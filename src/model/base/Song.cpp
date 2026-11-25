@@ -8,8 +8,7 @@ namespace phazite
 {
 namespace
 {
-    // Set on the message thread, read wherever a song is made: the checks of a song read from the versions make one on the
-    // history's thread (model/versions/SongPieces.cpp).
+    // Set and read on the message thread, where songs are made; atomic for a test's thread that reads it.
     std::atomic<int> undoSteps { Song::defaultUndoSteps };
 } // namespace
 
@@ -23,18 +22,9 @@ int Song::getUndoSteps()
     return undoSteps;
 }
 
-Song::Song (juce::ValueTree s)
-    : state (std::move (s))
-{
-    // By steps alone: JUCE weighs each change by the size of its record, not by what it holds, so a budget of units kept as
-    // few as 30 steps after a drag of many notes.
-    undoManager.stepsKept = undoSteps.load();
-    undoManager.keepMoreSteps (0);
-}
-
 Song::~Song()
 {
-    values = nullptr; // its keeper listens to the tree
+    values = nullptr; // its areas' tellers, before the history their areas hold actions in
 
     if (ownCacheFolder != juce::File())
         ownCacheFolder.deleteRecursively();
@@ -107,7 +97,6 @@ void Song::removePendingWriter (PendingWriter* writer)
 
 void Song::writePending()
 {
-    // None but on the message thread: a song read or checked on another thread (model/versions/SongPieces.cpp) has none.
     pendingWriters.call ([] (PendingWriter& writer) { writer.writePending(); });
 }
 

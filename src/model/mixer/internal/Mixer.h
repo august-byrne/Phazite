@@ -42,14 +42,8 @@ struct DeviceSlot;
 // device, a container or a chain; nullptr for one the song hasn't), a pointer into that value, the same; and whether the song
 // holds one, whether one is a plug-in and whether one turns notes into sound (DeviceValue::isInstrument()). Each a look in
 // the area by an ID, which allocates nothing (counted: countDeviceLooks()), never a walk of the song. Keep no pointer or
-// reference across a writer (a set makes a new value), nor across a turn of the message loop. A song that holds no values
-// (the loader's, as it opens; the tests' check of a song made of a tree) reads its tree: all of them read whole again
-// (DevicesValue.h: readDevicesValue(), counted: countDevicesReadAsValues()), kept for the thread in place of what was read
-// before unless equal to it, so that what reads the one tree several times holds what it found while the tree doesn't change;
-// one by its ID, its one element found and read whole (counted the same), kept for the thread among the last 16 read: its
-// pointer is good through the next 15 looks on that thread that find a device of a song without values, whatever the song.
-// The loader's checks of the curves and the MIDI links read neither (Parameters.h: locateParameter() with the devices'
-// fields given); its check of the sidechains' loops reads one for a pad's track (getDeviceChannel()).
+// reference across a writer (a set makes a new value), nor across a turn of the message loop. The loader's
+// checks read a file's tree, never a song (Parameters.h: locateParameterIn(); Sidechain.h: forgetSidechainLoopsIn()).
 const SongDevices& getDevicesValue (const Song&);
 const DeviceValue* findDevice (const Song&, DeviceID);
 bool hasDevice (const Song&, DeviceID);
@@ -145,7 +139,7 @@ juce::ValueTree copyWholeDevice (const Song&, DeviceID);
 
 //==============================================================================
 // The devices' setters (roadmap step S5.20): every writer of a device, a container or a chain of a live song works its next
-// value out and sets it through these, the only functions (with the keeper and the versions' pass) that set the devices'
+// value out and sets it through these, the only functions (with the versions' pass) that set the devices'
 // area (SongValues.h: setDevice(), eraseDevice(), setDeviceListOrder(), setAllDevices()), in the mode of the moment: in the
 // step in progress, or outside the history while the song is written outside it (Song::OutsideHistory). Each computes the
 // area's next value (immer: a path copied, the rest shared) and sets it once; the narrow ones change one entry of one map. A
@@ -248,14 +242,12 @@ DeviceID setInstrument (Song&, TrackID, MadeDevices instrument);
 void copyDevices (Song&, CopiedIDs& copied);
 
 // What a track's removal takes of the devices (model/arrangement/internal/Tracks.h: eraseTrackHoldings()): every device,
-// container and chain on these channels (tracks by their IDs, the master by its), in one set of the devices' area, each
-// channel's list looked in alone, nothing walked of the rest; what the store holds of each stays (DeviceStoreArea.h). Whether
-// it changed the song's devices. And the devices, containers and chains a channel's element holds (its DEVICE and CONTAINER
-// children, each container's CHAINs and their DEVICEs, not those of the tracks in it) given to the song's channel of its ID
-// (a merge's choice of a whole track or the master: Tracks.h, chooseTrackClash()), as the keeper takes in those of a channel
-// that comes into the song with them (model/base/internal/DevicesArea.h): each read as the song holds one (DevicesValue.h:
-// readHeldDevice()), in their order, after the channel's others, one of an ID the song holds left out with what it holds, in
-// one set of the area.
+// container and chain on these channels (tracks by their IDs, the master by its), in one set of the devices' area, each channel's
+// list looked in alone, nothing walked of the rest; what the store holds of each stays (DeviceStoreArea.h). Whether it changed
+// the song's devices. And the devices, containers and chains a channel's element holds (its DEVICE and CONTAINER children, each
+// container's CHAINs and their DEVICEs, not those of the tracks in it) given to the song's channel of its ID (a merge's choice of
+// a whole track or the master: Tracks.h, chooseTrackClash()): each read as the song holds one (DevicesValue.h: readHeldDevice()),
+// in their order, after the channel's others, one of an ID the song holds left out with what it holds, in one set of the area.
 bool eraseChannelDevices (Song&, const std::vector<TrackID>& channels);
 void takeDevicesOf (Song&, const juce::ValueTree& channel);
 
@@ -267,13 +259,13 @@ void takeDevicesOf (Song&, const juce::ValueTree& channel);
 void removeDevice (Song&, DeviceID);
 
 // The IDs of the items the song holds that something can name (a curve, a modulation, a MIDI link, a send): its tracks,
-// their faders and VCAs and the master's, its devices, containers and chains, its sends,
-// modulators and macros; from its tree (Schema.h: holdsID(), its clips and its automation aside, which hold none that these
-// name) and its values (IDsHeld.h: forEachNameableIDHeld()), a song without values from its tree alone. One walk of the
-// song, gathered once for a pass that asks of many: the one answer to "does the song hold what this names", which
-// forgetWhatNamesTheGone() asks at every removal and automation asks of a curve's owner (Automation.cpp:
-// isCurveOwnerThere(), the loader's too, makeSong()).
+// their faders and VCAs and the master's, its devices, containers and chains, its sends, modulators and macros, from its
+// values (IDsHeld.h: forEachNameableIDHeld()); and those of a file's song's tree (Schema.h: holdsID(), its clips and its
+// automation aside, which hold none that these name: the loader's, makeSong()). Gathered once for a pass that asks of many:
+// the one answer to "does the song hold what this names", which forgetWhatNamesTheGone() asks at every removal and automation
+// asks of a curve's owner (Automation.cpp: isCurveOwnerThere(), and forgetCurvesOfGoneDevices() of a file's tree).
 std::set<std::uint64_t> getItemIDs (const Song&);
+std::set<std::uint64_t> getItemIDsIn (const juce::ValueTree& song);
 
 // Takes what names an item the song no longer holds out of it, in the caller's undo step: the modulations, the MIDI links
 // and the automation curves of a device's, a chain's, a send's, a fader's, a modulator's or a macro's parameters
@@ -349,8 +341,8 @@ juce::String getVolumeParameterID (const Song&, TrackID channel);
 juce::String getPanParameterID (const Song&, TrackID channel); // none for a plain folder's VCA
 ChannelRef findChannelOfFader (const Song&, DeviceID fader);
 
-// The same among tracks given, in the order given, then their master: what a loader that read a song without values once
-// asks (model/devices/internal/Parameters.h: locateParameter() with the song's devices and tracks given).
+// The same among tracks given, in the order given, then their master: what the loader asks of a file's tree, its tracks read
+// once (model/devices/internal/Parameters.h: locateParameterIn()).
 ChannelRef findChannelOfFaderIn (const SongTracks&, const std::vector<TrackID>& order, DeviceID fader);
 
 // A channel's volume, in decibels, and its pan, from -1 to 1 (Schema.h: channelVolume, channelPan): the song's, which its
@@ -397,13 +389,12 @@ TrackID addReturnWithEffect (Song&, TrackID sender, MadeDevices effect);
 std::vector<DeviceID> getSends (const Song&, TrackID);
 DeviceID addSend (Song&, TrackID from, TrackID returnTrack, bool preFader);
 
-// The sends as values (model/base/internal/SendsValue.h), which every reader of a send reads them as: a send by its ID (none
-// for one the song hasn't), the track it is on (none for none), a track's sends in their order (none for the master, or a
-// track the song hasn't or that sends nowhere), the return a send goes to, and a track's (first) send to a return, none for
-// none. Each a look in the sends' area of the song's values (SongValues.h: sends), by the send's ID or the track's; for a song
-// that holds no values (the loader's song, a check's copy), a walk of its tree. A control's parameter finds its send by its
-// ID, at each tick (model/devices/internal/Parameters.h: FoundParameter), and a strip's knob its track's send to a return
-// (findSendFromTo(): model/mixer/MixerModel.h, getSendLevelTo()), nothing allocated.
+// The sends as values (model/base/internal/SendsValue.h), which every reader of a send reads them as: a send by its ID (none for
+// one the song hasn't), the track it is on (none for none), a track's sends in their order (none for the master, or a track the
+// song hasn't or that sends nowhere), the return a send goes to, and a track's (first) send to a return, none for none. Each a
+// look in the sends' area of the song's values (SongValues.h: sends), by the send's ID or the track's. A control's parameter
+// finds its send by its ID, at each tick (model/devices/internal/Parameters.h: FoundParameter), and a strip's knob its track's
+// send to a return (findSendFromTo(): model/mixer/MixerModel.h, getSendLevelTo()), nothing allocated.
 std::optional<SendValue> getSendValue (const Song&, DeviceID send);
 TrackID getSendTrack (const Song&, DeviceID send);
 std::vector<SendValue> getSendValues (const Song&, TrackID);
@@ -428,9 +419,8 @@ void removeSend (Song&, DeviceID send);
 bool eraseTrackSends (Song&, const std::vector<TrackID>&);
 
 // The sends a track's element holds (its SEND children, not those of the tracks in it) given to the song's track of its ID (a
-// merge's choice of a whole track: Tracks.h, chooseTrackClash()), as the keeper takes in those of a track that comes into the
-// song with them (model/base/internal/SendsArea.h): each read as the song holds one (SendsValue.h: readHeldSend()), in their
-// order, after the track's others, one of an ID the song holds left out.
+// merge's choice of a whole track: Tracks.h, chooseTrackClash()): each read as the song holds one (SendsValue.h: readHeldSend()),
+// in their order, after the track's others, one of an ID the song holds left out.
 void takeSendsOf (Song&, const juce::ValueTree& track);
 
 // Each copied track (by the copied IDs: a duplicate's, model/arrangement/internal/Tracks.h, duplicateTracks()) given its

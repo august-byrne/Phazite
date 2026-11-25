@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The tracks' setters (internal/Tracks.h: setTrack() and those beside it): the one place, with the tracks' part of the keeper
-// (its safety net and the adoption), that changes the tracks' area of a live song (the versions' passes and a merge's choice
+// The tracks' setters (internal/Tracks.h: setTrack() and those beside it): the one place that changes the tracks' area of a
+// live song (the versions' passes and a merge's choice
 // write through it too). Each takes what the song holds from the area (getTracksValue(): no element read), works out the next
 // value (model/base/internal/TracksValue.h: withTrack(), withoutTrack(), withListOrder(); immer: a path copied, the rest
-// shared) and sets it once through the area's setters (model/base/internal/SongValues.h), in the mode of the moment. No tree is
-// written: the song's tree holds no track.
+// shared) and sets it once through the area's setters (model/base/internal/SongValues.h), in the mode of the moment.
 #include "internal/Tracks.h"
 #include "model/base/internal/DevicesArea.h"
 #include "model/base/internal/Schema.h"
@@ -81,9 +80,6 @@ bool setTrack (Song& song, TrackValue value, int index)
 {
     auto* values = song.getValues();
 
-    if (values == nullptr)
-        return false;
-
     const auto& tracks = values->tracks.get();
 
     if (value.isMaster())
@@ -105,7 +101,7 @@ bool setMasterAnew (Song& song, const TrackValue& value)
 {
     auto* values = song.getValues();
 
-    if (values == nullptr || ! value.isMaster() || ! value.id.isValid())
+    if (! value.isMaster() || ! value.id.isValid())
         return false;
 
     // Put in anew whole: told as the master made (SongTracks::masterPutIn), as its element put in anew was.
@@ -120,7 +116,7 @@ bool setNewTracks (Song& song, const std::vector<TrackValue>& made, int index, I
 {
     auto* values = song.getValues();
 
-    if (made.empty() || values == nullptr)
+    if (made.empty())
         return false;
 
     // Each one as the song would hold it with those before it, the first at its place, the rest in the folders made before
@@ -151,15 +147,12 @@ bool setNewTracks (Song& song, const std::vector<TrackValue>& made, int index, I
 bool eraseTrack (Song& song, TrackID id)
 {
     auto* values = song.getValues();
-    return values != nullptr && values->eraseTrack (song, id);
+    return values->eraseTrack (song, id);
 }
 
 bool setTrackPlace (Song& song, TrackID id, TrackID folder, int index)
 {
     auto* values = song.getValues();
-
-    if (values == nullptr)
-        return false;
 
     const auto& tracks = values->tracks.get();
     const auto* held = tracks.tracks.find (id.getRaw());
@@ -203,7 +196,7 @@ bool setTrackPlace (Song& song, TrackID id, TrackID folder, int index)
 bool setTrackListOrder (Song& song, TrackID folder, const immer::flex_vector<TrackID>& order)
 {
     auto* values = song.getValues();
-    return values != nullptr && values->setTrackListOrder (song, folder, order);
+    return values->setTrackListOrder (song, folder, order);
 }
 
 bool setTrackFields (Song& song, TrackID id, const std::function<void (TrackValue&)>& edit)

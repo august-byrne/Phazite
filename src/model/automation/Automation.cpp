@@ -341,7 +341,7 @@ namespace
             }
 
             auto* values = song.getValues();
-            const PointValue point { at, position, readCurve (curve), values != nullptr ? values->givePointKey() : std::uint64_t { 0 } };
+            const PointValue point { at, position, readCurve (curve), values->givePointKey() };
             value.points = value.points.insert (index, point);
             edited = true;
             return (int) index;
@@ -387,18 +387,13 @@ namespace
 
         // What the edit did, given the song's curves' area (above): the curve as the edit has it, in its place, or after the
         // others where it is new or was made again, or taken out where it is gone; nothing where nothing was edited, and no
-        // step where the curve is as it was (SongValues.h: setCurves()). A song that holds no values has no curves to edit.
+        // step where the curve is as it was (SongValues.h: setCurves()).
         void commit()
         {
             if (! std::exchange (edited, false))
                 return;
 
             auto* values = song.getValues();
-            jassert (values != nullptr);
-
-            if (values == nullptr)
-                return;
-
             const auto& curves = values->curves.get();
 
             if (! inSong)
@@ -1233,13 +1228,13 @@ void pasteAutomation (Song& song, const std::vector<AutomationCopy>& copies, Bea
 bool setCurveValue (Song& song, const ParameterRef& parameter, const CurveValue& value)
 {
     auto* values = song.getValues();
-    return values != nullptr && parameter.isValid() && values->setCurve (song, parameter, value);
+    return parameter.isValid() && values->setCurve (song, parameter, value);
 }
 
 bool eraseCurve (Song& song, const ParameterRef& parameter)
 {
     auto* values = song.getValues();
-    return values != nullptr && values->eraseCurve (song, parameter);
+    return values->eraseCurve (song, parameter);
 }
 
 void renameCurve (Song& song, const ParameterRef& from, const ParameterRef& to)
@@ -1251,7 +1246,7 @@ void renameCurve (Song& song, const ParameterRef& from, const ParameterRef& to)
 bool setCurveOrder (Song& song, const std::vector<ParameterRef>& order)
 {
     auto* values = song.getValues();
-    return values != nullptr && values->setCurveOrder (song, order);
+    return values->setCurveOrder (song, order);
 }
 
 AreaChoice chooseCurveClash (Song& song, const MergeClash& clash, int value, const MergeSides&)
@@ -1263,7 +1258,7 @@ AreaChoice chooseCurveClash (Song& song, const MergeClash& clash, int value, con
     // for any other clash through a curve, which a merge of two songs Phazite holds never makes, but a commit's song may come
     // from anyone: a property, the AUTOMATION itself (the curves' place, which every song that holds its values has), an
     // element in a curve, an element of another type or of another parameter, one that stands in for what its version
-    // couldn't read (SongPieces.h: holdsStandIn()), and a song that holds no values to choose it in.
+    // couldn't read (SongPieces.h: holdsStandIn()).
     if (clash.path.isEmpty() || ! clash.path[0].startsWith (schema::AUTOMATION.toString() + ":"))
         return AreaChoice::notTheArea;
 
@@ -1273,7 +1268,7 @@ AreaChoice chooseCurveClash (Song& song, const MergeClash& clash, int value, con
     const juce::ValueTree* elements[] = { &clash.baseElement, &clash.oursElement, &clash.theirsElement };
     const auto parameter = readCurveKeyText (clash.path[1].fromFirstOccurrenceOf (":", false, false));
 
-    if (clash.property.isValid() || ! juce::isPositiveAndBelow (value, 3) || ! parameter.has_value() || song.getValues() == nullptr)
+    if (clash.property.isValid() || ! juce::isPositiveAndBelow (value, 3) || ! parameter.has_value())
         return AreaChoice::refused;
 
     const auto& chosen = *elements[value];
@@ -1291,9 +1286,7 @@ AreaChoice chooseCurveClash (Song& song, const MergeClash& clash, int value, con
 
 const SongCurves& getCurvesValue (const Song& song)
 {
-    static const SongCurves none;
-    const auto* values = song.getValues();
-    return values != nullptr ? values->curves.get() : none;
+    return song.getValues()->curves.get();
 }
 
 const CurveValue* findCurve (const Song& song, const ParameterRef& parameter)
@@ -1474,17 +1467,14 @@ void addAutomationPoints (Song& song, const std::vector<ParameterPoint>& points)
     }
 }
 
-void forgetCurvesOfGoneDevices (Song& song)
+void forgetCurvesOfGoneDevices (juce::ValueTree& song)
 {
     // What is there keeps its curves, those of parameters it has now and others (a plug-in that isn't installed has none
     // until it is), by the one notion of a curve's owner (isCurveOwnerThere(): a device's, a chain's, a fader's or a VCA's,
     // a send's, a modulator's or a macro's), its items gathered once from its tree. A child that is no curve names no owner,
-    // and goes too. It runs as a song opens, before the song holds its values (Project.cpp: makeSong()), and on a song made
-    // of a tree alone (a copy as it would open: tests/SongCheck.cpp): on its tree, without an undo step, which nothing hears
-    // as the song's curves.
-    jassert (song.getValues() == nullptr);
-    auto automation = song.getState().getChildWithName (schema::AUTOMATION);
-    const auto items = getItemIDs (song);
+    // and goes too. It runs as a file's song opens, on its tree before the song is made of it (Project.cpp: makeSong()).
+    auto automation = song.getChildWithName (schema::AUTOMATION);
+    const auto items = getItemIDsIn (song);
 
     for (auto i = automation.getNumChildren(); --i >= 0;)
         if (! isCurveOwnerThere (items, readCurveParameter (automation.getChild (i)).device))
@@ -1494,9 +1484,6 @@ void forgetCurvesOfGoneDevices (Song& song)
 void forgetCurvesOfTheGone (Song& song, const std::set<std::uint64_t>& items)
 {
     auto* values = song.getValues();
-
-    if (values == nullptr)
-        return;
 
     // The next value made only once a curve is found gone, from the one held (a reference into the area, valid until the
     // set below), each gone one taken out of it; the order walked by its parameters' owners alone.

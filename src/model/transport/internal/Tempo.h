@@ -25,8 +25,7 @@ class CommandRegistry;
 //==============================================================================
 // The song's tempo map as a value (model/base/internal/TempoMapValue.h), what the readers below read it from: each kind by
 // beat, at least one of each. The song holds it in an area of its values (SongValues.h), which this refers to, valid until
-// its next change; the edits below compute the next value from it and set it once (SongValues::setTempoMap()). A song that
-// holds no values (one made to be read or checked: Song::getValues()) reads as makeDefaultTempoMap()'s.
+// its next change; the edits below compute the next value from it and set it once (SongValues::setTempoMap()).
 const TempoMapValue& getTempoMapValue (const Song&);
 
 // The song's tempo map (TempoValues.h), and its bars.
@@ -49,9 +48,9 @@ BeatPosition toBeats (const Song&, double seconds);
 double getTempoAt (const Song&, BeatPosition);
 
 // What every project's tempo map holds when it has none yet: a tempo of 120 BPM and 4/4 from the song's start, as a new
-// song is, written into its tree's TEMPOMAP before the song holds its values (model/project/internal/Project.h: makeSong(),
-// makeNewSong()). Not an undo step. Nothing for a song that holds its values, whose map is whole in its area.
-void ensureTempoMap (Song&);
+// song is, written into a file's song's TEMPOMAP before the song is made of it (model/project/internal/Project.h: makeSong()).
+// Its entries that are there stay as they are.
+void ensureTempoMap (juce::ValueTree& song);
 
 // The time edits (model/arrangement/internal/Arrangement.h): the tempos and time signatures after a beat move later by a
 // length; and those in a range go, the ones after it moving earlier by its length. The first, at the song's start, stays.

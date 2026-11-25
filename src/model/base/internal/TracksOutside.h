@@ -81,11 +81,6 @@ struct TracksOutside
 TracksOutside withTrackView (const TracksOutside&, std::uint64_t id, TrackView);
 TracksOutside withMasterView (const TracksOutside&, TrackView);
 
-// The value without the views of tracks whose IDs are at or above first (the master's stays), one walk of the map; the very
-// map where it holds none. What the song as copied drops as its count of IDs is set back to the copy's
-// (model/versions/ApplySong.cpp: makeSongAsCopied()): no step its history holds can bring such a track back.
-TracksOutside withoutIDsFrom (const TracksOutside&, std::uint64_t first);
-
 //==============================================================================
 // The conversion: the one place that reads and writes a TRACK's and the MASTER's view, and LANES and LANE, by name.
 
@@ -101,13 +96,10 @@ TrackView readViewOf (const juce::ValueTree& trackOrMaster);
 // reads as none left out.
 TrackView readHeldViewOf (const juce::ValueTree& trackOrMaster);
 
-// Of a view read so, its lanes read again from its LANES: what the tracks' keeper reads for one lane that changed
-// (TracksArea.h).
-immer::flex_vector<LaneValue> readHeldLanesOf (const juce::ValueTree& trackOrMaster);
-
 // A LANE as Phazite's code always read it (model/automation/Automation.cpp: getLanes()): its device as a cast reads its
 // text, its parameter as text, its height as an int truncates it where it has one, collapsed as a cast's bool. And as the
-// song holds it: its device one the song can count on from, else none (no lane); its height within its range, made whole.
+// song holds it: its device one the song can count on from and a parameter that isn't empty (Schema.h: laneParameter,
+// always), else none (no lane); its height within its range, made whole.
 LaneValue readLaneValue (const juce::ValueTree& lane);
 std::optional<LaneValue> readHeldLane (const juce::ValueTree& lane);
 
@@ -125,13 +117,8 @@ void writeViewInto (juce::ValueTree& trackOrMaster, const TrackView&);
 // keepTrackAsHeld() (TracksValue.h) and keepSwitchesAsHeld() (TrackSwitchesValue.h).
 bool keepViewAsHeld (juce::ValueTree trackOrMaster);
 
-// Whether a TRACK or the MASTER holds any of the view's properties described on its type, or a LANES; and those taken out of
-// it (its LANES, each of them, whatever they hold), with an undo manager (a step's) or none: what the adoption and the
-// keeper's safety net take out of an element that comes with them (TracksArea.h), and a merge's whole track out of its copy
-// (model/arrangement/Tracks.cpp: chooseTrackClash()). Nothing for any other element.
-bool holdsViewIn (const juce::ValueTree& trackOrMaster);
+// Whether a property of a TRACK or the MASTER is one of the view's described on its type.
 bool isViewProperty (const juce::ValueTree& trackOrMaster, const juce::Identifier& property); // described on its type
-void takeViewOutOf (juce::ValueTree trackOrMaster, juce::UndoManager*);
 
 // Every track's view and the master's of a song's tree (PHAZITE), read as readViewOf() reads them. For the tests, and what
 // reads them whole while the tree holds them.

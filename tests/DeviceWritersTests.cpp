@@ -9,8 +9,8 @@
 // refused); and the writers moved onto them, each one exact undo step with its name, the song checked (checkSong()), and
 // each leaving the song written as Phazite wrote it before (a copy written as its original, but for the IDs; a round trip
 // back to the text it started from): a container made around three devices and taken apart, a chain duplicated, moved and
-// removed, an instrument replaced, a container's preset added (its macros set as values, none taken in by modulation's
-// safety net), Swap's trial kept and put back, a track with a container duplicated (its devices before its lanes, as the
+// removed, an instrument replaced, a container's preset added (its macros set as values),
+// Swap's trial kept and put back, a track with a container duplicated (its devices before its lanes, as the
 // original's, its MIDI links not copied), a bus folder duplicated (its children in the original's order), a device turned
 // off and on, a mix set, a chain's fader and ranges, a
 // split and its crossovers, effects moved in and between chains, an instrument replaced in a chain, an instrument container
@@ -169,11 +169,6 @@ const dev::ParameterInfo& findParameterOf (const dev::DeviceInfo& info, dev::Uni
 
     FAIL ("no parameter of that unit");
     return info.parameters.front();
-}
-
-int countModulationAdopted (const phazite::Song& song)
-{
-    return song.getValues()->countModulationAdopted();
 }
 
 // A change checked as one undo step of its name (its Undo and Redo exact: UndoCheck), and the song checked after it.
@@ -450,15 +445,13 @@ TEST_CASE ("Device writers: a container made around three devices and taken apar
     phazite::test::UndoCheck undo (s.context);
 
     // The three effects grouped: the container in the first's place, its chain holding them as they were but for the
-    // compressor's sidechain, and its eight macros, which modulation's safety net took none of.
+    // compressor's sidechain, and its eight macros.
     const auto before = phazite::test::writeSong (song, phazite::test::SongPart::undoable); // the count of IDs aside
     const auto devicesBefore = getWrittenDevices (song, track);
-    const auto adopted = countModulationAdopted (song);
     DeviceID container;
     undo.check ("Group into Container",
                 inStep (song, "Group into Container", [&] { container = phazite::groupIntoContainer (song, { delay, compressor, eq }); }));
     REQUIRE (container.isValid());
-    CHECK (countModulationAdopted (song) == adopted);
     CHECK (phazite::getContainerMacros (song, container).size() == 8);
     CHECK (phazite::getDevices (song, track) == std::vector<DeviceID> { synth, container });
     const auto chain = phazite::getChains (song, container).front();
@@ -507,8 +500,8 @@ TEST_CASE ("Device writers: a container made around three devices and taken apar
     phazite::test::checkSong (song);
 }
 
-TEST_CASE ("Device writers: a container's preset and a track's preset come in with their macros set as values, none taken in by "
-           "modulation's safety net, and as the container they were saved from")
+TEST_CASE ("Device writers: a container's preset and a track's preset come in with their macros set as values, "
+           "and as the container they were saved from")
 {
     phazite::test::TestSong s;
     auto& song = *phazite::findSong (s.context);
@@ -525,13 +518,11 @@ TEST_CASE ("Device writers: a container's preset and a track's preset come in wi
     const auto preset = phazite::makeDevicePreset (song, container);
     phazite::test::UndoCheck undo (s.context);
 
-    const auto adopted = countModulationAdopted (song);
     const auto other = s.addTrack ("Other");
     DeviceID made;
     undo.check ("Add Device",
                 inStep (song, "Add Device", [&] { made = phazite::addDeviceFromPreset (song, host, other, preset, nullptr); }));
     REQUIRE (made.isValid());
-    CHECK (countModulationAdopted (song) == adopted);
     const auto macros = phazite::getContainerMacros (song, made);
     REQUIRE (macros.size() == 8);
     CHECK (phazite::getModulatorValue (song, macros.front())->value == doctest::Approx (0.25f));
@@ -545,7 +536,6 @@ TEST_CASE ("Device writers: a container's preset and a track's preset come in wi
     undo.check ("Add Track",
                 inStep (song, "Add Track", [&] { added = phazite::addTrackFromPreset (song, host, other, trackPreset, nullptr); }));
     REQUIRE (added.isValid());
-    CHECK (countModulationAdopted (song) == adopted);
     CHECK (withIDsInOrder (getWrittenDevices (song, added)) == withIDsInOrder (getWrittenDevices (song, track)));
     undo.walkBackAndForth();
     phazite::test::checkSong (song);
@@ -924,12 +914,10 @@ TEST_CASE ("Device writers: effects moved within a chain and to another chain, a
     phazite::test::UndoCheck undo (s.context);
 
     // An instrument container in the synth's place, the synth first in its chain, the same device; its macros set as values.
-    const auto adopted = countModulationAdopted (song);
     auto synthBefore = findHeld (song, synth);
     DeviceID container;
     checkOneStep (undo, song, "Add Instrument Container", [&] { container = phazite::addInstrumentContainer (s.context, track); });
     REQUIRE (container.isValid());
-    CHECK (countModulationAdopted (song) == adopted);
     CHECK (phazite::getDevices (song, track) == std::vector<DeviceID> { container });
     CHECK (findHeld (song, container).instrument);
     CHECK (phazite::getContainerMacros (song, container).size() == 8);

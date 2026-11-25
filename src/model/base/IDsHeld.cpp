@@ -20,9 +20,6 @@ std::uint64_t findLargestIDHeld (const Song& song)
 {
     const auto* values = song.getValues();
 
-    if (values == nullptr)
-        return 0;
-
     // Each area that holds IDs, a line each: the clips' (each clip's ID and its alias group's), the notes' (each note's ID).
     std::uint64_t largest = 0;
     largest = std::max (largest, findLargestIDIn (values->clips.get()));
@@ -61,12 +58,6 @@ std::uint64_t countHeldID (std::uint64_t largest, std::uint64_t held) noexcept
 void forEachItemIDHeld (const Song& song, const std::function<void (std::uint64_t)>& each)
 {
     const auto* values = song.getValues();
-
-    if (values == nullptr)
-    {
-        forEachIDHeld (readTracksValue (song.getState()), each); // a song without values: its tree holds its tracks
-        return;
-    }
 
     forEachIDHeld (values->tracks.get(), each);
 
