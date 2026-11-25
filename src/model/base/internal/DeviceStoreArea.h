@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The devices' store's area of the song's values (roadmap step S5.20; SongValues.h, whose recipe this follows): what the
+// The devices' store's area of the song's values (SongValues.h, whose recipe this follows): what the
 // song's devices store in the history and outside it alike (DeviceStoreValue.h: a plug-in's values set by hand, its state,
 // program, format ID and version; a chain's mute and solo), held in a keyed area (an Undo puts back only the entries its step
 // changed: ValueArea.h), and each device's window's place, held outside the history (DevicesOutside.h, an OutsideValue). Its

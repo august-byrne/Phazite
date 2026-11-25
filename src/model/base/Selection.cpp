@@ -43,8 +43,7 @@ namespace
 
 bool hasNote (const Song& song, const NoteRef& ref)
 {
-    // In its clip's value (ClipNotesValue.h), which a clip that isn't the song's has none of; and a song that keeps everything in
-    // its tree (one made to be read or checked: Song::getValues()) none.
+    // In its clip's value (ClipNotesValue.h), which a clip that isn't the song's has none of.
     const auto* values = song.getValues();
     const auto* clip = values->findClipNotes (ref.clip);
     return clip != nullptr && clip->find (ref.note) != nullptr;

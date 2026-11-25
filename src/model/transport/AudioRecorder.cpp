@@ -81,9 +81,7 @@ AudioRecorder::AudioRecorder (PlaybackSession& s)
       song (s.getSong()),
       audio (s.getAudioIO())
 {
-    if (auto* values = song.getValues())
-        values->addListener (this);
-
+    song.getValues()->addListener (this);
     audio.addChangeListener (this);
     update();
 }
@@ -91,10 +89,7 @@ AudioRecorder::AudioRecorder (PlaybackSession& s)
 AudioRecorder::~AudioRecorder()
 {
     audio.removeChangeListener (this);
-
-    if (auto* values = song.getValues())
-        values->removeListener (this);
-
+    song.getValues()->removeListener (this);
     armed.clear();
     closing = true;
     update(); // what was opened for its tracks closes
@@ -142,7 +137,7 @@ bool AudioRecorder::canRecord() const
 //==============================================================================
 void AudioRecorder::update()
 {
-    // From the song's tracks as its values hold them (the tracks' area: SongValues.h), or as its tree holds them.
+    // From the song's tracks as its values hold them (the tracks' area: SongValues.h).
     updateFrom (getTracksValue (song));
 }
 

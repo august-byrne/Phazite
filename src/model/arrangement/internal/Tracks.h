@@ -28,7 +28,7 @@ namespace phazite
 class CommandRegistry;
 
 //==============================================================================
-// The song's tracks as values, by their IDs (base/internal/TracksValue.h; roadmap step S5.20): the tracks' area of the song's
+// The song's tracks as values, by their IDs (base/internal/TracksValue.h): the tracks' area of the song's
 // values (SongValues.h: tracks) holds them. Each reader reads the area's value in place.
 
 // A track, the master too, found by its ID: what findTrack() returns, used as `if (const auto track = findTrack (song, id))
@@ -117,7 +117,7 @@ std::set<std::uint64_t> getAutomatableIDs (const Song&, TrackID);
 std::optional<ChannelRef> findChannelOnPath (const Song&, const juce::StringArray& path);
 
 //==============================================================================
-// The tracks' setters (model/arrangement/TrackWriters.cpp; roadmap step S5.20): the only code that
+// The tracks' setters (model/arrangement/TrackWriters.cpp): the only code that
 // changes the tracks' area of a live song. Every writer of the tracks' own code (this
 // file's, the versions' passes and a merge's choice, Buses.h, the channels' of Mixer.h, model/devices/internal/DrumKit.h's
 // pads, model/transport/RecordingModel.h's input and monitoring, model/notes/internal/Notes.h's key) reads a track's value by

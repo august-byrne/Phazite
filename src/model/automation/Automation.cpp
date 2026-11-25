@@ -1239,8 +1239,7 @@ bool eraseCurve (Song& song, const ParameterRef& parameter)
 
 void renameCurve (Song& song, const ParameterRef& from, const ParameterRef& to)
 {
-    if (auto* values = song.getValues())
-        values->renameCurve (song, from, to);
+    song.getValues()->renameCurve (song, from, to);
 }
 
 bool setCurveOrder (Song& song, const std::vector<ParameterRef>& order)
@@ -1333,20 +1332,6 @@ std::vector<std::uint64_t> getPointKeys (const Song& song, const ParameterRef& p
     }
 
     return keys;
-}
-
-juce::ValueTree copyWholeCurve (const Song& song, const ParameterRef& parameter)
-{
-    const auto* curve = findCurve (song, parameter);
-
-    if (curve == nullptr)
-        return {};
-
-    juce::ValueTree automation (schema::AUTOMATION);
-    writeCurveElement (parameter, *curve, automation);
-    auto element = automation.getChild (0);
-    automation.removeChild (element, nullptr);
-    return element;
 }
 
 void insertAutomationTime (Song& song, BeatPosition at, BeatDuration length)

@@ -914,11 +914,10 @@ namespace
         }
     }
 
-    // The MIDI links' area: no MIDILINK in the song's tree, its MIDILINKS there (where the song has one) an empty
-    // placeholder, and no link held without one (a whole copy writes the links in it); every number within its description's
-    // range (Schema.h), read here from the description, and a parameter named (a device's ID and a text); and one link of each
-    // controller and one of each parameter (MidiLinksValue.h: holdsOneLinkEach()). That each names a parameter the song has
-    // is the rule above, on the song whole (checkValues()'s MIDILINK).
+    // The MIDI links' area: every number within its description's range (Schema.h), read here from the description, and a
+    // parameter named (a device's ID and a text); and one link of each controller and one of each parameter (MidiLinksValue.h:
+    // holdsOneLinkEach()). That each names a parameter the song has is the rule above, on the song whole (checkValues()'s
+    // MIDILINK).
     void checkMidiLinksValue (const Song&, const SongValues& values, std::vector<std::string>& problems)
     {
         const auto& links = values.midiLinks.get();
@@ -1003,11 +1002,10 @@ namespace
             problems.push_back ("values: two of the song's points hold one key");
     }
 
-    // The sections' area: no SECTION in the song's tree, its SECTIONS there (where the song has one) an empty placeholder, and
-    // no section held without one (a whole copy writes the sections in it); every section with an ID the song can count on
-    // from, one of each (SectionsValue.h: holdsSectionsHeld()); and every number within its description's range (Schema.h),
-    // read here from the description, a length more than 0. That each ID is held once across the song, and the song's next ID
-    // past it, is the id rule above, on the song whole (findIDProblems(), which reads the sections written into whole state).
+    // The sections' area: every section with an ID the song can count on from, one of each (SectionsValue.h:
+    // holdsSectionsHeld()); and every number within its description's range (Schema.h), read here from the description, a length
+    // more than 0. That each ID is held once across the song, and the song's next ID past it, is the id rule above, on the song
+    // whole (findIDProblems(), which reads the sections written into whole state).
     void checkSectionsValue (const Song&, const SongValues& values, std::vector<std::string>& problems)
     {
         const auto& sections = values.sections.get();
@@ -1382,38 +1380,12 @@ namespace
         compareLists (keptValue->channels, read.channels, "channel");
         compareLists (keptValue->chains, read.chains, "container");
         compareLists (keptValue->chainDevices, read.chainDevices, "chain");
-
-        // What a writer wrote is what the song holds (the devices' writers: model/mixer/internal/Mixer.h): the lenient reader,
-        // as Phazite's code always read the tree (DevicesValue.h: readDevicesValue()), reads each item as the reader of what the
-        // song holds does; a value written off its steps, at its default or out of its range would read otherwise.
-        const auto lenient = readDevicesValue (whole);
-
-        for (const auto& [id, value] : read.devices)
-        {
-            const auto text = "values: device " + std::to_string (id);
-            const auto* asRead = lenient.devices.find (id);
-
-            if (asRead == nullptr)
-            {
-                problems.push_back (text + " is held but not read as Phazite's code always read it");
-                continue;
-            }
-
-            std::string fields;
-
-            for (const auto& field : findDifferingFields (*asRead, value))
-                fields += (fields.empty() ? "" : ", ") + field;
-
-            if (! fields.empty())
-                problems.push_back (text + " is written other than the song holds it, in its " + fields);
-        }
     }
 
-    // The devices' store's area (DeviceStoreValue.h): no DEVICE or CHAIN of the song's tree holds anything of it (a store's
-    // property, a VALUE, a window's place: the keeper takes them out of what comes in); each entry of an item the song holds
-    // is of an item of its kind (a plug-in's values, state, program, format ID and version; a chain's mute and solo), the
-    // entries of items it doesn't hold being kept for an Undo; and each is as the song holds it (a value within 0 and 1, a
-    // state of some bytes, a text that isn't empty, a switch on).
+    // The devices' store's area (DeviceStoreValue.h): each entry of an item the song holds is of an item of its kind (a plug-in's
+    // values, state, program, format ID and version; a chain's mute and solo), the entries of items it doesn't hold being kept
+    // for an Undo; and each is as the song holds it (a value within 0 and 1, a state of some bytes, a text that isn't empty, a
+    // switch on).
     void checkDeviceStoreValue (const Song&, const SongValues& values, std::vector<std::string>& problems)
     {
         const auto& store = values.deviceStore.get();
@@ -1815,25 +1787,13 @@ namespace
                                 "it is another)");
 
         // The root as a whole copy writes it (SongOwnArea.h: writeSongOwnIn(), its properties and its own elements), made of the
-        // values alone: what the rest of the song holds may not be whole while a test looks (a second AUTOMATION left to a
-        // step's Undo), which no copy of the song should be asked of.
+        // values alone.
         juce::ValueTree root (schema::PHAZITE);
         writeSongOwnIn (root, getSongState (song));
 
-        if (! (readSongOwnValue (root) == readHeldSongOwn (root)))
-            problems.push_back ("values: the song's own is read otherwise as Phazite's code read it and as the song holds it");
-
-        if (! (readSongStanding (root) == readHeldSongStanding (root)))
-            problems.push_back ("values: the song's key set last or its versions' names are read otherwise as Phazite's code read "
-                                "them and as the song holds them");
-
-        if (! (readSongOutside (root) == readHeldSongOutside (root)))
-            problems.push_back ("values: the song's loop, grids or other state are read otherwise as Phazite's code read them and as "
-                                "the song holds them");
-
         // And the root read as held and written back is the root (for what Phazite knows: each property the descriptions put on
         // PHAZITE but nextID, which no value holds, and those of its first LASTKEY, PIANOROLL and MERGING, each held where it is
-        // written, as it is written), so that the song's own switched to values writes the file it opened.
+        // written, as it is written), so that the song writes the file it opened.
         juce::ValueTree written (schema::PHAZITE);
         writeSongOwnInto (written, readHeldSongOwn (root), readHeldSongStanding (root), readHeldSongOutside (root));
 
@@ -1951,8 +1911,8 @@ void checkSong (const Song& song)
 Song::Ptr copyAsOpened (const Song& song)
 {
     // The lanes of devices gone left out of the song whole, before a song is made of it: a whole copy holds every channel's
-    // LANES, which the song's own tree won't once the tracks are values beside it (roadmap step S5.20). The items (the
-    // tracks, the master, their faders and devices) are those of the same whole copy.
+    // LANES, those of devices gone too, which are left out here. The items (the tracks, the master, their faders and devices) are
+    // those of the same whole copy.
     auto whole = phazite::test::copyWholeSong (song);
     std::set<std::uint64_t> items;
     findIDProblems (whole, &items);

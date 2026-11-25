@@ -162,11 +162,6 @@ std::vector<ParameterRef> getCurveKeysWithPoints (const Song&);
 std::optional<CurveValue> getCurveValue (const Song&, const ParameterRef&);
 std::vector<std::uint64_t> getPointKeys (const Song&, const ParameterRef&);
 
-// A parameter's curve as a CURVE element that holds everything the song holds of it, an invalid tree for one without: what
-// compares a curve as a file holds it (the versions' changes: model/versions/internal/ChangesWorker.h), written from its
-// value as whole state writes it (CurveValues.h: writeCurveElement()). Message thread.
-juce::ValueTree copyWholeCurve (const Song&, const ParameterRef&);
-
 //==============================================================================
 // A parameter's whole curve, by its parameter: what makes, takes out, renames, copies or moves a whole curve does it through
 // these (a copy's curves: copyCurves(); a folder made a bus and back: model/mixer/Buses.cpp; a version applied:

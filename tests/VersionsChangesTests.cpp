@@ -284,7 +284,7 @@ TEST_CASE ("A MIDI link added alone, or removed alone, is listed once, in the so
 TEST_CASE ("A curve edited and nothing else changes its device's track's line alone, and the edit undone leaves no change")
 {
     // What the changes are worked out from takes each curve that changed from the song whole (ChangesWorker.cpp: take(),
-    // Automation.h: copyWholeCurve()): a curve it didn't find there would count as gone, so that the track's line would name
+    // copyCurve()): a curve it didn't find there would count as gone, so that the track's line would name
     // its automation as changed with the curve back as the version has it.
     TestSong s;
     const auto bass = s.addTrack ("Bass");

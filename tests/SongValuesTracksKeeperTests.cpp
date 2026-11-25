@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The tracks are values of the song (roadmap step S5.20, the tracks' switch: model/base/internal/SongValues.h, tracks;
+// The tracks are values of the song (model/base/internal/SongValues.h, tracks;
 // TracksArea.h). What takes, moves, copies or renders a track is one exact undo step, its Undo and Redo putting every area
 // back with it (UndoCheck.h); a drag rolled back and a trial put back leave the tracks as they were; and what plays follows
 // a folder moved.

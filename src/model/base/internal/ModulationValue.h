@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song's modulation as a value (roadmap step S5.20, modulation's area): each modulator and macro (Schema.h: MODULATOR,
+// The song's modulation as a value: each modulator and macro (Schema.h: MODULATOR,
 // MACRO), by its ID, with what it modulates (MODULATES) and a modulator's values set by hand (its VALUES); each owner's in
 // their order (a track's or the master's own, a container's macros); in Phazite's own types, with the helpers that alone
 // write it, and the conversion between the elements and the value, the one place that reads and writes those elements by
@@ -194,20 +194,17 @@ bool isWrittenAsHeld (const juce::ValueTree& element, const ModulatorPlace&);
 // its device's ID as text, its parameter and its amount to a ten-thousandth. Its VALUES before its MODULATES.
 juce::ValueTree writeModulatorElement (const ModulatorValue&);
 
-// Every modulator and macro of a song's tree (PHAZITE), read as readModulatorValue() reads one: each TRACK's (in the track
-// list, folders' tracks too, in the song's order of its tracks) and the MASTER's, each channel's own and then those of each of
-// its CONTAINERs, each owner's in its element's order; of two with one ID (which the loader leaves none of), the first. For the
-// tests.
-SongModulation readModulationValue (const juce::ValueTree& song);
-
-// One of them by its ID, as readModulationValue() holds it (the first of the ID that reads as one), the others not read into
-// values: what the loader's checks find one with in a file's tree for each parameter they look at (Parameters.h:
-// locateParameterIn()). None for an ID no element has.
+// A modulator or a macro of a song's tree (PHAZITE) by its ID, read as readModulatorValue() reads one (the first of the ID
+// that reads as one, in the walk readHeldModulation() makes), the others not read into values: what the loader's checks find
+// one with in a file's tree for each parameter they look at (Parameters.h: locateParameterIn()). None for an ID no element
+// has.
 std::optional<ModulatorValue> readModulatorValueIn (const juce::ValueTree& song, ModulatorID);
 
-// The same as the song holds it: each read as readHeldModulator() reads it, in the same order, held together as the setters
-// hold it (withHeldModulator()); of two with one ID, the first. What the song made of its state takes in (ModulationArea.h).
-// Each element read is given to `each` too (its assertion).
+// Every modulator and macro of a song's tree (PHAZITE) as the song holds them: each TRACK's (in the track list, folders'
+// tracks too, in the song's order of its tracks) and the MASTER's, each channel's own and then those of each of its
+// CONTAINERs, each owner's in its element's order, each read as readHeldModulator() reads it, held together as the setters
+// hold it (withHeldModulator()); of two with one ID (which the loader leaves none of), the first. What the song made of its
+// state takes in (ModulationArea.h). Each element read is given to `each` too (its assertion).
 SongModulation readHeldModulation (const juce::ValueTree& song, const std::function<void (const juce::ValueTree&)>& each = {});
 
 // A modulator or a macro with one of its own properties (Schema.h: modulatorID, modulatorType, deviceOff and modulatorSteps

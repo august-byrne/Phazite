@@ -4,7 +4,7 @@
 // beat on, held until the next or ramping to it, straight or bent (TempoChange, TempoValues.h). For now a song has one time
 // signature, from its start. Clips stay on their beats when the tempo changes, as the playlist's time line is in beats:
 // those that follow the tempo stretch with it, along its changes too, the others keep their speed (TempoStretch,
-// TempoValues.h). The song holds them in its tempo map, a value beside its tree (getTempoMapValue()), which Phazite's engine
+// TempoValues.h). The song holds them in its tempo map, a value (getTempoMapValue()), which Phazite's engine
 // plays (getTempoMap()).
 #pragma once
 

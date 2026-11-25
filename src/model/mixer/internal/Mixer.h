@@ -37,7 +37,7 @@ struct DeviceSlot;
 
 //==============================================================================
 // The song's devices, containers and chains as values (model/base/internal/DevicesValue.h), the devices' area of the song's
-// values (SongValues.h: devices), which every reader of a device reads them as (roadmap step S5.20): all of them, by
+// values (SongValues.h: devices), which every reader of a device reads them as: all of them, by
 // reference, the area's value as it is now, valid until the area's next change (as getCurvesValue()); one by its ID (a
 // device, a container or a chain; nullptr for one the song hasn't), a pointer into that value, the same; and whether the song
 // holds one, whether one is a plug-in and whether one turns notes into sound (DeviceValue::isInstrument()). Each a look in
@@ -119,7 +119,7 @@ std::optional<DevicePlace> findContainerPlace (const Song&, DeviceID container);
 
 // The sound files Phazite's own devices name (Schema.h: SOUNDS, schema::isSoundFileProperty()), each by its device, its
 // property and its path as the song keeps it: a channel's devices', in the outline's order (getDeviceOutline()), for the
-// project's files; or every device's of the song, in its tree's order, for the paths the song plays (AudioClips.h:
+// project's files; or every device's of the song, in the song's order, for the paths the song plays (AudioClips.h:
 // findAudioFilePaths(), what Clean Up and an import keep).
 struct DeviceSoundFile
 {
@@ -138,7 +138,7 @@ std::vector<DeviceSoundFile> getDeviceSoundFiles (const Song&);
 juce::ValueTree copyWholeDevice (const Song&, DeviceID);
 
 //==============================================================================
-// The devices' setters (roadmap step S5.20): every writer of a device, a container or a chain of a live song works its next
+// The devices' setters: every writer of a device, a container or a chain of a live song works its next
 // value out and sets it through these, the only functions (with the versions' pass) that set the devices'
 // area (SongValues.h: setDevice(), eraseDevice(), setDeviceListOrder(), setAllDevices()), in the mode of the moment: in the
 // step in progress, or outside the history while the song is written outside it (Song::OutsideHistory). Each computes the

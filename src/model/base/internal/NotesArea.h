@@ -1,9 +1,10 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later The notes' area of the song's values (roadmap step S5.20; SongValues.h, whose recipe
-// this follows): its parts, each of which a list of SongValues.h's, WholeState.h's or IDsHeld.h's asks in turn, a line for each
-// area. Its value and the conversion of its elements are ClipNotesValue.h's. A clip's notes come into the song and leave it with
-// their clip: the clips' reader of a file's state and whole state's writer of the clips (ClipsArea.h) do the notes' part for each
-// clip, through takeClipNotes() and the clip's element, so the notes' area has no line of its own in those two lists. Message
-// thread, but for the comparison and the IDs, which read only the values they are given.
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// The notes' area of the song's values (SongValues.h, whose recipe this follows): its parts, each of which a list of
+// SongValues.h's, WholeState.h's or IDsHeld.h's asks in turn, a line for each area. Its value and the conversion of its
+// elements are ClipNotesValue.h's. A clip's notes come into the song and leave it with their clip: the clips' reader of a
+// file's state and whole state's writer of the clips (ClipsArea.h) do the notes' part for each clip, through takeClipNotes()
+// and the clip's element, so the notes' area has no line of its own in those two lists. Message thread, but for the
+// comparison and the IDs, which read only the values they are given.
 #pragma once
 
 #include "model/base/IDs.h"

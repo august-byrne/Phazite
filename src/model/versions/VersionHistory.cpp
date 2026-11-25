@@ -855,10 +855,7 @@ VersionHistory::VersionHistory (Song& s, std::function<void()> changeCallback)
     changesOutsideHistory = song.getChangesOutsideHistory();
     outsideSeen = song.getDeviceChangesOutsideHistory();
     pluginsLoadingSeen = getPluginsLoading (song).size();
-
-    if (auto* values = song.getValues())
-        values->addListener (this);
-
+    song.getValues()->addListener (this);
     open();
     startTimer (tickMilliseconds);
 }
@@ -874,8 +871,7 @@ VersionHistory::~VersionHistory()
 
     stopTimer();
     backgroundBounce = nullptr; // cancelled, before what it renders goes
-    if (auto* values = song.getValues())
-        values->removeListener (this);
+    song.getValues()->removeListener (this);
 
     // A version open: the song as it was again, so that whatever holds it on (a test's song, which outlives its project) holds
     // its own. Its owner's work as it goes back (VersionsModel.cpp) needs a history, which goes: the trial alone is put back.
@@ -2919,9 +2915,9 @@ std::set<std::uint64_t> VersionHistory::findReported (const ReportCounts& then, 
 
 void VersionHistory::baselineChanged (bool songIsIt)
 {
-    // The clips whose notes were heard to change marked first, as the tree's changes mark at once: the comparison with the
-    // version compared keeps them, and the one with the baseline starts again below, so that none is left waiting for the
-    // next ask (which kept mayHaveChanges() true with no changes since a version saved at once).
+    // The clips whose notes were heard to change marked first: the comparison with the version compared keeps them, and the one
+    // with the baseline starts again below, so that none is left waiting for the next ask (which kept mayHaveChanges() true with
+    // no changes since a version saved at once).
     markHeard();
 
     // Compared again with the song from here on, in the background: at once known to be none, where the song is it.
@@ -3068,10 +3064,9 @@ void VersionHistory::markLineKey (std::uint64_t key)
 
 void VersionHistory::tracksChanged (const std::vector<TrackChange>& tracks, const std::vector<TrackID>& reordered, const SongTracks&)
 {
-    // A change of the song as its tree's are, in tracks: each one's line by its ID (the master's by its key), as markChanged()
-    // and markChildChanged() marked the TRACK; the song's order of them, and their names ("Track 3"), for one added or taken
-    // away, come to another folder, renamed or of another kind, and for tracks in another order; every line where the
-    // master's element came anew, as the MASTER added or taken away marked them all.
+    // A change of the song, in tracks: each one's line by its ID (the master's by its key); the song's order of them, and their
+    // names ("Track 3"), for one added or taken away, come to another folder, renamed or of another kind, and for tracks in
+    // another order; every line where the master came anew (a merge's choice of the whole MASTER).
     ++songChanges;
     edited();
     auto order = ! reordered.empty();
@@ -3117,8 +3112,8 @@ void VersionHistory::tracksViewChanged (const std::vector<TrackID>&, bool)
 
 void VersionHistory::songOwnChanged (const SongOwnChange& change)
 {
-    // A change of the song as its tree's are, of its own: a merge waiting (Schema.h: MERGING) found again as it is asked for;
-    // and every part, MERGING too, counted, the song's own line (as markChanged() and markChildChanged() marked them).
+    // A change of the song, of its own: a merge waiting (Schema.h: MERGING) found again as it is asked for; and every part,
+    // MERGING too, counted, the song's own line.
     ++songChanges;
 
     if (change.has (SongOwnChange::merging))
@@ -3169,8 +3164,7 @@ void VersionHistory::markLine (TrackID track)
 
 void VersionHistory::clipNotesChanged (const std::vector<ClipID>& clips)
 {
-    // A change of the song as its tree's are (valueTreePropertyChanged()), in a clip: its track's line, once its track is
-    // known (markHeard()).
+    // A change of the song, in a clip: its track's line, once its track is known (markHeard()).
     ++songChanges;
     edited();
     notesHeard.insert (notesHeard.end(), clips.begin(), clips.end());
@@ -3179,8 +3173,8 @@ void VersionHistory::clipNotesChanged (const std::vector<ClipID>& clips)
 
 void VersionHistory::clipsChanged (const std::vector<SongValues::ClipChange>& clips, const std::vector<TrackID>& reordered)
 {
-    // A change of the song as its tree's are, in clips: the lines of the tracks they were on and are on, and of those whose
-    // clips came in another order, by their IDs (a listener of the song's values reads nothing of the song).
+    // A change of the song, in clips: the lines of the tracks they were on and are on, and of those whose clips came in another
+    // order, by their IDs (a listener of the song's values reads nothing of the song).
     ++songChanges;
     edited();
 
@@ -3207,7 +3201,7 @@ void VersionHistory::clipsChanged (const std::vector<SongValues::ClipChange>& cl
 
 void VersionHistory::tempoMapChanged()
 {
-    // A change of the song as its tree's are, in its tempo map: the song's own line (as markChanged() marks it).
+    // A change of the song, in its tempo map: the song's own line.
     ++songChanges;
     edited();
     markSongOwn();
@@ -3215,7 +3209,7 @@ void VersionHistory::tempoMapChanged()
 
 void VersionHistory::chordLaneChanged()
 {
-    // A change of the song as its tree's are, in its chord lane: the song's own line (as markChanged() marks it).
+    // A change of the song, in its chord lane: the song's own line.
     ++songChanges;
     edited();
     markSongOwn();
@@ -3223,8 +3217,8 @@ void VersionHistory::chordLaneChanged()
 
 void VersionHistory::curvesChanged (const std::vector<ParameterRef>& parameters)
 {
-    // A change of the song as its tree's are, in its automation: each curve, by the key the changes name it by (a curve given
-    // another parameter by both, the one it had and the one it has, each compared).
+    // A change of the song, in its automation: each curve, by the key the changes name it by (a curve given another parameter by
+    // both, the one it had and the one it has, each compared).
     ++songChanges;
     edited();
 
@@ -3234,7 +3228,7 @@ void VersionHistory::curvesChanged (const std::vector<ParameterRef>& parameters)
 
 void VersionHistory::midiLinksChanged()
 {
-    // A change of the song as its tree's are, in its MIDI links: the song's own line (as markChanged() marks it).
+    // A change of the song, in its MIDI links: the song's own line.
     ++songChanges;
     edited();
     markSongOwn();
@@ -3242,7 +3236,7 @@ void VersionHistory::midiLinksChanged()
 
 void VersionHistory::sectionsChanged (const std::vector<SectionID>&)
 {
-    // A change of the song as its tree's are, in its sections: the song's own line (as markChanged() marks it).
+    // A change of the song, in its sections: the song's own line.
     ++songChanges;
     edited();
     markSongOwn();
@@ -3264,8 +3258,8 @@ void VersionHistory::markHeard()
 void VersionHistory::modulationChanged (const std::vector<SongValues::ModulationChange>& modulators,
                                         const std::vector<ModulatorPlace>& reordered)
 {
-    // A change of the song as its tree's are, in modulators: the lines of the channels they were on and are on, by their IDs
-    // (a listener of the song's values reads nothing of the song).
+    // A change of the song, in modulators: the lines of the channels they were on and are on, by their IDs (a listener of the
+    // song's values reads nothing of the song).
     ++songChanges;
     edited();
 
@@ -3300,9 +3294,8 @@ void VersionHistory::modulationChanged (const std::vector<SongValues::Modulation
 void VersionHistory::sendsChanged (const std::vector<SongValues::SendChange>& sends, const std::vector<TrackID>& reordered,
                                    const SongSends&)
 {
-    // A change of the song as its tree's are, in sends: the lines of the tracks they were on and are on, and of those whose
-    // sends came in another order, by their IDs (a listener of the song's values reads nothing of the song), as a change of a
-    // SEND marked its track's line.
+    // A change of the song, in sends: the lines of the tracks they were on and are on, and of those whose sends came in another
+    // order, by their IDs (a listener of the song's values reads nothing of the song).
     ++songChanges;
     edited();
 
@@ -3330,8 +3323,8 @@ void VersionHistory::sendsChanged (const std::vector<SongValues::SendChange>& se
 void VersionHistory::devicesChanged (const std::vector<SongValues::DeviceChange>& devices, const std::vector<DevicePlace>& reordered,
                                      const SongDevices&)
 {
-    // A change of the song as its tree's are, in devices: the lines of the channels they were on and are on, by their IDs (a
-    // listener of the song's values reads nothing of the song), as a change under a device marked its channel's line.
+    // A change of the song, in devices: the lines of the channels they were on and are on, by their IDs (a listener of the song's
+    // values reads nothing of the song).
     ++songChanges;
     edited();
 

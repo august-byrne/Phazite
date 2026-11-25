@@ -683,7 +683,7 @@ TEST_CASE ("Learning a track's fader goes on as the track moves into a folder, a
 {
     // A move is one change of the track, come to another folder (TracksArea.h: TrackChange::place), never told as the track
     // taken out and made again: the learning of its fader goes on (MidiLinks.h: MidiLinker::tracksChanged()). Named in the
-    // tracks' switch (roadmap step S5.20): while the tree held the tracks, a move was told as a track taken out and made, and
+    // tracks' switch: while the tree held the tracks, a move was told as a track taken out and made, and
     // ended the learning.
     SynthSong s;
     auto& context = s.song.context;

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song's devices as values (model/base/internal/DevicesValue.h; roadmap step S5.20, the devices' first piece): a device,
+// The song's devices as values (model/base/internal/DevicesValue.h): a device,
 // a container and a chain as a DeviceValue and the song's as SongDevices, their helpers, and the conversion between the
 // elements and the values: the golden project's devices, damaged ones, a drum sampler with every field and sound set and
 // every factory preset's device, each read the same by the lenient reader and as the song holds it once the song has
@@ -21,6 +21,7 @@
 #include "model/base/internal/DevicesValue.h"
 #include "model/base/internal/SavedValues.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongState.h"
 #include "model/base/internal/SongText.h"
 #include "model/devices/internal/DeviceFiles.h"
 #include "model/devices/internal/Devices.h"
@@ -289,8 +290,11 @@ TEST_CASE ("Devices value: the golden project's devices read the same both ways,
                               ++inFile;
                           });
 
-    // Read before the song opens it: the song takes its devices out of the tree it is made of (the file's, shared).
-    const auto all = phazite::readDevicesValue (file);
+    // Read as the song holds them (SongState.h: readSongTree(), of a copy the loader made consistent), before the song is
+    // made of the file's tree.
+    auto consistent = file.createCopy();
+    phazite::makeConsistent (consistent);
+    const auto all = phazite::readSongTree (consistent).devices;
     const auto song = phazite::makeSong (file);
     REQUIRE (song != nullptr);
     CHECK (checkSongsDevices (*song) == inFile);

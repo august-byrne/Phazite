@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// What the song holds of its own as values (roadmap step S5.20, the song's own, its first source piece: the tree still holds
-// them): src/model/base/internal/SongOwnValue.h's three values (SongOwnValue, the keyed SongStanding, SongOutside), their
-// conversion from and to the song's root (PHAZITE's properties, LASTKEY, PIANOROLL, MERGING), and the getters every reader of
-// the song's own reads through. The golden projects' roots, a song with every field set through the model and values at
-// each field's bounds, written back as the file holds them; the reader as the song holds it against the loader on a damaged
-// root; the standing as a keyed value in an area (design D.2: a key set outside the history survives the Undo of a step
-// that changed the versions' base, which puts the base back); and each reader of the model on the getters, reading what the
-// file holds.
+// What the song holds of its own as values: src/model/base/internal/SongOwnValue.h's three values (SongOwnValue, the keyed
+// SongStanding, SongOutside), their conversion from and to the song's root (PHAZITE's properties, LASTKEY, PIANOROLL, MERGING),
+// and the getters every reader of the song's own reads through. The golden projects' roots, a song with every field set through
+// the model and values at each field's bounds, written back as the file holds them; the reader as the song holds it against the
+// loader on a damaged root; the standing as a keyed value in an area (design D.2: a key set outside the history survives the Undo
+// of a step that changed the versions' base, which puts the base back); and each reader of the model on the getters, reading what
+// the file holds.
 //   phazite_tests.exe --test-case="Song's own*"
 #include "GoldenFiles.h"
 #include "PerformanceCounts.h"
@@ -100,23 +99,19 @@ juce::ValueTree withoutOwn (const juce::ValueTree& root)
     return copy;
 }
 
-// A root as the song holds it: both readers read it alike, and the three values written back into it, emptied of them, give
-// its text again.
+// A root as the song holds it: the three values read from it and written back into it, emptied of them, give its text again.
 void checkRoundTrip (const juce::ValueTree& root)
 {
     const auto own = phazite::readHeldSongOwn (root);
     const auto standing = phazite::readHeldSongStanding (root);
     const auto outside = phazite::readHeldSongOutside (root);
-    CHECK (phazite::readSongOwnValue (root) == own);
-    CHECK (phazite::readSongStanding (root) == standing);
-    CHECK (phazite::readSongOutside (root) == outside);
 
     auto written = withoutOwn (root);
     phazite::writeSongOwnInto (written, own, standing, outside);
     CHECK (writeOwnText (written) == writeOwnText (root));
 }
 
-// Values read back from a root they are written into, by both readers.
+// Values read back from a root they are written into.
 void checkWrittenAndRead (const SongOwnValue& own, const SongStanding& standing, const SongOutside& outside)
 {
     juce::ValueTree root (schema::PHAZITE);
@@ -124,9 +119,6 @@ void checkWrittenAndRead (const SongOwnValue& own, const SongStanding& standing,
     CHECK (phazite::readHeldSongOwn (root) == own);
     CHECK (phazite::readHeldSongStanding (root) == standing);
     CHECK (phazite::readHeldSongOutside (root) == outside);
-    CHECK (phazite::readSongOwnValue (root) == own);
-    CHECK (phazite::readSongStanding (root) == standing);
-    CHECK (phazite::readSongOutside (root) == outside);
 }
 
 juce::String repeat (char digit, int count)
@@ -425,9 +417,9 @@ TEST_CASE ("Song's own: a damaged root read as the song holds it is what the loa
     auto consistent = damaged.createCopy();
     phazite::makeConsistent (consistent);
 
-    CHECK (phazite::readSongOwnValue (consistent) == phazite::readHeldSongOwn (damaged));
-    CHECK (phazite::readSongStanding (consistent) == phazite::readHeldSongStanding (damaged));
-    CHECK (phazite::readSongOutside (consistent) == phazite::readHeldSongOutside (damaged));
+    CHECK (phazite::readHeldSongOwn (consistent) == phazite::readHeldSongOwn (damaged));
+    CHECK (phazite::readHeldSongStanding (consistent) == phazite::readHeldSongStanding (damaged));
+    CHECK (phazite::readHeldSongOutside (consistent) == phazite::readHeldSongOutside (damaged));
 
     // Written back as the song holds it: what the loader left, a grid's step of no word, which it took out, completed with its
     // default, as a grid saved writes all five (Grid.h: makeSavedGrid()).
@@ -476,11 +468,11 @@ TEST_CASE ("Song's own: where playback starts is held within its range, past 0 o
         file.setProperty (schema::playStart, text, nullptr);
         CHECK (juce::exactlyEqual (phazite::readHeldSongOutside (file).playStart, held));
 
-        // The loader keeps it so (Schema.h: its range; written only past 0), and both readers then read it alike.
+        // The loader keeps it so (Schema.h: its range; written only past 0), which then reads the same.
         auto root = file.createCopy();
         phazite::makeConsistent (root);
         CHECK (root.hasProperty (schema::playStart) == (held > 0.0));
-        CHECK (phazite::readSongOutside (root) == phazite::readHeldSongOutside (file));
+        CHECK (phazite::readHeldSongOutside (root) == phazite::readHeldSongOutside (file));
         checkRoundTrip (root);
     }
 

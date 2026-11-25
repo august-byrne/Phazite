@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The song whole, or a part of it whole, as the tree a file holds: what needs the song or a part of it with everything it
 // holds as elements (a save, a version's pieces, a comparison, a merge, the clipboard, a duplicate, an export) asks these. The
-// song is values (roadmap step S5.20; model/base/internal/SongValues.h); these write its file's form from a state of it
+// song is values (model/base/internal/SongValues.h); these write its file's form from a state of it
 // (SongState.h: writeSongTree()): under each track, its clips first among its elements, in the track's order, each
 // written as ClipsValue.h's writeClipElement() writes it (each property only while it is set; an audio clip's warp markers;
 // a MIDI clip's NOTE elements, then its CONTROL elements, each kind in its order); in the song's TEMPOMAP element its tempos

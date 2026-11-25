@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // What hears the song's tracks, folders, returns and master change hears it from one place (model/base/internal/SongValues.h:
-// Listener::tracksChanged(), trackSwitchesChanged(), tracksViewChanged()), by their IDs (roadmap step S5.20; while the song's
-// tree is still their storage, the tracks' part of the keeper tells it from the tree: model/base/internal/TracksArea.h). For
-// each edit of tracks made through the model, its Undo and its Redo, the listener is told every track that differs before
-// and after, compared as values (getTracksValue(), readTrackSwitches(), readTracksOutside(): the readers, independent of
-// what tells it), with its folder and its place before and after, at least the parts that differ and its value after as the
-// readers read it; one told that doesn't differ was taken out and came back (a track JUCE moves); every list whose tracks came
-// in another order; each switch that differs of a track the song holds before and after; each track whose view differs; and
-// the tracks whole after as the readers read them. What a step told in all is checked, never how many calls (the tree's
-// count until the tracks' switch). Another area's change tells nothing of the tracks. And what plays makes the plans it made
+// Listener::tracksChanged(), trackSwitchesChanged(), tracksViewChanged()), by their IDs. For each edit of tracks made through
+// the model, its Undo and its Redo, the listener is told every track that differs before and after, compared as values
+// (getTracksValue(), and the switches and the view read from a whole copy: SongState.h, readSongTree(); the readers,
+// independent of what tells it), with its folder and its place before and after, at least the parts that differ and its value
+// after as the readers read it; one told that doesn't differ was taken out and came back; every list whose tracks came in
+// another order; each switch that differs of a track the song holds before and after; each track whose view differs; and the
+// tracks whole after as the readers read them. What a step told in all is checked, never how many calls. Another area's
+// change tells nothing of the tracks. And what plays makes the plans it made
 // per edit, and plays a volume and a mute at once; the unsaved check, the versions' lines and a learning fader follow them
 // too.
 //   phazite_tests.exe --test-case="Song values' tracks*"
@@ -26,6 +25,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongState.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/SongValues.h"
 #include "model/base/internal/TrackSwitchesValue.h"
@@ -317,14 +317,16 @@ struct Watched
         Heard heard;
         const auto projectBefore = s.getProject().getChangeCount();
         heard.before = phazite::getTracksValue (song);
-        heard.switchesBefore = phazite::readTrackSwitches (phazite::test::copyWholeSong (song));
-        heard.viewBefore = phazite::readTracksOutside (phazite::test::copyWholeSong (song));
+        const auto readBefore = phazite::readSongTree (phazite::test::copyWholeSong (song));
+        heard.switchesBefore = readBefore.trackSwitches;
+        heard.viewBefore = readBefore.tracksOutside;
         change();
         heard.told = told;
         heard.project = s.getProject().getChangeCount() - projectBefore;
         heard.after = phazite::getTracksValue (song);
-        heard.switchesAfter = phazite::readTrackSwitches (phazite::test::copyWholeSong (song));
-        heard.viewAfter = phazite::readTracksOutside (phazite::test::copyWholeSong (song));
+        const auto readAfter = phazite::readSongTree (phazite::test::copyWholeSong (song));
+        heard.switchesAfter = readAfter.trackSwitches;
+        heard.viewAfter = readAfter.tracksOutside;
         return heard;
     }
 

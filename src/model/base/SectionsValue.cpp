@@ -17,19 +17,6 @@ namespace
 {
     std::atomic<std::uint64_t> sectionsRead { 0 }; // countSectionsRead(): a count alone, which orders nothing
 
-    // Each property a section has read as setSectionProperty() reads it, absent as a void value.
-    SectionValue readSection (const juce::ValueTree& element)
-    {
-        SectionValue section;
-
-        for (const auto* property : { &schema::sectionID.getName(), &schema::sectionStart.getName(), &schema::sectionLength.getName(),
-                                      &schema::sectionName.getName(), &schema::sectionRole.getName(), &schema::sectionTip.getName(),
-                                      &schema::sectionEnergy.getName(), &schema::sectionColour.getName() })
-            setSectionProperty (section, *property, element[*property]);
-
-        return section;
-    }
-
     // Whether an ID is one the song can count on from (Schema.h: schema::maxID), as every item's is once the song is loaded.
     bool isHeldID (SectionID id)
     {
@@ -83,18 +70,6 @@ bool holdsSection (const Song& song, SectionID id)
     return false;
 }
 
-SectionsValue readSectionsValue (const juce::ValueTree& sectionsElement)
-{
-    auto sections = immer::flex_vector<SectionValue>().transient();
-
-    for (const auto& child : sectionsElement)
-        if (child.hasType (schema::SECTION))
-            sections.push_back (readSection (child));
-
-    sectionsRead.fetch_add (sections.size(), std::memory_order_relaxed);
-    return { sections.persistent() };
-}
-
 std::optional<SectionValue> readHeldSection (const juce::ValueTree& element)
 {
     if (! element.hasType (schema::SECTION))
@@ -127,6 +102,7 @@ SectionsValue readHeldSections (const juce::ValueTree& sectionsElement)
         if (auto section = readHeldSection (child))
             sections.push_back (std::move (*section));
 
+    sectionsRead.fetch_add (sections.size(), std::memory_order_relaxed);
     return keepSectionsHeld ({ sections.persistent() });
 }
 

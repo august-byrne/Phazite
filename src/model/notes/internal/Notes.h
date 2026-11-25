@@ -22,15 +22,13 @@ namespace phazite
 {
 class CommandRegistry;
 
-// A clip's notes and controllers' values as the song holds them now, beside its tree (model/base/internal/SongValues.h): a
-// copy that shares what it holds. Nothing for a clip that isn't a MIDI clip of the song's. Message thread. Of a song that
-// keeps everything in its tree (one made to be read or checked: Song::getValues()), its clip's NOTE and CONTROL children read.
+// A clip's notes and controllers' values as the song holds them now (model/base/internal/SongValues.h): a copy that shares
+// what it holds. Nothing for a clip that isn't a MIDI clip of the song's. Message thread.
 ClipNotes getClipNotesValue (const Song&, ClipID);
 
 // Gives a clip, and each clip of its alias group, these notes and values: in the song's undo history (the step in progress),
 // or outside it while the song is written outside its history (Song::isWritingOutsideHistory()); SongValues::setClipNotes().
-// Nothing for a clip that isn't a MIDI clip of the song's, nor for a song that keeps everything in its tree, which isn't
-// edited.
+// Nothing for a clip that isn't a MIDI clip of the song's.
 void setClipNotesValue (Song&, ClipID, const ClipNotes&);
 
 // What a note is, by where it is in the song; none for a note that is gone. Notes' IDs (schema::noteID) are each note's,

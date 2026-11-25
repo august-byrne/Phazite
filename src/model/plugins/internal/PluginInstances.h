@@ -29,7 +29,7 @@
 #include "model/base/internal/SongValues.h"
 #include "model/devices/ParameterRef.h"
 
-#include <juce_data_structures/juce_data_structures.h>
+#include <juce_events/juce_events.h>
 
 #include <functional>
 #include <map>

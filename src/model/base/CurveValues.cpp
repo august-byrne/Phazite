@@ -19,26 +19,6 @@ namespace
 
     std::atomic<std::uint64_t> pointsRead { 0 }; // countCurvePointsRead(): a count alone, which orders nothing
 
-    // A point's number as the song reads one (SongText.h: readValueNumber(), the loader's reading, so that a text reads as the
-    // same number wherever it is read), or what the value holds where the element has none, or what it has is no finite
-    // number.
-    double readOr (const juce::var& held, double absent)
-    {
-        const auto number = readValueNumber (held);
-        return number.has_value() && std::isfinite (*number) ? *number : absent;
-    }
-
-    PointValue readPoint (const juce::ValueTree& point)
-    {
-        return { BeatPosition::fromBeats (readOr (point[schema::pointBeat], 0.0)), toFloat (readOr (point[schema::pointValue], 0.0)),
-                 toFloat (readOr (point[schema::pointCurve], straight)) };
-    }
-
-    // A POINT child that is a point: one with a value (the loader takes one without out as the song opens).
-    bool isPoint (const juce::ValueTree& child)
-    {
-        return child.hasType (schema::POINT) && ! child[schema::pointValue].isVoid();
-    }
 } // namespace
 
 bool PointValue::operator== (const PointValue& other) const noexcept
@@ -206,18 +186,6 @@ ParameterRef readCurveParameter (const juce::ValueTree& curve)
     return { DeviceID::fromRaw (readID (curve[schema::curveDevice])), curve[schema::curveParameter].toString() };
 }
 
-CurveValue readCurveValue (const juce::ValueTree& curve)
-{
-    auto points = immer::flex_vector<PointValue>().transient();
-
-    for (const auto& child : curve)
-        if (isPoint (child))
-            points.push_back (readPoint (child));
-
-    pointsRead.fetch_add (points.size(), std::memory_order_relaxed);
-    return { points.persistent() };
-}
-
 CurveValue readHeldCurve (const juce::ValueTree& curve, std::uint64_t* nextKey)
 {
     auto points = immer::flex_vector<PointValue>().transient();
@@ -266,38 +234,6 @@ SongCurves readHeldCurves (const juce::ValueTree& automation, std::uint64_t& nex
 std::uint64_t countCurvePointsRead() noexcept
 {
     return pointsRead.load (std::memory_order_relaxed);
-}
-
-bool holdsPoints (const juce::ValueTree& curve)
-{
-    for (const auto& child : curve)
-        if (isPoint (child))
-            return true;
-
-    return false;
-}
-
-SongCurves readCurvesValue (const juce::ValueTree& automation)
-{
-    SongCurves read;
-    auto curves = read.curves.transient();
-    auto order = read.order.transient();
-
-    for (const auto& child : automation)
-    {
-        if (! child.hasType (schema::CURVE))
-            continue;
-
-        if (const auto parameter = readCurveParameter (child); curves.find (parameter) == nullptr)
-        {
-            curves.set (parameter, readCurveValue (child));
-            order.push_back (parameter);
-        }
-    }
-
-    read.curves = curves.persistent();
-    read.order = order.persistent();
-    return read;
 }
 
 void writeCurveElement (const ParameterRef& parameter, const CurveValue& curve, juce::ValueTree& automation)

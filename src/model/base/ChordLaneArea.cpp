@@ -32,7 +32,7 @@ void SongValues::ChordLaneTeller::valueAreaChanged (const ChordLaneValue& before
 void readHeldChordLaneIn (const juce::ValueTree& song, SongState& into)
 {
     // The chord lane the loader made consistent, each entry as the song holds one (ChordLaneValue.h: readHeldChordLane(), placed
-    // as the tree has a CHORDLANE); an empty lane, not placed, for a song without one.
+    // where the file has a CHORDLANE); an empty lane, not placed, for a song without one.
     into.chordLane = readHeldChordLane (song.getChildWithName (schema::CHORDLANE));
 }
 

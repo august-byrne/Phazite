@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song's chord lane as an area of its values (model/base/internal/SongValues.h, ChordLaneArea.h; roadmap step S5.20, the
-// chord lane's switch). What hears the lane change hears it from one place (Listener::chordLaneChanged()), which the lane's
-// area tells: for each edit made through the model, its Undo and its Redo, once for each change of the value, and nothing of
-// the clips or the tempo map, a lane placed or taken away among them; another area's change tells it nothing. A set equal
-// to the lane held makes no step; every edit is one exact undo step; a lane made by the first chord goes with its Undo; and
-// the versions give the song another lane, or none, through the lane's code, and a merge's clash on the lane is chosen
-// either way.
+// The song's chord lane as an area of its values (model/base/internal/SongValues.h, ChordLaneArea.h). What hears the lane change
+// hears it from one place (Listener::chordLaneChanged()), which the lane's area tells: for each edit made through the model, its
+// Undo and its Redo, once for each change of the value, and nothing of the clips or the tempo map, a lane placed or taken away
+// among them; another area's change tells it nothing. A set equal to the lane held makes no step; every edit is one exact undo
+// step; a lane made by the first chord goes with its Undo; and the versions give the song another lane, or none, through the
+// lane's code, and a merge's clash on the lane is chosen either way.
 //   phazite_tests.exe --test-case="Song values' chord lane*"
 #include "SongCheck.h"
 #include "TestClips.h"

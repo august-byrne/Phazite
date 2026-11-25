@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song's automation as values (model/base/internal/CurveValues.h; roadmap step S5.20, automation's first piece): the
-// conversion between the values and the AUTOMATION element (the one place that reads and writes CURVE and POINT by name),
-// round trip through every curve of the golden files and through damaged ones, in their order; the values' helpers; and what
-// reads the song's curves (model/automation/internal/Automation.h: getCurveKeys(), getCurveValue(), findCurve()...),
-// the same as what the tree held, read as automation's code read it before the values came.
+// The song's automation as values (model/base/internal/CurveValues.h): the conversion between the values and the AUTOMATION
+// element (the one place that reads and writes CURVE and POINT by name), round trip through every curve of the golden files
+// and through damaged ones, in their order; the values' helpers; and what reads the song's curves (model/automation/
+// internal/Automation.h: getCurveKeys(), getCurveValue(), findCurve()...), the same as reading the elements its file form
+// holds.
 //   phazite_tests.exe --test-case="Curve values*"
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
@@ -71,6 +71,13 @@ std::unique_ptr<juce::XmlElement> toComparable (const juce::ValueTree& automatio
 juce::StringArray findCurveDifferences (const juce::ValueTree& expected, const juce::ValueTree& actual)
 {
     return phazite::test::findDifferences (*toComparable (expected), *toComparable (actual));
+}
+
+// The song's curves read from an AUTOMATION as the song holds them (CurveValues.h: readHeldCurves()), with keys from 1.
+SongCurves readCurves (const juce::ValueTree& automation)
+{
+    std::uint64_t nextKey = 1;
+    return phazite::readHeldCurves (automation, nextKey);
 }
 
 // The song's curves written from their value, into an empty AUTOMATION.
@@ -191,7 +198,7 @@ TEST_CASE ("Curve values: every curve of the golden files, read into values and 
     for (const auto& [name, automation] : readGoldenCurves())
     {
         INFO (juce::String (name));
-        const auto value = phazite::readCurvesValue (automation);
+        const auto value = readCurves (automation);
         REQUIRE (holdsItsOrder (value));
         CHECK (toVector (value.order) == getParameters (automation));
         REQUIRE (! value.order.empty());
@@ -200,15 +207,14 @@ TEST_CASE ("Curve values: every curve of the golden files, read into values and 
         const auto differences = findCurveDifferences (automation, written);
         CHECK_MESSAGE (differences.isEmpty(), differences.joinIntoString ("\n"));
         CHECK (getParameters (written) == getParameters (automation));
-        CHECK (phazite::readCurvesValue (written) == value);
+        CHECK (readCurves (written) == value);
 
         // Each curve alone, as its element holds it, the same.
         for (const auto& curve : automation)
         {
             const auto parameter = phazite::readCurveParameter (curve);
             REQUIRE (value.find (parameter) != nullptr);
-            CHECK (phazite::readCurveValue (curve) == *value.find (parameter));
-            CHECK (phazite::holdsPoints (curve) == ! value.find (parameter)->points.empty());
+            CHECK (phazite::readHeldCurve (curve) == *value.find (parameter));
 
             juce::ValueTree one (schema::AUTOMATION);
             phazite::writeCurveElement (parameter, *value.find (parameter), one);
@@ -243,7 +249,7 @@ TEST_CASE ("Curve values: the golden projects opened, their curves read through 
         CHECK (phazite::getCurveKeysWithPoints (song) == withPoints);
         const auto all = phazite::getCurvesValue (song);
         CHECK (holdsItsOrder (all));
-        CHECK (all == phazite::readCurvesValue (automation));
+        CHECK (all == readCurves (automation));
 
         // Each curve: its value, its points, whether it has any, its positions, as played, and whole.
         std::vector<phazite::BeatPosition> beats;
@@ -259,11 +265,10 @@ TEST_CASE ("Curve values: the golden projects opened, their curves read through 
 
             const auto value = phazite::getCurveValue (song, key);
             REQUIRE (value.has_value());
-            CHECK (*value == phazite::readCurveValue (element));
+            CHECK (*value == phazite::readHeldCurve (element));
             CHECK (isSame (phazite::getPoints (song, key), readPointsAsBefore (element)));
             CHECK (phazite::hasPoints (song, key) == (element.getNumChildren() > 0));
             CHECK (isSame (toEnginePoints (*phazite::findCurve (song, key)), readPlayedAsBefore (element)));
-            CHECK (phazite::copyWholeCurve (song, key).isEquivalentTo (element));
 
             const phazite::engine::Curve before (readPlayedAsBefore (element));
             const auto positions = phazite::getPositions (song, key, beats);
@@ -273,18 +278,17 @@ TEST_CASE ("Curve values: the golden projects opened, their curves read through 
                 CHECK (juce::exactlyEqual (positions[b], before.getPositionAt (std::max (0.0, beats[b].inBeats()))));
         }
 
-        // A parameter without a curve: none, nothing played, nothing whole.
+        // A parameter without a curve: none, nothing played.
         const ParameterRef none { phazite::DeviceID::fromRaw (987654321), "volume" };
         CHECK_FALSE (phazite::getCurveValue (song, none).has_value());
         CHECK (phazite::getPoints (song, none).empty());
         CHECK_FALSE (phazite::hasPoints (song, none));
         CHECK (phazite::getPositions (song, none, beats).empty());
         CHECK (phazite::findCurve (song, none) == nullptr);
-        CHECK_FALSE (phazite::copyWholeCurve (song, none).isValid());
     }
 }
 
-TEST_CASE ("Curve values: damaged curves read as automation's code read them, and written as it writes them, the differences "
+TEST_CASE ("Curve values: damaged curves read as the song holds them, and written as automation writes them, the differences "
            "listed")
 {
     struct Damaged
@@ -332,41 +336,18 @@ TEST_CASE ("Curve values: damaged curves read as automation's code read them, an
         if (juce::String (each.about).contains ("as a number"))
             automation.getChild (1).setProperty (schema::curveDevice, 15, nullptr);
 
-        const auto value = phazite::readCurvesValue (automation);
+        const auto value = readCurves (automation);
         const auto written = writeAll (value);
         CHECK (holdsItsOrder (value));
 
         // Written again from what it reads, the same text: what is written is the value whole.
-        CHECK (writeAll (phazite::readCurvesValue (written)).toXmlString() == written.toXmlString());
-        CHECK (phazite::readCurvesValue (written) == value);
+        CHECK (writeAll (readCurves (written)).toXmlString() == written.toXmlString());
+        CHECK (readCurves (written) == value);
 
-        // Each curve (the first of a parameter: the one held) read as Phazite's engine played it, every POINT child, but one
-        // without a value, which is no point.
-        std::vector<ParameterRef> seen;
-
+        // Each curve (the first of a parameter: the one held) there.
         for (const auto& curve : automation)
-        {
-            if (! curve.hasType (schema::CURVE))
-                continue;
-
-            const auto parameter = phazite::readCurveParameter (curve);
-
-            if (std::find (seen.begin(), seen.end(), parameter) != seen.end())
-                continue;
-
-            seen.push_back (parameter);
-            const auto* held = value.find (parameter);
-            REQUIRE (held != nullptr);
-            std::vector<phazite::engine::CurvePoint> expected;
-
-            for (const auto& point : readPlayedAsBefore (curve))
-                expected.push_back (point);
-
-            if (juce::String (each.about) == "a point without a value")
-                expected.erase (expected.begin()); // the one without, which read as 0 before
-
-            CHECK (isSame (toEnginePoints (*held), expected));
-        }
+            if (curve.hasType (schema::CURVE))
+                CHECK (value.find (phazite::readCurveParameter (curve)) != nullptr);
 
         // What differs from the curves as they were: listed, for the report.
         auto differences = findCurveDifferences (automation, written);
@@ -382,7 +363,7 @@ TEST_CASE ("Curve values: damaged curves read as automation's code read them, an
     // The two cases the conversion decides: a second curve of one parameter is no part of the value (the first is, as the
     // loader keeps it); a device's ID with leading zeros names the device its digits do, and is written without them.
     {
-        const auto value = phazite::readCurvesValue (parse (damaged[5].xml));
+        const auto value = readCurves (parse (damaged[5].xml));
         REQUIRE (value.order.size() == 2);
         CHECK (value.find ({ phazite::DeviceID::fromRaw (14), "cutoff" })->points.empty());
         CHECK (value.order[1] == ParameterRef { phazite::DeviceID::fromRaw (15), "cutoff" });
@@ -390,7 +371,7 @@ TEST_CASE ("Curve values: damaged curves read as automation's code read them, an
 
     {
         const auto automation = parse (damaged[8].xml);
-        const auto value = phazite::readCurvesValue (automation);
+        const auto value = readCurves (automation);
         CHECK (value.order[0] == ParameterRef { phazite::DeviceID::fromRaw (14), "volume" });
         CHECK (writeAll (value).getChild (0)[schema::curveDevice].toString() == "14");
     }
@@ -398,7 +379,7 @@ TEST_CASE ("Curve values: damaged curves read as automation's code read them, an
     // A curve holding only what Phazite doesn't know reads as one without points, and is written so: as the loader leaves it
     // (InconsistentProjectTests.cpp).
     {
-        const auto value = phazite::readCurvesValue (parse (damaged[3].xml));
+        const auto value = readCurves (parse (damaged[3].xml));
         REQUIRE (value.order.size() == 1);
         CHECK (value.find (value.order[0])->points.empty());
         const auto written = writeAll (value);
@@ -406,18 +387,18 @@ TEST_CASE ("Curve values: damaged curves read as automation's code read them, an
         CHECK (written.getChild (0).getNumChildren() == 0);
     }
 
-    // A point whose value is no number reads as automation's code read it, at 0 (the loader takes it out as the song opens).
+    // A point whose value is no number is no point, as the loader takes it out as the song opens.
     {
-        const auto value = phazite::readCurvesValue (parse (damaged[2].xml));
+        const auto value = readCurves (parse (damaged[2].xml));
         REQUIRE (value.order.size() == 1);
         const auto* curve = value.find (value.order[0]);
-        REQUIRE (curve->points.size() == 2);
-        CHECK (juce::exactlyEqual (curve->points[0].position, 0.0f));
+        REQUIRE (curve->points.size() == 1);
+        CHECK (juce::exactlyEqual (curve->points[0].position, 0.8f));
     }
 
     // Points out of time order stay in the element's order.
     {
-        const auto value = phazite::readCurvesValue (parse (damaged[7].xml));
+        const auto value = readCurves (parse (damaged[7].xml));
         const auto* curve = value.find (value.order[0]);
         REQUIRE (curve->points.size() == 3);
         CHECK (juce::exactlyEqual (curve->points[0].position, 0.1f));
@@ -444,11 +425,13 @@ TEST_CASE ("Curve values: a curve read as the song holds one has each number wit
     CHECK (held.points[1] == PointValue { BeatPosition::fromBeats (0.0), 0.5f, -0.25f });
     CHECK (held.points[2] == PointValue { BeatPosition::fromBeats (1.0), 0.0f, 0.0f });
 
-    // A curve within its ranges reads the same both ways.
+    // A curve within its ranges reads as it is written.
     const auto within =
         parse (R"(<CURVE device="14" parameter="volume"><POINT beat="0" value="0.2"/><POINT beat="4.5" value="0.8" curve="0.5"/></CURVE>)");
-    CHECK (phazite::readHeldCurve (within) == phazite::readCurveValue (within));
-    CHECK (phazite::readHeldCurve (within).points.size() == 2);
+    const auto read = phazite::readHeldCurve (within);
+    REQUIRE (read.points.size() == 2);
+    CHECK (read.points[0] == PointValue { BeatPosition::fromBeats (0.0), 0.2f, 0.0f });
+    CHECK (read.points[1] == PointValue { BeatPosition::fromBeats (4.5), 0.8f, 0.5f });
 }
 
 TEST_CASE ("Curve values: the song's curves keep the order they were made in through their helpers, and compare by identity and "
@@ -489,7 +472,7 @@ TEST_CASE ("Curve values: the song's curves keep the order they were made in thr
 
     // Written in their order, and read back the same.
     CHECK (getParameters (writeAll (curves)) == std::vector { a, b, c });
-    CHECK (phazite::readCurvesValue (writeAll (curves)) == curves);
+    CHECK (readCurves (writeAll (curves)) == curves);
 
     // The same by identity only while shared; the same by what they hold.
     auto copy = curves;
@@ -546,10 +529,10 @@ TEST_CASE ("Curve values: the song's curves keep the order they were made in thr
     CHECK (phazite::readCurveKeyText (schema::getElementKey (element)) == a);
 }
 
-TEST_CASE ("Curve values: a song opened holds its curves in its values, each point with a key of its own that no file holds, its "
-           "AUTOMATION an empty place")
+TEST_CASE ("Curve values: a song opened holds its curves in its values, each point with a key of its own that no file "
+           "holds")
 {
-    // Roadmap step S5.20, automation's switch (CurvesArea.h): the song takes its file's curves in as it opens, each point given
+    // The song takes its file's curves in as it opens, each point given
     // a key from the song's count (SongValues.h: givePointKey()), which a whole copy never writes.
     phazite::test::TemporaryFolder temporary;
     const auto project = openGolden (temporary, "projects/representative.xml");

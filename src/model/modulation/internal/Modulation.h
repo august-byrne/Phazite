@@ -6,7 +6,7 @@
 // the UI.
 //
 // As values (model/base/internal/ModulationValue.h: ModulatorValue, SongModulation), which the song holds as modulation's
-// area (SongValues.h; roadmap step S5.20): every reader looks in the area through the readers below (one modulator by its
+// area (SongValues.h): every reader looks in the area through the readers below (one modulator by its
 // ID, an owner's list, what modulates one parameter, the whole value for the plan's compile and the passes), and every
 // writer works its next value out and sets it through the setters below, once for an edit.
 #pragma once
@@ -200,7 +200,7 @@ void copyModulators (Song&, TrackID from, TrackID to, CopiedIDs& copied);
 // After a part of the song was copied with new IDs (giveNewIDs(), Schema.h: a duplicated track): each copied owner's
 // modulators and macros (a track's own, a container's) given to its copy, in their order, each with a new ID, which copied
 // gets too, what they modulate of the copied items renamed to the copies, in the caller's undo step, the song's modulation
-// set once; nothing for a copy that holds some already (a copied element carries none: the song's tree holds no modulator).
+// set once; nothing for a copy that holds some already (a copied element carries none).
 // Before the copies' automation (Automation.h: copyCurves()), which names a macro's copy by the
 // ID it gets here.
 void copyModulation (Song&, CopiedIDs& copied);

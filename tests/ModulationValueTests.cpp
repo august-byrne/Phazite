@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song's modulation as a value (model/base/internal/ModulationValue.h; roadmap step S5.20, modulation's first piece): the
-// round trip of its elements through the golden files' modulators and macros and through damaged ones; the two readers; the
-// value's helpers and its IDs; a merge's clash on a modulator's property; and the readers of a song (Modulation.h) against
-// what its elements hold, on a song whose tree is the storage and on one opened through the loader.
+// The song's modulation as a value (model/base/internal/ModulationValue.h): the round trip of its elements through the golden
+// files' modulators and macros and through damaged ones; the readers; the value's helpers and its IDs; a merge's clash on a
+// modulator's property; and the readers of a song (Modulation.h) against what its elements hold, on a song made through the model
+// and on one opened through the loader.
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
@@ -230,7 +230,7 @@ TEST_CASE ("Modulation value: the golden files' modulators and macros, read into
         }
 
         // The song's modulation, every one of them by its ID, each owner's in its order.
-        const auto modulation = phazite::readModulationValue (song);
+        const auto modulation = phazite::readHeldModulation (song);
         CHECK (modulation.modulators.size() == elements.size());
         CHECK (phazite::holdsItsLists (modulation));
 
@@ -238,7 +238,7 @@ TEST_CASE ("Modulation value: the golden files' modulators and macros, read into
         {
             const auto* found = modulation.find (ModulatorID::fromRaw (phazite::readID (element[schema::modulatorID])));
             REQUIRE (found != nullptr);
-            CHECK (*found == *phazite::readModulatorValue (element, phazite::readModulatorPlace (element)));
+            CHECK (*found == *phazite::readHeldModulator (element, phazite::readModulatorPlace (element)));
         }
     }
 }

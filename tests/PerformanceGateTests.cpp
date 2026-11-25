@@ -732,14 +732,13 @@ TEST_CASE ("Performance gate: a device changed on one channel among many brings 
 TEST_CASE ("Performance gate: a tick of a device's knob, a chain's volume or a drum pad's field reads no device whole, nor do a "
            "strip's slots, however many tracks the song has")
 {
-    // A reader of one field of one device reads it from the device's value in the devices' area (roadmap step S5.20, the
-    // devices' switch: Mixer.h, findDevice(), a pointer into the area's value), never the device read whole into a value
-    // anew: a drum sampler's whole value holds thousands of entries.
-    // On songs of 4 tracks and of 40, each with an instrument and an effect, the last with a drum sampler, an equalizer, five
-    // delays and a container: a tick of the equalizer's first knob, of the container's chain's volume and of a pad's field,
-    // and the eight slots of its strip. Counted: the devices read into whole values (countDevicesReadAsValues()); the looks
-    // in the devices' area by an ID (countDeviceLooks()), as many at a tick on 40 tracks as on 4; and what the value's
-    // reading allocates at a tick, none (the parameter's name taken as its reference holds it, as before).
+    // A reader of one field of one device reads it from the device's value in the devices' area (Mixer.h: findDevice(), a pointer
+    // into the area's value), never the device read whole into a value anew: a drum sampler's whole value holds thousands of
+    // entries. On songs of 4 tracks and of 40, each with an instrument and an effect, the last with a drum sampler, an equalizer,
+    // five delays and a container: a tick of the equalizer's first knob, of the container's chain's volume and of a pad's field,
+    // and the eight slots of its strip. Counted: the devices read into whole values (countDevicesReadAsValues()); the looks in
+    // the devices' area by an ID (countDeviceLooks()), as many at a tick on 40 tracks as on 4; and what the value's reading
+    // allocates at a tick, none (the parameter's name taken as its reference holds it, as before).
     using dev::DrumSampler;
 
     struct Tick
@@ -1188,7 +1187,7 @@ TEST_CASE ("Performance gate: the plan after a device's knob moved on a song of 
            "time, none whole")
 {
     // The plan's compile reads what it plays of the song's devices from the devices' area (Mixer.h: getDevicesValue(),
-    // findDevice(); roadmap step S5.20, the devices' switch), never a device read whole into a value anew: a drum sampler's
+    // findDevice()), never a device read whole into a value anew: a drum sampler's
     // whole value holds thousands of entries.
     // On a song of 40 tracks, each with an instrument and an effect, the last with a drum sampler, an equalizer and a
     // container with a delay in its chain: the plan after the equalizer's knob moved, which reads the values of that
@@ -1266,8 +1265,7 @@ TEST_CASE ("Performance gate: the plan after a track's rename, colour, mute, hei
     // (model/base/internal/TracksValue.h), never a track whole (countTracksReadAsValues()). A track's own property marks no
     // channel (model/playback/SongPlayer.cpp: markChange()), so the plan after a rename, a colour, a mute or a height reads no
     // device's values again, and one after a volume set reads none either: what the compile reads of the channels stays what
-    // it read before the tracks' readers outside their area moved onto the tracks' readers (roadmap step S5.20, the tracks'
-    // second piece).
+    // it read before the tracks' readers outside their area moved onto the tracks' readers.
     auto song = phazite::createSong();
     const auto tracks = phazite::ensureTracks (*song, 40);
 
@@ -1348,7 +1346,7 @@ TEST_CASE ("Performance gate: a version that differs from a song of 40 tracks by
     // The versions' devices pass (model/versions/ApplySong.cpp: makeDevicesLike()) takes the song's devices from the devices'
     // area (Mixer.h: getDevicesValue()), reading none, and reads the version's once each, as the song holds them
     // (DevicesValue.h: readHeldDevice()), compares them as values and writes through the devices' setters only what differs:
-    // here one value set by hand, one entry of one device's values in the area (roadmap step S5.20, the devices' switch: the
+    // here one value set by hand, one entry of one device's values in the area (the
     // song's tree holds no device), the setter finding the device by a look in the area (countDeviceLooks()). Nothing is
     // written into the song's tree, and the store's pass writes nothing (the song holds no plug-in or chain).
     auto song = phazite::createSong();
@@ -1512,13 +1510,12 @@ TEST_CASE ("Performance gate: a version a track's name apart from a song of 40 t
            "into the tree, reads each of the version's tracks once and none of the song's, nor what a track holds; a line's "
            "restore reads its own track")
 {
-    // The versions' tracks pass (model/versions/ApplySong.cpp: makeTracksLike()) takes the song's tracks from the tracks'
-    // keeper (Tracks.h: getHeldTracks(), findHeldTrack(): none read), reads the version's once each, as the song holds one
+    // The versions' tracks pass (model/versions/ApplySong.cpp: makeTracksLike()) takes the song's tracks from the tracks' area
+    // (Tracks.h: getHeldTracks(), findHeldTrack(): none read), reads the version's once each, as the song holds one
     // (TracksValue.h: readHeldTrack()), and writes through the tracks' setters only what differs: here one track's name, one
-    // track set in the tracks' value, nothing written into the song's tree since the tracks' switch (roadmap step S5.20; one
-    // property of its element before, while the tree was the tracks' storage). It reads nothing a track holds (no device read
-    // whole for it: the devices pass reads the version's once each, as its own gate above counts) and erases nothing. One
-    // track's line reads the version's track alone, the song's from the keeper.
+    // track set in the tracks' value. It reads nothing a track holds (no device read whole for it: the devices pass reads the
+    // version's once each, as its own gate above counts) and erases nothing. One track's line reads the version's track alone,
+    // the song's from the area.
     auto song = phazite::createSong();
     const auto tracks = phazite::ensureTracks (*song, 40);
 
@@ -1944,13 +1941,13 @@ TEST_CASE ("Performance gate: a frozen track holding a full drum sampler, compar
 TEST_CASE ("Performance gate: an effect added into a chain, moved within it and removed looks up as many devices, and allocates no "
            "more, on 40 tracks than on 4")
 {
-    // The devices' setters (Mixer.h: setNewDevices(), moveInDeviceList(), eraseDevice(); roadmap step S5.20, the devices'
-    // switch) find what they change by a look in the devices' area and set its next value once, what hears the devices told
-    // by immer's diff (model/base/internal/DevicesArea.h), never a walk of the song: a drag of a device within its chain
-    // makes one at each step. On songs of 4 tracks and of 40, each with an instrument and an effect,
-    // the first with a container whose chain holds two delays: an equalizer added into the chain, moved to its start and
-    // removed, each one step on a song alone (no project: what else listens costs the same on both). Counted: the looks in
-    // the devices' area by an ID (countDeviceLooks()), and what the edit allocates, on the first track.
+    // The devices' setters (Mixer.h: setNewDevices(), moveInDeviceList(), eraseDevice()) find what they change by a look in the
+    // devices' area and set its next value once, what hears the devices told by immer's diff (model/base/internal/DevicesArea.h),
+    // never a walk of the song: a drag of a device within its chain makes one at each step. On songs of 4 tracks and of 40, each
+    // with an instrument and an effect, the first with a container whose chain holds two delays: an equalizer added into the
+    // chain, moved to its start and removed, each one step on a song alone (no project: what else listens costs the same on
+    // both). Counted: the looks in the devices' area by an ID (countDeviceLooks()), and what the edit allocates, on the first
+    // track.
     struct Edit
     {
         std::uint64_t looks = 0;
@@ -2032,7 +2029,7 @@ TEST_CASE ("Performance gate: an effect added into a chain, moved within it and 
     }
 
     // The removal's beside what its writer's forgetting of what names the gone makes, which grows with the song (not this
-    // listener's; the writers' piece of S5.20). Measured 2026-11-23 (MSVC's Debug build), 4 tracks / 40: added 78 / 74 (74 /
+    // listener's). Measured 2026-11-23 (MSVC's Debug build), 4 tracks / 40: added 78 / 74 (74 /
     // 75 in a run after other tests), moved 61 / 61, removed 163 / 452 of which its writer's forgetting 63 / 351, so 100 / 101
     // beside it; with the listener's first form, which walked the song's devices for each, on the last track 158 / 952,
     // 133 / 745 and 292 / 1,913, and 13 / 85 device elements walked. Before the listener the tree's callbacks walked none.
@@ -2298,7 +2295,7 @@ TEST_CASE ("Performance gate: a notes edit and a loop toggle allocate, and the u
 TEST_CASE ("Performance gate: an ID made allocates nothing and tells no one, so that a paste of 1,000 notes makes one plan and one "
            "change of the versions' count")
 {
-    // The song's count of IDs (Song.h: makeID()), a member of the song's from the song's own switch (roadmap step S5.20), as it
+    // The song's count of IDs (Song.h: makeID()), a member of the song's from the song's own switch, as it
     // was a property of the song's root before: each ID made then was a notification of the song's tree, which the version
     // history counted as a change of the song (VersionHistory.h: countSongChanges()) and the playback session as a reason for a
     // plan. On a project with everything that listens to it: 1,000 IDs made alone; then 1,000 notes pasted into a clip, one
@@ -2838,13 +2835,14 @@ TEST_CASE ("Performance gate: bending several selected points of a curve reads t
 
 TEST_CASE ("Performance gate: asking whether each selected section is selected reads no value of the song's sections for each")
 {
-    // A paint of the sections' strip and of the playlist asks it of each section in view (SectionsStrip.cpp, Playlist.cpp),
-    // and the selection asks the song whether it holds that section (Selection.cpp: isThere()): a value made of every section
-    // for each (SectionsValue.h: getSectionsValue()) read the square of the sections, twice a frame while the playlist follows
-    // the playhead. Asked through SectionsValue.h's holdsSection(), it reads none into a value. Counted as the lists of sections
-    // built from the song's value (Sections.h: countSectionListsBuilt(), none), as the sections read from the tree
-    // (countSectionsRead(), which a live song never reads), and as allocations, which immer's lists of freed nodes hide from
-    // the count, but which must not grow either.
+    // A paint of the sections' strip and of the playlist asks it of each section in view (SectionsStrip.cpp, Playlist.cpp), and
+    // the selection asks the song whether it holds that section (Selection.cpp: isThere()): a value made of every section for
+    // each (SectionsValue.h: getSectionsValue()) read the square of the sections, twice a frame while the playlist follows the
+    // playhead. Asked through SectionsValue.h's holdsSection(), it reads none into a value. Counted as the lists of sections
+    // built from the song's value (Sections.h: countSectionListsBuilt(), none), as the sections read from elements into values
+    // (countSectionsRead(): readHeldSections(), which only a song opened, a version's sections applied and a merge's choice run,
+    // never a question asked of the song), and as allocations, which immer's lists of freed nodes hide from the count, but which
+    // must not grow either.
     struct Counts
     {
         std::uint64_t built = 0, read = 0;
@@ -3263,7 +3261,7 @@ TEST_CASE ("Performance gate: an edit of a section and the playlist's paint that
     // every section, sorted: Sections.h, getSections()), never once for each section: the lanes behind the tracks
     // (Playlist.cpp: Playlist::Lanes::paint()) and the sections' strip in the time bar (SectionsStrip.cpp: paint()). Counted
     // for one rename of a section, its changes delivered to the views and the whole window painted once, with as many lists
-    // for 40 sections as for 4: the bound is what this measured when the sections left the song's tree (roadmap step S5.20),
+    // for 40 sections as for 4: the bound is what this measured when the sections left the song's tree,
     // the edit's own work and the views' answers to it included.
     const auto builtFor = [] (int numSections)
     {
@@ -4185,7 +4183,7 @@ TEST_CASE ("Performance gate: a song of 40 modulators and 200 automated paramete
 TEST_CASE ("Performance gate: a drawn lane of 10,000 points taken into the song's values as it opens makes far fewer allocations "
            "than points")
 {
-    // Roadmap step S5.20, automation's switch: a song made of its file's state (SongState.h: readSongTree()) reads its
+    // A song made of its file's state (SongState.h: readSongTree()) reads its
     // file's curves into the curves' value (CurvesArea.h, readHeldCurves()), each point given a key, the points put into the
     // value's leaves many at a time.
     constexpr auto numPoints = 10000;
@@ -4563,11 +4561,9 @@ TEST_CASE ("Performance gate: a device removed on a song of 200 curves of other 
 TEST_CASE ("Performance gate: the tracks' setters read no track whole and walk no element for a volume's drag event, a mute's "
            "click, a row's height drag, a track added or moved, a folder moved into another, on 20 tracks as on 200")
 {
-    // The tracks are values (model/base/internal/TracksArea.h, roadmap step S5.20, the tracks' switch): each setter works the
-    // next value out of the area's and sets it, reading no track whole (countTracksReadAsValues()) and walking no element
-    // (countTrackElementsWalked()), and a volume's drag event tells one track changed. Counted on songs of 20 and 200 tracks,
-    // the same. (Before the switch a track added was read whole once, and a folder of 10 that came into another folder 11
-    // times: the tree's keeper read what came in.)
+    // The tracks are values (model/base/internal/TracksArea.h): each setter works the next value out of the area's and sets it,
+    // reading no track whole (countTracksReadAsValues()) and walking no element (countTrackElementsWalked()), and a volume's drag
+    // event tells one track changed. Counted on songs of 20 and 200 tracks, the same.
     struct Counts
     {
         std::uint64_t whole = 0, walked = 0;

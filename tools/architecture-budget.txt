@@ -30,9 +30,6 @@ thread-kills                   0
 # came, and it only falls, as each literal moves into the tokens. Never raise it: add a token instead.
 ui-design-literals            32
 
-# Whatever listens to a song listens to its root (src/model/base/Song.h), with no exception, and this stays 0.
-song-listeners                 0
-
 # The immer library, which holds the song's values (src/model/base/internal/ValueArea.h), is included in src/model alone
 # (and the tests): the layers above get Phazite's own types of the song. This stays 0.
 immer-outside-model            0

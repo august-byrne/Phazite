@@ -71,12 +71,6 @@
 #                             thicknesses, alphas, and sizes worked out from tokens or geometry (TextSize::body * 0.8f,
 #                             area.getHeight() / 2.0f) aren't counted. Its budget is the one above 0, today's count,
 #                             and only falls, as each literal moves into the tokens.
-#   song-listeners            listeners on a song's elements rather than its root, in src/model, src/services, src/ui
-#                             and src/app (src/model/base/Song.h): addListener on an element found in the song
-#                             (getChild..., getParent, find...State) or named for one (track..., clip..., note..., lane...,
-#                             device..., folder..., ...State but songState), and getPropertyAsValue, CachedValue and
-#                             referTo, which listen to an element's property. By the names the model gives its
-#                             handles: a handle named otherwise isn't seen.
 #   immer-outside-model       includes of the immer library's headers (immer/...) in src/ outside src/model: the
 #                             song's values (src/model/base/internal/ValueArea.h) stay inside the model, and the layers
 #                             above get Phazite's own types of it. The model and the tests include them through
@@ -156,7 +150,7 @@ function setup(    i, n, s, parts) {
 
     ruleNames = "upward-includes model-window-includes model-window-references model-undo-steps"
     ruleNames = ruleNames " model-include-loops ui-internal-includes ui-undo-steps flat-files unresolved-includes"
-    ruleNames = ruleNames " cmake-sources tracktion thread-kills ui-design-literals song-listeners immer-outside-model"
+    ruleNames = ruleNames " cmake-sources tracktion thread-kills ui-design-literals immer-outside-model"
     nrules = split(ruleNames, rules, " ")
     for (i = 1; i <= nrules; i++) known[rules[i]] = 1
 
@@ -199,14 +193,6 @@ function setup(    i, n, s, parts) {
     reLiteralFont = reLiteralFont "|FontOptions[[:blank:]]*[(][[:blank:]]*[)][[:blank:]]*[.][[:blank:]]*withHeight[[:blank:]]*[(][[:blank:]]*[0-9.])"
     reStyleConstant = W "[A-Za-z_]*([Cc]orner|[Ff]ont[A-Za-z]*|[Tt]ext[Ss]ize|[Ll]etter[Ss]ize)[A-Za-z0-9_]*[[:blank:]]*"
     reStyleConstant = reStyleConstant "([=][[:blank:]]*" NUMBER "[[:blank:]]*[,;)]|[{][[:blank:]]*" NUMBER "[[:blank:]]*[}])"
-    # A listener on one of a song's elements rather than its root (rule song-listeners): addListener on an element
-    # found in the song (getChild..., getParent, find...State) or named for one (track..., clip..., note..., lane...,
-    # device..., folder..., ...State but songState, the root's), and a juce::Value or CachedValue of an element's property.
-    reAddListener = "[[:blank:]]*([.]|->)[[:blank:]]*addListener"
-    reSongListener = "(getPropertyAsValue|CachedValue|[.]referTo[[:blank:]]*[(]|" W "(track|clip|note|lane|device|folder)[A-Za-z0-9_]*" reAddListener
-    reSongListener = reSongListener "|[A-Za-z0-9_]*State" reAddListener
-    reSongListener = reSongListener "|(getChildWithName|getOrCreateChildWithName|getChild|getParent|find[A-Za-z]*State)[[:blank:]]*[(][^;]*[)]" reAddListener ")"
-    reRootListener = W "songState" reAddListener
 
     n = split(undo_implementation, parts, " ")
     for (i = 1; i <= n; i++) isUndoCode[parts[i]] = 1
@@ -241,8 +227,6 @@ function setup(    i, n, s, parts) {
     instead["thread-kills"] = "stop a thread with stopThread (-1), once whatever it waits on is woken or cancelled, and run jobs with phazite::BackgroundJobs (src/model/base/BackgroundJobs.h): on Windows a thread ended by force can leave a lock it held held for ever."
     what["ui-design-literals"] = "colours, font sizes and corner radii written as literals in src/ui and src/app outside src/ui/theme: juce::Colours names (but transparent ones), juce::Colour from a number, a number as a font" q "s size or a rounded rectangle" q "s corner, and constants named for corners or text sizes set to a number"
     instead["ui-design-literals"] = "take it from the design tokens (src/ui/theme/DesignTokens.h, read with ui::getPalette (component)), adding a token where none fits. This budget only falls: never raise it."
-    what["song-listeners"] = "listeners on a song" q "s elements rather than its root in src/model, src/services, src/ui and src/app: addListener on an element found in the song or named for one (track..., clip..., note..., ...State), and juce::Value or CachedValue of an element" q "s property"
-    instead["song-listeners"] = "listen to the song" q "s root (what Song::getState() returns) and tell the element from the tree the callback names (src/model/base/Song.h)."
     what["immer-outside-model"] = "includes of the immer library" q "s headers (immer/...) in src/ outside src/model"
     instead["immer-outside-model"] = "keep the song" q "s values inside the model (src/model/base/internal/ValueArea.h): add a model function that takes and returns Phazite" q "s own types (IDs, plain values, handles) for what the layer above needs."
 }
@@ -412,9 +396,6 @@ function treeLine(line,    path, lineno, text, s, n) {
         hitLine("ui-undo-steps", path, lineno, text, count(s, reUiUndo))
         if (index(path, "src/ui/theme/") != 1) hitLine("ui-design-literals", path, lineno, text, designLiterals(s))
     }
-    if ((curLayer == "model" || curLayer == "services" || curLayer == "ui" || curLayer == "app") &&
-        (index(s, "Listener") || index(s, "Value") || index(s, "referTo")))
-        hitLine("song-listeners", path, lineno, text, count(s, reSongListener) - count(s, reRootListener))
 }
 
 # The colours, font sizes and corner radii written as literals in a line of code (rule ui-design-literals).
@@ -1017,9 +998,6 @@ src/model/b/Two.cpp:1:#include "Two.h"
 src/model/b/Two.cpp:2:auto* t = te::findTrackForID (e, id);
 src/model/b/Two.cpp:3:#include <immer/map.hpp>
 src/model/b/Three.cpp:1:#include "One.h"
-src/model/b/Three.cpp:2:state.addListener (this); songState.addListener (this); findClipState (song, id).addListener (this);
-src/model/b/Three.cpp:3:trackState.addListener (this); clip.addListener (this); juce::CachedValue<int> v; auto value = note.getPropertyAsValue (id, nullptr);
-src/model/b/Three.cpp:4:value.referTo (other); // trackState.addListener (this)
 src/services/Fixture.cpp:1:#include <juce_gui_extra/juce_gui_extra.h>
 src/services/Fixture.cpp:2:#include "app/MainWindow.h"
 src/services/Fixture.cpp:3:#include <tracktion_graph/tracktion_graph.h>
@@ -1088,8 +1066,7 @@ tests/Fixture.cpp:3:#include "model/b/One.h"
 tests/Fixture.cpp:4:std::unique_ptr<te::Edit> edit; // te::Track
 tests/Fixture.cpp:5:namespace tr = tracktion::engine; using namespace te; auto p = "#include <tracktion_engine/tracktion_engine.h>";
 tests/Fixture.cpp:6:stopThread (timeout); waitForThreadToExit (100);
-tests/Fixture.cpp:7:clip.addListener (this); juce::CachedValue<int> v;
-tests/Fixture.cpp:8:#include <immer/map.hpp>
+tests/Fixture.cpp:7:#include <immer/map.hpp>
 tests/TestHelpers.h:1:// test helpers
 tools/x/Tool.cpp:1:#include "Missing.h"
 tools/x/Tool.cpp:2:#include <tracktion_core/tracktion_core.h>
@@ -1131,7 +1108,6 @@ fixture_expectations() {
 @expect tracktion 32
 @expect thread-kills 5
 @expect ui-design-literals 14
-@expect song-listeners 6
 @expect immer-outside-model 3
 @expect no-layer 1
 EXPECT

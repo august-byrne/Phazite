@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song's tempo map as a value (roadmap step S5.20, the tempo map's area): its tempos and time signatures, each kind by beat,
+// The song's tempo map as a value: its tempos and time signatures, each kind by beat,
 // in Phazite's own types, and the conversion between the value and the TEMPOMAP element with its TEMPO and TIMESIGNATURE
 // children (Schema.h), the one place that reads and writes those by name. The song holds its tempo map as this value, in an
 // area of its values (SongValues.h), which the tempo map's code (model/transport/internal/Tempo.h) reads and computes each

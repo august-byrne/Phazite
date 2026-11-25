@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The IDs the song's values hold (roadmap step S5.20): the values hold the song's IDs (a clip's, its alias group's, its
+// The IDs the song's values hold: the values hold the song's IDs (a clip's, its alias group's, its
 // notes'), which the song's count of IDs must stay past (Schema.h: findNextID() of a
 // song), and those of them that something can name, which what looks for the song's items finds (forEachNameableIDHeld()).
 // Each area of values that holds IDs counts its own in its area's file (findLargestIDIn(): ClipsArea.h, NotesArea.h,

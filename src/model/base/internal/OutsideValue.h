@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A value of the song's that is never in its undo history (roadmap step S5.20): view state written outside it alone, as a
+// A value of the song's that is never in its undo history: view state and how the song plays, written outside it alone, as a
 // device's window place (DevicesOutside.h), which no step holds, no Undo puts back and no step may write. Unlike an area
 // (ValueArea.h), it knows no undo manager at all, so that nothing can put it in a step: set() moves it to its next value and
 // tells its listeners, whatever step is open. A value type as an area's: copyable, its copies cheap, and the same as another
 // without a look inside where it says so (a member isSameAs()), else by ==; setting the same value is nothing.
 //
-// Not held by the song yet: the store's switch gives one to SongValues (model/base/internal/SongValues.h). Message thread
-// only, as the song's tree is.
+// SongValues (model/base/internal/SongValues.h) holds three: the windows' places, the tracks' rows (TracksOutside.h) and the
+// song's own state (SongOwnValue.h: SongOutside). Message thread only, as the song is.
 #pragma once
 
 #include <juce_core/juce_core.h>

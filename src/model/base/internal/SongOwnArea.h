@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song's own part of the song's values (roadmap step S5.20; SongValues.h, whose recipe this follows): what the song holds
+// The song's own part of the song's values (SongValues.h, whose recipe this follows): what the song holds
 // of its own (SongOwnValue.h: its root's properties and its LASTKEY, PIANOROLL and MERGING) in three areas (SongValues.h:
 // songOwn, a plain ValueArea<SongOwnValue>; songStanding, a keyed ValueArea<SongStanding>; songOutside, an
 // OutsideValue<SongOutside>), which its setters set (SongOwnValue.h: setSongOwn(), setSongStanding(),

@@ -88,7 +88,7 @@ ParameterRef readMidiLinkParameter (const Song& song, const MidiLinkEntry& link)
 
 ParameterRef readMidiLinkParameterIn (const juce::ValueTree& song, const juce::ValueTree& link)
 {
-    // As readMidiLinkParameter() reads one, the macro found by its element of the ID in the song's tree.
+    // As readMidiLinkParameter() reads one, the macro found by its element of the ID in the tree given.
     const auto entry = readMidiLinkEntry (link);
     const auto device = DeviceID::fromRaw (entry.device);
 
@@ -207,15 +207,14 @@ bool makeMidiLinksAs (Song& song, const juce::ValueTree& links)
 
 AreaChoice chooseMidiLinkClash (Song& song, const MergeClash& clash, int value, const MergeSides&)
 {
-    // A path into the song's MIDILINKS, whose links the song holds as a value (model/base/internal/SongValues.h): a link
-    // merges whole (SongMerge.cpp: mergesWhole()), so its clash
-    // is the whole link's, by its controller, the path's second step. The side chosen's link put in the place of the song's
-    // link of that controller, or after the others where it has none; or the song's taken away where that side had none: as
-    // the song's tree had it chosen, in the choice's step (VersionsModel.cpp: chooseClash(), which then keeps one link of
-    // each parameter: forgetWhatNamesTheGone()). Refused (nothing written) for any other clash on its path, which a merge of
-    // two songs Phazite holds never makes, but a commit's song may come from anyone (tests/FuzzTests.cpp chooses every clash
-    // of a damaged merge): a property, the MIDILINKS itself, an element of another type, a link the song can't hold, and one
-    // that stands in for what its version couldn't read.
+    // A path into the song's MIDILINKS, whose links the song holds as a value (model/base/internal/SongValues.h): a link merges
+    // whole (SongMerge.cpp: mergesWhole()), so its clash is the whole link's, by its controller, the path's second step. The side
+    // chosen's link put in the place of the song's link of that controller, or after the others where it has none; or the song's
+    // taken away where that side had none, in the choice's step (VersionsModel.cpp: chooseClash(), which then keeps one link of
+    // each parameter: forgetWhatNamesTheGone()). Refused (nothing written) for any other clash on its path, which a merge of two
+    // songs Phazite holds never makes, but a commit's song may come from anyone (tests/FuzzTests.cpp chooses every clash of a
+    // damaged merge): a property, the MIDILINKS itself, an element of another type, a link the song can't hold, and one that
+    // stands in for what its version couldn't read.
     if (clash.path.isEmpty() || ! clash.path[0].startsWith (schema::MIDILINKS.toString() + ":"))
         return AreaChoice::notTheArea;
 
@@ -280,9 +279,7 @@ std::optional<float> getValueAtControllerPosition (const Song& song, const Param
 MidiLinker::MidiLinker (Song& s)
     : song (&s)
 {
-    if (auto* values = song->getValues())
-        values->addListener (this);
-
+    song->getValues()->addListener (this);
     getLinkers().push_back (this);
 }
 
@@ -290,10 +287,7 @@ MidiLinker::~MidiLinker()
 {
     std::erase (getLinkers(), this);
     onChange = nullptr; // what it would tell may be going too
-
-    if (auto* values = song->getValues())
-        values->removeListener (this);
-
+    song->getValues()->removeListener (this);
     stopTimer();
     endBurst();
 
@@ -555,9 +549,8 @@ void MidiLinker::devicesChanged (const std::vector<SongValues::DeviceChange>& de
         anyTakenOut = anyTakenOut || ! device.isThere;
     }
 
-    // A chain's crossover is one only while its container splits into bands and it isn't the first of its chains
-    // (Parameters.h): looked at again as something is taken out, as the tree's callback looked for it again then, in the
-    // song's devices handed whole.
+    // A chain's crossover is one only while its container splits into bands and it isn't the first of its chains (Parameters.h):
+    // looked at again as something is taken out, in the song's devices handed whole.
     if (learningSource == ParameterSource::crossover && anyTakenOut)
     {
         const auto* chain = now.find (learning->device);

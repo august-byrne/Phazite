@@ -244,16 +244,13 @@ namespace
         // order, each alike, and its modulators and macros, read into values only where asked. Its parts first: what its
         // curves are of (getFrozenCurveOwners()) and the containers whose macros it holds are in them, so curves and macros
         // left out are of the same owners as before.
-        if (const auto* values = song.getValues())
-        {
-            const auto& devices = values->devices.get();
-            const auto& store = values->deviceStore.get();
+        const auto& devices = song.getValues()->devices.get();
+        const auto& store = song.getValues()->deviceStore.get();
 
-            if (! (devices.isSameAs (frozen.values.devices) && store.isSameAs (frozen.values.deviceStore)))
-                for (const auto id : frozen.parts)
-                    if (! soundsAsFrozen (devices, store, frozen.values, id))
-                        return false;
-        }
+        if (! (devices.isSameAs (frozen.values.devices) && store.isSameAs (frozen.values.deviceStore)))
+            for (const auto id : frozen.parts)
+                if (! soundsAsFrozen (devices, store, frozen.values, id))
+                    return false;
 
         if (const auto tempos = getTempoMapValue (song).tempos;
             tempos.identity() != frozen.tempos.identity() && ! (tempos == frozen.tempos))
@@ -379,7 +376,7 @@ void freezeFromFile (Song& song, TrackID track, const juce::File& rendered, juce
     setTrackFrozen (song, track, true, undo); // in the caller's step with its undo manager (Bounce in Place), else outside
 
     // What the track holds as it is frozen, taken here by what keeps the song's frozen tracks (FreezeKeeper, the song's
-    // writer of what is pending), not in its tree callback, which reads no clip of the song's (SongValues.h): so what
+    // writer of what is pending), not in its listener, which reads nothing of the song (SongValues.h): so what
     // changes after it, in the same turn too, unfreezes it.
     song.writePending();
 }

@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song's values: the song held as immutable values (the immer library; roadmap step S5.20, model/base/internal/
-// ValueArea.h), an area for each part of it. The areas are the song's clips (ClipsValue.h: SongClips, each clip's properties
-// and warp markers as a ClipValue, each track's clips in their order, each alias group's clips), which the clips' code
-// (model/arrangement/internal/Clips.h, AudioClips.h) computes each edit on; a MIDI clip's notes and its controllers' values
-// (ClipNotesValue.h: ClipNotes, every clip's in NotesByClip), which the notes' code (model/notes/internal/Notes.h) computes
-// each edit on, from one value to the next; the song's tempo map (TempoMapValue.h: its tempos and time signatures), which the
-// tempo map's code (model/transport/internal/Tempo.h) computes each edit on; the song's chord lane (ChordLaneValue.h: its
-// chords and key changes, and whether the song has a lane), which the chord lane's code (model/chords/internal/Chords.h)
-// computes each edit on; the song's MIDI links (MidiLinksValue.h: each controller linked to a parameter), which the MIDI
-// links' code (model/midi/internal/MidiLinks.h) computes each edit on; the song's automation (CurveValues.h: SongCurves, each
-// automated parameter's curve with its points, in the order the song made them), which automation's code
+// The song's values: the song held as immutable values (the immer library: ValueArea.h), an area for each part of it. The
+// areas are the song's clips (ClipsValue.h: SongClips, each clip's properties and warp markers as a ClipValue, each track's
+// clips in their order, each alias group's clips), which the clips' code (model/arrangement/internal/Clips.h, AudioClips.h)
+// computes each edit on; a MIDI clip's notes and its controllers' values (ClipNotesValue.h: ClipNotes, every clip's in
+// NotesByClip), which the notes' code (model/notes/internal/Notes.h) computes each edit on, from one value to the next; the
+// song's tempo map (TempoMapValue.h: its tempos and time signatures), which the tempo map's code
+// (model/transport/internal/Tempo.h) computes each edit on; the song's chord lane (ChordLaneValue.h: its chords and key
+// changes, and whether the song has a lane), which the chord lane's code (model/chords/internal/Chords.h) computes each edit
+// on; the song's MIDI links (MidiLinksValue.h: each controller linked to a parameter), which the MIDI links' code
+// (model/midi/internal/MidiLinks.h) computes each edit on; the song's automation (CurveValues.h: SongCurves, each automated
+// parameter's curve with its points, in the order the song made them), which automation's code
 // (model/automation/internal/Automation.h) computes each edit on; the song's sections (SectionsValue.h: each by its ID),
 // which the sections' code (model/arrangement/internal/Sections.h) computes each edit on; the song's modulation
 // (ModulationValue.h: SongModulation, each modulator and macro by its ID, each owner's in its order), which modulation's
@@ -35,72 +35,57 @@
 // place that reads and writes those elements by their names: what a file's song, or any part of one that comes into the song
 // as elements (a version's track, a track pasted), is read into, and what a whole copy of the song is written from.
 //
-// An area's parts. Each area has its own files, and each list that asks every area asks it in a line of its own; nothing
-// generic joins them (no table, no registration): plain functions, called in a list in a fixed order, which each list states
-// with its reason. What an area provides, the lists it joins, what reaches it and what it must not do, in the steps a builder
-// of the next area follows (<Area> is its name, as TempoMap; <area> its member's, as tempoMap; its element <AREA>, as
-// TEMPOMAP, where it has one at the song's root):
-//   1. Its value: internal/<Area>Value.h, with its .cpp in model/base/ (as TempoMapValue.h): the value's types, each with
-//      isSameAs() (ValueArea.h) and ==, the helpers that alone write it, its invariants as a function the check calls
-//      (TempoMapValue.h: isHeldAsTheSongHoldsIt(); ClipsValue.h: holdsItsLists()), and the conversion of its elements by
-//      name (read<Area>Value(), write<Area>(), a merge's property set on the value). Two readers of its element:
-//      read<Area>Value(), lenient (each property as the area's code always read it), for tests; and readHeld<Area>(), as the
-//      song holds the area (each number by its description, within its range, and what must hold together kept so, as
-//      ChordLaneValue.h's keepChordsApart()), which everything that enters the area reads: the song's making
-//      (readSongTree()), the versions' pass and a merge's choice (steps 8 and 9). Entries the selection names that have no
-//      identity in the file (an automation point: CurveValues.h, PointValue) get a key in the value, never saved nor compared
-//      as content, from a counter of SongValues' outside the history (givePointKey()): given to each as it enters the song
-//      (the song's making, an edit that makes one) and kept by each edit that keeps the entry, so that the selection, holding
-//      keys, follows the entries through edits, undo and redo.
-//   2. Its area: internal/<Area>Area.h and model/base/<Area>Area.cpp (as TempoMapArea.h), including this header: its teller
-//      (struct SongValues::<Area>Teller, a ValueArea listener that adds itself to the area and tells Listener of a change of
-//      its value); its setter, a member of SongValues defined there; its whole state's part (leadsTo<Area>(),
-//      write<Area>In()) and its reader of a song's tree (readHeld<Area>In()); its comparison of two states (holdSame<Area>(),
-//      declared in WholeState.h); and, if it holds IDs, findLargestIDIn (const <Area>Value&) (IDsHeld.h). Each new file
-//      listed in CMakeLists.txt (phazite_core) and in src/model/README.md. An area whose element's presence means something
-//      (the chord lane's CHORDLANE: a song without one takes its keys from the key set last) says it in its value
-//      (ChordLaneValue.h: placed), which its code sets in the step that changes the value, its teller tells as any change,
-//      and whole state writes as an empty element. An area whose element only holds its entries (the MIDI links' MIDILINKS,
-//      the sections' SECTIONS) has none while it holds none: an empty list is none, whole state writes no empty element, and
-//      a file's empty one reads as none. An area whose element is a place every song has (the tempo map's TEMPOMAP), or one
-//      whole state writes while the area holds entries (the curves' AUTOMATION: CurvesArea.h, writeCurvesIn()), is written so
-//      by whole state alone. An area whose entries sit under an owner (the clips under tracks; modulation under tracks, the
-//      master and containers; the devices under channels, containers and chains) names each owner by its ID in its entries, so
-//      that nothing follows an owner as it moves, and what removes an owner erases its entries first
-//      (model/arrangement/internal/Tracks.h: eraseTrackHoldings(); model/mixer/internal/Mixer.h: forgetWhatNamesTheGone());
-//      whole state writes an owner's entries in its element (writeModulationIn(): after its other children but those another
-//      area writes after it, a track's sends); and an entry keeps beside its owner each owner above it that a teller names
-//      (ModulatorPlace: a container's macro keeps its channel), so that what is told names it without reading another area,
-//      which an undo may not have put back yet.
-//   3. Here, in SongValues: its area as a member (ValueArea<<Area>Value> <area>, after the others); its setter (set<Area>());
-//      a virtual <area>Changed() in Listener, empty by default; struct <Area>Teller among the declarations below, and a
-//      std::unique_ptr<<Area>Teller> after the others.
-//   4. SongValues.cpp: its area header included; its area in the constructor's initialiser list after the others
-//      (<area> (song.getUndoManager(), its empty value)), and its teller after the others' (<area>Teller
-//      (std::make_unique<<Area>Teller> (<area>, listeners))); the destructor lets go of its teller before the others' (the
-//      reverse of their making); a line of takeIn(), which sets each area to the state a song is made of.
-//   5. SongState.h, WholeState.h and WholeState.cpp: a member of SongState and a line of getSongState() and of readSongTree()
-//      (its readHeld<Area>In(), in its area's file); a line of writeIn() (its write<Area>In()) and of leadsToKept() (its
-//      leadsTo<Area>()); its element, where it has one at the song's root, in the root's order, which is its description's
-//      (Schema.h: PHAZITE's elements in the order they are described, which writeSongTree() follows); a line of
-//      holdSameSong() (or of holdSameChannels(), for what a track or a device holds); its holdSame<Area>() declared with the
-//      others, comparing two states by identity first.
-//   6. IDsHeld.cpp: a line of findLargestIDHeld(), if it holds IDs.
-//   7. tests/SongCheck.cpp: its rule as a function of its own (check<Area>Value(): its invariants), a line of
-//      findValueProblems() and of findStateDifferences(). tests/SchemaTests.cpp: its elements' type a line of Changed's list
-//      of what the loader alone takes (is<Area>Entry()), and of findOpened(), which reads the opened song's element back in
-//      its whole state; a branch of its own for a property whole state writes with its default where the element had none
-//      (as the sections' energy).
-//   8. model/versions/internal/AreaClashes.h: choose<Area>Clash(), declared there and defined with the area's model code
-//      (as chooseTempoMapClash() in model/transport/Tempo.cpp), a line of chooseInAreas() in model/versions/VersionsModel.cpp.
-//   9. model/versions/ApplySong.cpp: its pass (make<Area>Like(), through its setter) and a line of makeValuesLike(); its part
-//      of each line's pass beside the whole song's, where that line holds it: a track's, makeTrackLikeIn() (as its
-//      ClipPass), and the song's own, makeSongOwnLikeIn() (as its makeTempoMapLike()). What the other's version couldn't read
-//      (a stand-in): an area whose entries have no identity leaves its value whole (the tempo map's, the chord lane's); one
-//      whose entries are keyed keeps the song's entry of a stand-in's key in its place (the MIDI links', by a link's
-//      controller: ApplySong.cpp, makeMidiLinksLike()).
-//  10. Each SongValues::Listener: its <area>Changed() override, which only marks (step 12); one that follows nothing of the
-//      area says so in a comment beside its overrides. They are:
+// How to add an area to the song. Each area has its own files, and each list that asks every area asks it in a line of its
+// own; nothing generic joins them (no table, no registration): plain functions, called in a list in a fixed order, which
+// each list states with its reason. <Area> is the area's name (as TempoMap), <area> its member's (as tempoMap), <AREA> its
+// element where it has one at the song's root (as TEMPOMAP).
+//   1. The value and its conversion: internal/<Area>Value.h, with its .cpp in model/base/ (as TempoMapValue.h). The value's
+//      types, each with isSameAs() (ValueArea.h) and ==; the helpers that alone write it; its invariants as a function the
+//      check calls (TempoMapValue.h: isHeldAsTheSongHoldsIt(); ClipsValue.h: holdsItsLists()); and the conversion of its
+//      elements by name: write<Area>(), and readHeld<Area>(), which reads the elements as the song holds the area (each
+//      number by its description, within its range: SongText.h, readDescribed(); what must hold together kept so, as
+//      ChordLaneValue.h's keepChordsApart()) and is what everything that enters the area reads: the song's making
+//      (readSongTree()), the versions' pass and a merge's choice (step 7). The loader (model/project/internal/Project.h:
+//      makeConsistent()) keeps a file's elements by the same rule, so that a file reads the same read whole or in part. A
+//      reader of elements as they are written, no range kept, only where the loader's checks need one before the tree is
+//      consistent (ModulationValue.h: readModulatorValueIn()). Entries the selection names that have no identity in the file
+//      (an automation point: CurveValues.h, PointValue) get a key in the value, never saved nor compared as content, from a
+//      count of SongValues' outside the history (givePointKey()): given to each as it enters the song and kept by each edit
+//      that keeps the entry, so that the selection, holding keys, follows the entries through edits, undo and redo.
+//   2. Its names: each element and property it writes described once in Schema.h (an Element with the elements it goes in, a
+//      Property<T> with its range or its words, its default, its kind and whether it counts as a change), which the loader
+//      and the check read; tests/golden/format/song-schema.json regenerated on purpose (PHAZITE_UPDATE_GOLDEN=1, the reason in
+//      the commit); and each name in the representative golden project (tests/GoldenProjectTests.cpp), or in
+//      getNamesNotInTheProject() there with why.
+//   3. Plain, keyed or outside. A plain area (ValueArea<<Area>Value>) is undone whole: what only an undo step writes (the
+//      clips, the tempo map, the devices). A keyed one, whose value type says undoesByEntry (ValueArea.h), is undone by
+//      entry: what is written in steps and outside the history alike (the devices' store, the tracks' switches, the song's
+//      standing), so that a write outside the history to an entry a step didn't change survives that step's Undo; what a
+//      maker gives a new item there is written outside the history where the area holds no entry for it. What is never an
+//      undo step (view state, how the song plays) is an OutsideValue (OutsideValue.h), which no step holds. What is written
+//      outside the history never lives in a plain area: its Undo would put the value back whole.
+//   4. The area: internal/<Area>Area.h and model/base/<Area>Area.cpp (as TempoMapArea.h), including this header; here its
+//      member (ValueArea<<Area>Value> <area>, after the others) and its setter (set<Area>(), a member of SongValues defined
+//      there: one set of the next value, in the step in progress or, while the song is written outside the history
+//      (Song::OutsideHistory), outside it; a value equal to the one held is nothing, or ValueArea.h's setWithoutStep() where
+//      only identity differs); in SongValues.cpp its area header included, its place in the constructor's initialiser list
+//      (<area> (song.getUndoManager(), its empty value)) and its teller's after the others', the destructor letting go of its
+//      teller before the others' (the reverse of their making), and a line of takeIn(), which sets each area to the state a
+//      song is made of. Each new file listed in CMakeLists.txt (phazite_core) and in src/model/README.md. Its code, outside
+//      model/base (as model/transport/internal/Tempo.h), reads it by ID, by reference into the area's value where it asks
+//      on the message thread (Automation.h: getCurvesValue(), findCurve()), keeping no reference across a set, and is the
+//      only code that changes it, through the setter. An area whose entries sit under an owner (the clips under tracks;
+//      modulation under tracks, the master and containers; the devices under channels, containers and chains) names each
+//      owner by its ID in its entries, so that nothing follows an owner as it moves, and what removes an owner erases its
+//      entries first (model/arrangement/internal/Tracks.h: eraseTrackHoldings(); model/mixer/internal/Mixer.h:
+//      forgetWhatNamesTheGone()); an entry keeps beside its owner each owner above it that a teller names (ModulatorPlace: a
+//      container's macro keeps its channel), so that what is told names it without reading another area, which an undo may
+//      not have put back yet.
+//   5. Its teller and its listener function: struct SongValues::<Area>Teller among the declarations below (a ValueArea
+//      listener that adds itself to the area and tells Listener of each change of its value, with the list of what changed
+//      it works out from the value before and after), a std::unique_ptr<<Area>Teller> after the others, and a virtual
+//      <area>Changed() in Listener, empty by default. Each SongValues::Listener gets its override, which only marks (step 9),
+//      or says in a comment beside its overrides that it follows nothing of the area. They are:
 //      - ClipRenders (model/arrangement/ClipRenders.cpp, internal/ClipRenders.h): rendersMayChange() where the area holds
 //        what a clip's render is made of (the clips', the tempo map's; not the notes', nor the curves': no render holds
 //        automation; nor modulation's, which moves nothing a render is made of; nor the sends', which play after a clip).
@@ -125,7 +110,7 @@
 //        changes: the tracks' notes and audio, the tempo, the curves by their parameters).
 //      - Project (model/project/Project.cpp, internal/Project.h): counts the change and marks what to compare (a member of
 //        its own, as tempoToCompare, cleared in clearToCompare()); its quick check, a line of compareWithSavedState()'s list
-//        (as isTempoMapAsSaved()); and its whole comparison, WholeState.h's holdSameSong() (step 5), which the quick check
+//        (as isTempoMapAsSaved()); and its whole comparison, WholeState.h's holdSameSong() (step 6), which the quick check
 //        agrees with (tests/SavedCopyTests.cpp).
 //      - ProjectContext's SongWatcher (model/project/ProjectContext.cpp): names what changed and adds it to its group of
 //        SongChanges (ProjectContext.h; a group of its own where the views need one).
@@ -137,30 +122,54 @@
 //        the channel it remembers).
 //      - AudioRecorder (model/transport/internal/AudioRecorder.h): the tracks' alone, its inputs brought in line from the
 //        tracks it is handed.
-//  11. What takes the song or a part of it for another thread or for later takes the area whole (WholeState.h:
-//      copyWholeSong(), getSongState(), or a part's own whole copy, as copyWholeClip()): the changes' worker
-//      (model/versions/ChangesWorker.cpp: take(), makeSkeleton(), copyTrack(), which writes a track's modulation in as
-//      whole state does, on the history's thread from a state); the saved copy (model/project/Project.cpp: savedState,
-//      a state, written on the writer's thread with writeSongTree()); the clipboard (model/arrangement/Clipboard.cpp); an export
-//      (model/project/Export.cpp, DawProject.cpp). What reads the area on the message thread reads it in place, by
-//      reference (Automation.h: getCurvesValue(), findCurve()), keeping no reference across a set.
-//  12. What an area must not do: a listener told of an area's change only marks, and reads the song at a later moment
+//   6. The song whole: a member of SongState (SongState.h) and a line of getSongState() and of readSongTree() (its
+//      readHeld<Area>In(), in its area's file); in WholeState.cpp a line of writeIn() (its write<Area>In()) and of
+//      leadsToKept() (its leadsTo<Area>()), its element, where it has one at the song's root, in the root's order, which is
+//      its description's (Schema.h: PHAZITE's elements in the order they are described, which writeSongTree() follows); a
+//      line of holdSameSong() (or of holdSameChannels(), for what a track or a device holds), its holdSame<Area>() declared
+//      with the others in WholeState.h, comparing two states by identity first. An area whose element's presence means
+//      something (the chord lane's CHORDLANE: a song without one takes its keys from the key set last) says it in its value
+//      (ChordLaneValue.h: placed), which its code sets in the step that changes the value, its teller tells as any change,
+//      and whole state writes as an empty element. An area whose element only holds its entries (the MIDI links' MIDILINKS,
+//      the sections' SECTIONS) has none while it holds none: whole state writes no empty element, and a file's empty one
+//      reads as none. An element that is a place every song has (the tempo map's TEMPOMAP), or one written while the area
+//      holds entries (the curves' AUTOMATION: CurvesArea.h, writeCurvesIn()), is written so by whole state alone. An owner's
+//      entries are written in its element (writeModulationIn(): after its other children but those another area writes
+//      after it, a track's sends). If it holds IDs: findLargestIDIn (const <Area>Value&) (IDsHeld.h) and a line of
+//      IDsHeld.cpp's findLargestIDHeld() (and of forEachNameableIDHeld() where something can name its entries).
+//   7. The versions: choose<Area>Clash(), declared in model/versions/internal/AreaClashes.h and defined with the area's
+//      model code (as chooseTempoMapClash() in model/transport/Tempo.cpp), a line of chooseInAreas() in
+//      model/versions/VersionsModel.cpp; its pass in model/versions/ApplySong.cpp (make<Area>Like(), through its setter) and
+//      a line of makeValuesLike(); its part of each line's pass beside the whole song's, where that line holds it: a
+//      track's, makeTrackLikeIn() (as its ClipPass), and the song's own, makeSongOwnLikeIn() (as its makeTempoMapLike()).
+//      What the other's version couldn't read (a stand-in): an area whose entries have no identity leaves its value whole
+//      (the tempo map's, the chord lane's); one whose entries are keyed keeps the song's entry of a stand-in's key in its
+//      place (the MIDI links', by a link's controller: ApplySong.cpp, makeMidiLinksLike()).
+//   8. What takes the song or a part of it for another thread or for later takes a state (getSongState()) and writes the
+//      area's elements from it where they are used: the changes' worker (model/versions/ChangesWorker.cpp: take(),
+//      makeSkeleton(), copyTrack(), on the history's thread); the saved copy (model/project/Project.cpp: savedState, written
+//      on the writer's thread with writeSongTree()); the clipboard (model/arrangement/Clipboard.cpp; a part's own whole copy,
+//      as copyWholeClip()); an export (model/project/Export.cpp, DawProject.cpp).
+//   9. What an area must not do: a listener told of an area's change only marks, and reads the song at a later moment
 //      (during an undo the step's areas move back one after another: a listener told by the first may find the second not
-//      back yet); a set equal to what is held makes no undo step (nothing, or ValueArea.h's setWithoutStep() where only
-//      identity differs); a number an element holds as text is read through readValueNumber() or readDescribed()
-//      (SongText.h), never a cast; what is written outside the undo history (view state, mute and solo) never lives in an
-//      area's undoable value.
-//  13. Its tests: its value and conversion, the round trip of every golden project's entries and of damaged ones
-//      (tests/InconsistentProjectTests.cpp), a song with its elements opened through makeSong(); its listener's case (as
-//      tests/SongValuesTempoTests.cpp's: each edit tells once, its Undo and its Redo too; where it counts the version
-//      history's song changes for an edit that makes an ID, it counts the count of IDs moving on (Song::makeID(): nextID) in
-//      the step alone, never in its Undo or its Redo, which leave the count as it is); its writers, through the setter, and
-//      the versions' pass and clash (steps 8 and 9); the check's rule, whole state, Undo and Redo (UndoCheck), the unsaved
+//      back yet); a set equal to what is held makes no undo step; a number an element holds as text is read through
+//      readValueNumber() or readDescribed() (SongText.h), never a cast; what is written outside the undo history never lives
+//      in a plain area (step 3).
+//  10. Its checks: tests/SongCheck.cpp, its rule as a function of its own (check<Area>Value(): its invariants), a line of
+//      findValueProblems() and of findStateDifferences(); tests/SchemaTests.cpp, its elements' type a line of Changed's list
+//      of what the loader alone takes (is<Area>Entry()), and of findOpened(), which reads the opened song's element back in
+//      its whole state, with a branch of its own for a property whole state writes with its default where the element had
+//      none (as the sections' energy).
+//  11. Its tests: its value and conversion, the round trip of every golden project's entries and of damaged ones
+//      (tests/InconsistentProjectTests.cpp), a song with its elements opened through makeSong(), and its state read back from
+//      its own file's form (SongCheck.cpp: findReopenedProblems()); its listener's case (as tests/SongValuesTempoTests.cpp's:
+//      each edit tells once, its Undo and its Redo too; where it counts the version history's song changes for an edit that
+//      makes an ID, it counts the count of IDs moving on, Song::makeID(), in the step alone, never in its Undo or its Redo);
+//      its writers, through the setter, and the versions' pass and clash (step 7); Undo and Redo (UndoCheck), the unsaved
 //      check agreeing with the whole comparison (tests/SavedCopyTests.cpp), and a speed gate (tests/PerformanceGateTests.cpp)
 //      where a reader is on a per-frame path.
-//  14. The docs it updates: CLAUDE.md's paragraph on the song's values; src/model/README.md; tests/README.md's nets;
-//      docs/design/engine.md; docs/project-format.md; docs/roadmap.md's sentence on where S5.20 stands; and
-//      docs/performance.md after a measurement.
+//  12. The docs it updates: CLAUDE.md's bullet on the song's values; src/model/README.md; tests/README.md's nets;
+//      docs/design/engine.md; docs/project-format.md; and docs/performance.md after a measurement.
 //
 // immer is the model's alone (tools/check-architecture.sh: immer-outside-model): nothing outside src/model includes this.
 #pragma once

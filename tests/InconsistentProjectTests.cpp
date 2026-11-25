@@ -1522,7 +1522,7 @@ TEST_CASE ("A number written as text reads as the same number wherever the song 
         numbers.push_back ((double) first (schema::NOTE, schema::CLIP, {})[schema::noteStart]);
         numbers.push_back ((double) first (schema::CONTROL, schema::CLIP, {})[schema::controlBeat]);
         numbers.push_back ((double) first (schema::WARP, schema::CLIP, schema::clipIsAudio)[schema::warpTime]);
-        // A curve's points as whole state writes them from the song's values (roadmap step S5.20): read as the song's values
+        // A curve's points as whole state writes them from the song's values: read as the song's values
         // read one.
         numbers.push_back (readValueNumber (first (schema::POINT, schema::CURVE, {})[schema::pointBeat]).value_or (-1.0));
         return numbers;
@@ -1664,11 +1664,9 @@ TEST_CASE ("A chord's start and a key change's written as text read as the same 
         juce::ValueTree lane (schema::CHORDLANE);
         lane.appendChild (juce::ValueTree (schema::CHORD, { { schema::chordStart, text }, { schema::chordLength, 2.0 } }), nullptr);
 
-        for (const auto& value : { phazite::readHeldChordLane (lane), phazite::readChordLaneValue (lane) })
-        {
-            REQUIRE (value.chords.size() == 1);
-            CHECK (juce::exactlyEqual (value.chords[0].start.inBeats(), expected));
-        }
+        const auto value = phazite::readHeldChordLane (lane);
+        REQUIRE (value.chords.size() == 1);
+        CHECK (juce::exactlyEqual (value.chords[0].start.inBeats(), expected));
     }
 }
 
@@ -2653,8 +2651,8 @@ TEST_CASE ("Elements and properties Phazite doesn't know stay where they are, as
     const auto saved = juce::parseXML (project->getFile());
     REQUIRE (saved != nullptr);
 
-    // At the song's root, what Phazite doesn't know goes as the song opens, with everything in it (roadmap step S5.20, the
-    // song's own: the song holds its root's own as values, and nothing else of it: SongOwnArea.h).
+    // At the song's root, what Phazite doesn't know goes as the song opens, with everything in it (the song holds its root's own
+    // as values, and nothing else of it: SongOwnArea.h).
     CHECK (saved->getChildByName ("FUTURE") == nullptr);
     // And a track's: what Phazite doesn't know on a TRACK (or the MASTER) isn't kept, as a track is a value beside the song's
     // tree, which holds its own fields alone (named, roadmap step S5.20, the tracks' switch: docs/project-format.md); nor a

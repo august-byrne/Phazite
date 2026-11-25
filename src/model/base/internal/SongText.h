@@ -40,13 +40,13 @@ bool isSameValue (const juce::var&, const juce::var&);
 // ("0x10", "4abc", an empty text). What is no finite number each reader then takes as its description's fallback.
 std::optional<double> readValueNumber (const juce::var&);
 
-// A number of an element (a note's, a controller's value's, a clip's, a warp marker's) as its value holds it: the
-// property's own, read as the loader reads it (readValueNumber(), so that a text reads as the same number wherever it is
-// read: "1e-321" as that subnormal, never as 0), kept within what its description gives (model/base/internal/Schema.h); and
-// where the element has none, or what it has is no finite number, what the description gives for one that is no number (a
-// velocity of 100, a pitch of 60, a length of a beat), else 0. In the tree a note without a velocity stayed without one; a
-// value always has one, which the loader left to this (a file from others: tests/FuzzTests.cpp found one). What the notes'
-// and the clips' conversions read their numbers with (ClipNotesValue.h, ClipsValue.h).
+// A number of an element (a note's, a controller's value's, a clip's, a warp marker's) as its value holds it: the property's own,
+// read as the loader reads it (readValueNumber(), so that a text reads as the same number wherever it is read: "1e-321" as that
+// subnormal, never as 0), kept within what its description gives (model/base/internal/Schema.h); and where the element has none,
+// or what it has is no finite number, what the description gives for one that is no number (a velocity of 100, a pitch of 60, a
+// length of a beat), else 0. A value always has one, so a note without a velocity in a file from others reads with its fallback
+// (tests/FuzzTests.cpp found one). What the notes' and the clips' conversions read their numbers with (ClipNotesValue.h,
+// ClipsValue.h).
 double readDescribed (const juce::var& held, const schema::PropertyDescription&);
 double readDescribed (const juce::ValueTree& element, const schema::PropertyDescription&);
 
@@ -89,4 +89,9 @@ void writeStartTag (juce::OutputStream&, const juce::String& type, const Propert
 // indented two spaces a level; each property on a line of its own, the first beside the element's type and the others
 // under it; lines ending in a line feed.
 void writeProjectText (juce::OutputStream&, const juce::ValueTree&);
+
+// An element read from text (a project file's, a version's piece's) as a tree, the text between its tags taken out first at
+// every depth: what Phazite writes never holds any (its values are attributes) and a value tree has nothing for it, so that
+// a file from elsewhere that holds some reads as Phazite's would.
+juce::ValueTree readTextElement (juce::XmlElement&);
 } // namespace phazite

@@ -773,7 +773,7 @@ void addTempoCommands (CommandRegistry& registry, Selection& selection)
 namespace
 {
     // Whether a path in the song goes into its tempo map: its first step the song's TEMPOMAP, which the song holds as a value
-    // beside its tree (model/base/internal/SongValues.h), its tree's element an empty place.
+    // (model/base/internal/SongValues.h).
     bool isPathInTempoMap (const juce::StringArray& path)
     {
         return ! path.isEmpty() && path[0].startsWith (schema::TEMPOMAP.toString() + ":");

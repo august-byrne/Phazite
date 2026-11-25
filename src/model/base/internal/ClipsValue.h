@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A clip as a value (roadmap step S5.20, the clips' area), every clip of a song (SongClips) with the helpers that alone write
+// A clip as a value, every clip of a song (SongClips) with the helpers that alone write
 // it, and the conversion between a CLIP element with its WARP children and the value, the one place that reads and writes
 // those by name. The song holds its clips in an area of its values (SongValues.h; the area's parts in ClipsArea.h).
 //
@@ -19,7 +19,7 @@
 
 namespace phazite
 {
-// A clip as a value (roadmap step S5.20, the clips' area): what each property of its CLIP element (Schema.h, "On CLIP") and
+// A clip as a value: what each property of its CLIP element (Schema.h, "On CLIP") and
 // its WARP children hold, in Phazite's own types. The song holds its clips as these (SongClips, below), which the clips' code
 // (model/arrangement/internal/Clips.h, AudioClips.h) reads (getClipValue()) and sets for the code outside it, by their IDs.
 

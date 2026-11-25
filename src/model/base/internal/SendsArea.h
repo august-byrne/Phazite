@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The sends' area of the song's values (roadmap step S5.20; SongValues.h, whose recipe this follows): its parts, each of which
+// The sends' area of the song's values (SongValues.h, whose recipe this follows): its parts, each of which
 // a list of SongValues.h's, WholeState.h's or IDsHeld.h's asks in turn, a line for each area. Its value and the conversion of
 // its elements are SendsValue.h's. It holds IDs (each send's). Message thread, but for whole state's parts and the
 // comparisons, which read only the values they are given.
@@ -38,7 +38,7 @@ struct SongValues::SendsTeller final : ValueArea<SongSends>::Listener
 
 // The sends' part of whole state (WholeState.cpp: writeIn()): a copy's TRACK given its sends from the values kept, by its ID,
 // in their list's order, after its other children (its modulators and macros among them, which modulation's part writes
-// before: decision L.5 of roadmap step S5.20's design). Nothing for another element. Whole state writes each TRACK itself
+// before). Nothing for another element. Whole state writes each TRACK itself
 // (WholeState.cpp: writeTracksIn()), asking this of each.
 void writeSendsIn (juce::ValueTree& element, const SongState&);
 

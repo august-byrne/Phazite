@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song's sections as a value (model/base/internal/SectionsValue.h; roadmap step S5.20, the sections' first piece): the
-// conversion between the value and the SECTIONS element (the one place that reads and writes SECTION by name), round trip
-// through the sections of the golden files and through damaged ones; a merge's clash on a section's property; and the
-// sections' readers on the value (model/arrangement/internal/Sections.h, the selection's), the same as before it came.
+// The song's sections as a value (model/base/internal/SectionsValue.h): the conversion between the value and the SECTIONS
+// element (the one place that reads and writes SECTION by name), round trip through the sections of the golden files and
+// through damaged ones; a merge's clash on a section's property; and the sections' readers on the value (model/arrangement/
+// internal/Sections.h, the selection's), the same as reading the elements the loader leaves.
 //   phazite_tests.exe --test-case="Sections value*"
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
@@ -152,20 +152,16 @@ TEST_CASE ("Sections value: the golden files' sections, read into a value and wr
         REQUIRE (element != nullptr);
         const auto sections = juce::ValueTree::fromXml (*element);
 
-        const auto value = phazite::readSectionsValue (sections);
+        const auto value = phazite::readHeldSections (sections);
         REQUIRE ((int) value.sections.size() == sections.getNumChildren());
         const auto written = writeSections (value);
         const auto differences = findElementDifferences (sections, written);
         CHECK_MESSAGE (differences.isEmpty(), differences.joinIntoString ("\n"));
-        CHECK (phazite::readSectionsValue (written) == value);
-
-        // Read as the song holds them (SectionsValue.h: readHeldSections(), what the song takes in as it opens): the same.
-        CHECK (phazite::readHeldSections (sections) == value);
+        CHECK (phazite::readHeldSections (written) == value);
     }
 }
 
-TEST_CASE ("Sections value: damaged sections read as the sections' code read them, written as it writes them, and the readers read "
-           "them as before")
+TEST_CASE ("Sections value: the readers on a song opened with damaged sections read them as before")
 {
     // A section without an ID, a start or a length; an energy beyond its range and none; a colour written empty and none; two
     // at one start; two with one ID; a child of another type and a property Phazite doesn't know.
@@ -178,30 +174,6 @@ TEST_CASE ("Sections value: damaged sections read as the sections' code read the
                                  R"(<SECTION id="9" start="40" length="4" name="Same ID"/>)"
                                  R"(</SECTIONS>)");
 
-    const auto value = phazite::readSectionsValue (sections);
-    REQUIRE (value.sections.size() == 5);
-    const auto& nothing = value.sections[0];
-    CHECK_FALSE (nothing.id.isValid());
-    CHECK (nothing.start == beat (0.0));
-    CHECK (nothing.length == phazite::BeatDuration());
-    CHECK (juce::exactlyEqual (nothing.energy, 0.5f));
-    CHECK_FALSE (nothing.colour.has_value());
-    CHECK (juce::exactlyEqual (value.sections[1].energy, 1.0f));
-    CHECK (value.sections[1].colour == std::optional<juce::String> (juce::String())); // written empty: empty, not none
-    CHECK (value.sections[2].colour == std::optional<juce::String> ("ff112233"));
-    CHECK (value.sections[2].tip == "Hm.");
-    CHECK (juce::exactlyEqual (value.sections[3].energy, 0.0f));
-    CHECK (value.find (phazite::SectionID::fromRaw (9)) == &value.sections[1]);
-    CHECK (value.find (phazite::SectionID::fromRaw (12)) == nullptr);
-
-    // Written as the sections' code writes them (a role, a tip and a colour only where there is one), read again the same.
-    const auto written = writeSections (value);
-    CHECK (phazite::readSectionsValue (written) == value);
-    CHECK_FALSE (written.getChild (0).hasProperty (schema::sectionRole));
-    CHECK_FALSE (written.getChild (0).hasProperty (schema::sectionColour));
-    CHECK (written.getChild (0).hasProperty (schema::sectionName));
-    CHECK (phazite::readSectionsValue ({}) == SectionsValue {});
-
     // The readers on a song opened with them (a file from others, which the loader makes consistent and the song takes into its
     // values: SectionsValue.h, readHeldSections()), the same as the sections' code read the sections the loader left.
     auto state = phazite::writeSongTree (phazite::makeNewSong());
@@ -209,7 +181,7 @@ TEST_CASE ("Sections value: damaged sections read as the sections' code read the
     const auto song = phazite::makeSong (state);
     REQUIRE (song != nullptr);
     const auto held = phazite::test::copyWholeSong (*song).getChildWithName (schema::SECTIONS);
-    CHECK (phazite::getSectionsValue (*song) == phazite::readSectionsValue (held));
+    CHECK (phazite::getSectionsValue (*song) == phazite::readHeldSections (held));
     CHECK_FALSE (phazite::getSectionsValue (*song).sections.empty());
     checkReadersAsBefore (*song, held);
 }
@@ -217,10 +189,10 @@ TEST_CASE ("Sections value: damaged sections read as the sections' code read the
 TEST_CASE ("Sections value: sections read as the song holds them keep what their descriptions keep, one of each ID, in the "
            "element's order")
 {
-    // What enters the song's sections (SectionsValue.h: readHeldSections(), withSectionTaken()): a section without an ID the
-    // song can count on from goes, as does a second of one ID (the first stays); a start and a length by their descriptions
-    // (within their ranges, and their fallbacks where they have none or no finite number: a length of four beats); an energy
-    // within 0 to 1, 0.5 where it has none or no number; a colour as written, none where it has none.
+    // What enters the song's sections (SectionsValue.h: readHeldSections()): a section without an ID the song can count on from
+    // goes, as does a second of one ID (the first stays); a start and a length by their descriptions (within their ranges, and
+    // their fallbacks where they have none or no finite number: a length of four beats); an energy within 0 to 1, 0.5 where it
+    // has none or no number; a colour as written, none where it has none.
     const auto sections = parse (R"(<SECTIONS colour="red"><SECTION name="No ID" start="0" length="4"/>)"
                                  R"(<SECTION id="0" name="Zero" start="0" length="4"/>)"
                                  R"(<SECTION id="9" name="Damaged" start="-4" energy="nan"/><OTHER id="11"/>)"
@@ -248,6 +220,18 @@ TEST_CASE ("Sections value: sections read as the song holds them keep what their
     CHECK_FALSE (phazite::holdsSectionsHeld ({ value.sections.push_back (damaged) }));
     CHECK_FALSE (phazite::readHeldSection (sections.getChild (0)).has_value());
     CHECK_FALSE (phazite::readHeldSection (sections.getChild (3)).has_value()); // not a section
+    CHECK (phazite::readHeldSections ({}) == SectionsValue {});
+
+    // A section by its ID: a pointer into the value, none for an ID it doesn't hold.
+    CHECK (value.find (phazite::SectionID::fromRaw (10)) == &value.sections[1]);
+    CHECK (value.find (phazite::SectionID::fromRaw (11)) == nullptr);
+
+    // Written as the sections' code writes them (a role, a tip and a colour only where there is one), read again the same.
+    const auto written = writeSections (value);
+    CHECK (phazite::readHeldSections (written) == value);
+    CHECK_FALSE (written.getChild (0).hasProperty (schema::sectionRole));
+    CHECK_FALSE (written.getChild (0).hasProperty (schema::sectionColour));
+    CHECK (written.getChild (1).hasProperty (schema::sectionTip));
 }
 
 TEST_CASE ("Sections value: a colour written empty and none round-trip as they were, and show as they did")
@@ -259,7 +243,7 @@ TEST_CASE ("Sections value: a colour written empty and none round-trip as they w
                                  R"(<SECTION id="4" start="4" length="4" name="None" role="drop" energy="0.5"/>)"
                                  R"(</SECTIONS>)");
 
-    const auto value = phazite::readSectionsValue (sections);
+    const auto value = phazite::readHeldSections (sections);
     REQUIRE (value.sections.size() == 2);
     CHECK (value.sections[0].colour == std::optional<juce::String> (juce::String()));
     CHECK_FALSE (value.sections[1].colour.has_value());
@@ -371,7 +355,7 @@ TEST_CASE ("Sections value: the sections the model made are read through the val
     }
 
     const auto sections = phazite::test::copyWholeSong (song).getChildWithName (schema::SECTIONS);
-    CHECK (phazite::getSectionsValue (song) == phazite::readSectionsValue (sections));
+    CHECK (phazite::getSectionsValue (song) == phazite::readHeldSections (sections));
     checkReadersAsBefore (song, sections);
 
     selection.selectOnly (verse);

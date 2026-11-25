@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The devices as values of the song (roadmap step S5.20, the devices' switch: model/base/internal/DevicesArea.h): a track's
+// The devices as values of the song (model/base/internal/DevicesArea.h): a track's
 // devices go with it and come back with it, a container's macros go with the container (model/mixer/internal/Mixer.h:
 // forgetWhatNamesTheGone()), and what is made, copied or chosen gives the song its devices through the devices' setters.
 // Each change one exact undo step (UndoCheck.h).

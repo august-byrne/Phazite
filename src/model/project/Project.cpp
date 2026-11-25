@@ -71,25 +71,12 @@ bool isLinkElsewhere (const juce::File& entry, bool isSymbolicLink, const juce::
 
 namespace
 {
-    // Text between an element's tags, which a song never holds (its values are attributes), and which a value tree has
-    // nothing for: left out of a file from elsewhere before it becomes one.
-    void removeText (juce::XmlElement& element)
-    {
-        element.deleteAllTextElements();
-
-        for (auto* child : element.getChildIterator())
-            removeText (*child);
-    }
-
     // The song a project file holds (Schema.h: PHAZITE, the file's one element), or an invalid tree for a file that holds
-    // none.
+    // none. Text between its tags is left out (SongText.h: readTextElement()).
     juce::ValueTree readSong (const juce::File& file)
     {
         if (const auto xml = juce::XmlDocument::parse (file); xml != nullptr && xml->getTagName() == schema::PHAZITE.toString())
-        {
-            removeText (*xml);
-            return juce::ValueTree::fromXml (*xml);
-        }
+            return readTextElement (*xml);
 
         return {};
     }
@@ -2331,9 +2318,7 @@ Project::Project (Song::Ptr s, const juce::File& f)
     song->setCacheFolder (getCacheFolder());
     rememberSavedState(); // what opening made of it isn't a change
     changesOutsideHistory = getOwnChangesOutsideHistory();
-
-    if (auto* values = song->getValues())
-        values->addListener (this);
+    song->getValues()->addListener (this);
 
     // While the song shows another (a version open: Song::setShowingOther()), its unsaved mark is held as it was as that
     // began, compared now: what the other changes is noted, and compared once it went (compareWithSavedState()), and neither
@@ -2387,10 +2372,7 @@ Project::~Project()
         tellNamesFailed();
 
     autosaveWriter = nullptr; // before the autosave goes
-
-    if (auto* values = song->getValues())
-        values->removeListener (this);
-
+    song->getValues()->removeListener (this);
     getAutosaveFile (file).deleteFile();
     purgeCache (*song);
 }
@@ -3073,9 +3055,9 @@ void Project::compareWithSavedState()
 
     same = same && isSongOwnAsSaved(); // the song's own, by its values
 
-    // What the values' listener marked of each area the song keeps beside its tree, against the saved copy's: each area in
-    // turn, a line each, in this order (the notes, the clips, the tempo map, the chord lane, the curves, the MIDI links, the
-    // sections, modulation, the sends, the devices, the devices' store, the tracks), each asked only while all before it compare.
+    // What the values' listener marked of each area of the song, against the saved copy's: each area in turn, a line each, in
+    // this order (the notes, the clips, the tempo map, the chord lane, the curves, the MIDI links, the sections, modulation, the
+    // sends, the devices, the devices' store, the tracks), each asked only while all before it compare.
     same = same && areNotesAsSaved();
     same = same && areClipsAsSaved();
     same = same && isTempoMapAsSaved();
@@ -3087,7 +3069,7 @@ void Project::compareWithSavedState()
     same = same && areSendsAsSaved();
     same = same && areDevicesAsSaved();
     same = same && isDeviceStoreAsSaved();
-    same = same && areTracksAsSaved(); // the tracks', by element while the trees hold them
+    same = same && areTracksAsSaved();
 
     clearToCompare();
 

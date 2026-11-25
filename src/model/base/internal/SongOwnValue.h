@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// What the song holds of its own, as values (roadmap step S5.20, the song's own): its root element's properties (Schema.h:
+// What the song holds of its own, as values: its root element's properties (Schema.h:
 // PHAZITE's outline, notes, idNumbering, patternsKeepTheirSpeed, the loop's, playStart, metronome, punch, lastInput, the
 // playlist's grid, versionsBranch, versionsBase) and its small elements (LASTKEY, PIANOROLL, MERGING), in three values by how
 // the song writes them: what only an undo step writes (SongOwnValue, plain: an Undo puts it back whole), what a step and a
@@ -7,12 +7,12 @@
 // tree's Undo of a property does), and what no step writes (SongOutside: state and view, never in the history). nextID is no
 // value of these: a count, which the song holds itself (Song.h: makeID()).
 //
-// The song holds them as areas of its values (SongValues.h: songOwn, songStanding, songOutside), its tree none of them: the
-// getters below read each area's value as it is, and every reader of the song's own reads through them; the setters below
-// are their writers' one way to change them, each setting the area's next value once; and what listens to the song hears
-// them change from the values' listener (SongValues.h: songOwnChanged(), songStandingChanged(), songOutsideChanged(), told
-// by each area's teller: SongOwnArea.h). The conversion below is the one place that reads and writes these names: what the
-// song takes in as it opens (SongOwnArea.h, as it is made of its state) and what a whole copy is written from (WholeState.h).
+// The song holds them as areas of its values (SongValues.h: songOwn, songStanding, songOutside): the getters below read each
+// area's value as it is, and every reader of the song's own reads through them; the setters below are their writers' one way to
+// change them, each setting the area's next value once; and what listens to the song hears them change from the values' listener
+// (SongValues.h: songOwnChanged(), songStandingChanged(), songOutsideChanged(), told by each area's teller: SongOwnArea.h). The
+// conversion below is the one place that reads and writes these names: what the song takes in as it opens (SongOwnArea.h, as it
+// is made of its state) and what a whole copy is written from (WholeState.h).
 #pragma once
 
 #include "model/base/internal/ValueArea.h"
@@ -119,20 +119,15 @@ struct SongOutside
 //==============================================================================
 // The conversion: the one place that reads and writes these names.
 
-// What a song's root (PHAZITE) holds of each, as Phazite's code always read it (each property's own reading: a switch as a
-// var's bool, a number as a var's, a text as it is): for the tests and the check. Nothing but defaults for another element.
-SongOwnValue readSongOwnValue (const juce::ValueTree& phazite);
-SongStanding readSongStanding (const juce::ValueTree& phazite);
-SongOutside readSongOutside (const juce::ValueTree& phazite);
-
-// The same as the song holds it, each field by its description in Schema.h, by the rule the loader applies
-// (model/project/internal/Project.h: makeConsistent()): a numbering's and a version's names only of their hexadecimal digits
-// (hexDigits()), else none; the loop's range, where playback starts and a grid's offset within their ranges (a number that
-// is no finite one none, where playback starts 0, an offset made whole), and the loop's range only with both its ends, the
-// end past the start, else none; the key's root within 0 to 11, made whole, none where it is no finite number, its scale one
-// of its words, else none; a grid only where it holds one of its properties as its description keeps it (a step that is one
-// of its words, an offset that is a number), its step one of its words, else the default. What the getters read. A field
-// whose description bounds nothing (the texts, the switches) is read as Phazite's code always read it.
+// What a song's root (PHAZITE) holds of each as the song holds it (nothing but defaults for another element), each field by
+// its description in Schema.h, by the rule the loader applies (model/project/internal/Project.h: makeConsistent()): a
+// numbering's and a version's names only of their hexadecimal digits (hexDigits()), else none; the loop's range, where
+// playback starts and a grid's offset within their ranges (a number that is no finite one none, where playback starts 0, an
+// offset made whole), and the loop's range only with both its ends, the end past the start, else none; the key's root
+// within 0 to 11, made whole, none where it is no finite number, its scale one of its words, else none; a grid only where it
+// holds one of its properties as its description keeps it (a step that is one of its words, an offset that is a number),
+// its step one of its words, else the default. What the getters read. A field whose description bounds nothing (the texts,
+// the switches) is read as it is: a switch as a var's bool, a text as it is.
 SongOwnValue readHeldSongOwn (const juce::ValueTree& phazite);
 SongStanding readHeldSongStanding (const juce::ValueTree& phazite);
 SongOutside readHeldSongOutside (const juce::ValueTree& phazite);

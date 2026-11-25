@@ -38,16 +38,14 @@ void forEachNameableIDHeld (const Song& song, const std::function<void (std::uin
     // value: modulation's (each modulator's and macro's: ModulationValue.h, what a MIDI link of a macro's value or of a
     // modulator's parameter and a macro's value's curve name), and the sends' (each send's ID: SendsValue.h, what a curve, a
     // MIDI link and a modulation name a send's level by).
-    if (const auto* values = song.getValues())
-    {
-        forEachIDHeld (values->modulation.get(), each);
-        forEachIDHeld (values->sends.get(), each);
-        forEachIDHeld (values->devices.get(), each); // the devices' (each device's, container's and chain's: DevicesValue.h)
+    const auto* values = song.getValues();
+    forEachIDHeld (values->modulation.get(), each);
+    forEachIDHeld (values->sends.get(), each);
+    forEachIDHeld (values->devices.get(), each); // the devices' (each device's, container's and chain's: DevicesValue.h)
 
-        // The tracks' (each track's, its fader's and its VCA's, and the master's: TracksValue.h), what a curve, a lane, a
-        // modulation and a MIDI link name a fader by and a send, a sidechain and a modulator's place a track by.
-        forEachIDHeld (values->tracks.get(), each);
-    }
+    // The tracks' (each track's, its fader's and its VCA's, and the master's: TracksValue.h), what a curve, a lane, a
+    // modulation and a MIDI link name a fader by and a send, a sidechain and a modulator's place a track by.
+    forEachIDHeld (values->tracks.get(), each);
 }
 
 std::uint64_t countHeldID (std::uint64_t largest, std::uint64_t held) noexcept

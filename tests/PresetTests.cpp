@@ -488,7 +488,7 @@ TEST_CASE ("A container's and a track's presets keep their macros' names and val
 {
     // What each preset reads of the song's modulation (Presets.cpp: a container's macros, a track's modulators and macros),
     // which reads it by IDs (model/modulation/internal/Modulation.h): built and checked through the model, so that it holds
-    // wherever the song keeps its modulation (roadmap step S5.20). Each preset in a subcase of its own, which fails alone.
+    // wherever the song keeps its modulation. Each preset in a subcase of its own, which fails alone.
     phazite::test::TemporaryFolder temp;
     const auto file = temp.folder.getChildFile ("Moving" + juce::String (phazite::presetExtension));
     const auto macroValueOf = [] (phazite::ProjectContext& context, phazite::ModulatorID macro)

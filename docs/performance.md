@@ -867,8 +867,8 @@ a call that is slow on this test machine's desktop. Each icon is now read once a
 
 Known bug 122: the model found each track, clip and note by looking through the song at every call, several times for each
 note an edit touched, and the piano roll read every note of its clips, and the other tracks' notes, at each move of the
-mouse. Since 2026-11-15 the song keeps an index of where its tracks, clips and notes are by their IDs (an index of
-the tree then; since roadmap step S5.20 the song's values hold them by their IDs, `src/model/base/internal/SongValues.h`),
+mouse. From 2026-11-15 the song kept an index of where its tracks, clips and notes were by their IDs in its tree (since
+roadmap step S5.20 there is neither: the song's values hold them by their IDs, `src/model/base/internal/SongValues.h`),
 and the piano roll finds what is under the mouse among the notes it paints.
 
 The first table: the piano roll in a window (`PianoRollScreen`), a clip of 5,000 notes, four a beat over twelve rows,
@@ -907,14 +907,14 @@ was counted through every track. After: 623 elements for the step of 20 notes, 6
 in a song of ten times the tracks (counting the model's own walks of a track's clips too, which each note's move makes to
 find how far its clip can grow: 24 elements); no notes read by the hover.
 
-What the index costs: about 100 bytes a track and a clip, made in one walk as the song is first asked for one (as a
+What the index cost, while there was one: about 100 bytes a track and a clip, made in one walk as the song is first asked for one (as a
 single lookup walked before), and about 60 bytes a note of each clip whose notes were asked for, made as the first is
 (until the notes became a value, 2026-11-21: the index holds none since, and a note is found in its clip's value);
-each change to the song costs it a lookup in a hash table at most, and each answer a check that the element is still where the index holds it (above), and a change it doesn't follow (an ID changed in
-place, a track made a folder) makes it again at the next lookup.
+each change to the song cost it a lookup in a hash table at most, and each answer a check that the element was still where the index held it (above), and a change it didn't follow (an ID changed in
+place, a track made a folder) made it again at the next lookup.
 
-**The notes as a value (roadmap step S5.20, 2026-11-21).** A clip's notes and controllers' values are an immutable
-value beside the song's tree, in the song's one undo history (`src/model/base/internal/SongValues.h`), and the edits
+**The notes as a value (roadmap step S5.20, 2026-11-21).** A clip's notes and controllers' values became an
+immutable value, in the song's one undo history (`src/model/base/internal/SongValues.h`), and the edits
 of notes are functions from one value to the next. Measured on `main` (f70b396f) and on the branch in turns, the
 median of five runs of each, the `windows-profile` build on a quiet machine, the same benchmark as the tables above
 (the piano roll in a window, each through the mouse or the command, the views and the engine's new plan included):
@@ -1012,6 +1012,51 @@ set).
 The model alone (`--test-case="*notes as values*"`, the median of three): a step of a drag of 500 notes 0.67 ms
 (1.10 before the clips moved); 5,000 notes transposed 6.2 ms (10.8); 500 notes deleted 1.07 ms (1.40); the song
 copied whole 4.3 ms (4.0); what a drag of 500 notes over 60 moves keeps in the undo history 352 KB.
+
+**The whole song as values, no tree (the end of roadmap step S5.20, 2026-11-24).** Every area of the song is a
+value, the song holds no tree, and what takes it whole takes its state. `main` (before steps S5.19 and S5.20) built
+beside the branch, `windows-profile`, each case run three times in turn on a quiet machine, the median of the
+three:
+
+| What | `main` | The song as values |
+|---|---|---|
+| Piano roll, a clip of 5,000 notes: a step of a drag of 500 notes | 4.38 ms | 2.12 ms |
+| ... its Undo | 13.69 ms | 2.20 ms |
+| A step of a rectangle selecting across the clip | 3.50 ms | 1.11 ms |
+| Select All | 3.59 ms | 1.49 ms |
+| Transpose Up, every note | 27.49 ms | 11.02 ms |
+| Quantize, every note | 47.48 ms | 16.80 ms |
+| Duplicate, every note | 50.31 ms | 16.54 ms |
+| Delete, every note | 32.65 ms | 6.04 ms |
+| Every track's clips, 200 tracks of 24 (`getClips()`) | 5.95 ms | 3.44 ms |
+| A clip found by its ID | 207 ns | 30 ns |
+| A track's row (`getTrackRow()`) | 0.0024 ms | 0.0005 ms |
+| The check for unsaved changes after a track moved and moved back (16 tracks) | 8.90 ms | 0.00 ms |
+| Autosave, on the UI thread (16 tracks, 16,384 notes) | 5.6 ms | 0.3 ms |
+| A note moved a step, with the views and the engine's new plan | 3.54 ms | 3.13 ms |
+| A branch switch of 32 tracks: the message thread's longest stretch | 78.0 ms | 58.0 ms |
+| ... the start of a merge: the call + the longest message after | 1.6 + 6.3 ms | 0.1 + 5.1 ms |
+| 100 tracks: the plan's compile given to the engine | 1.69 ms | 1.51 ms |
+| ... a note added, with its new plan | 1.73 ms | 1.62 ms |
+| ... blocks of 128 samples playing, mean of the block's time | 73.3 % | 70.4 % |
+| Save (40 tracks, 10,240 notes, 1,353 KB) | 58.6 ms | 54.5 ms |
+| Open of it | 55.9 ms | 70.5 ms |
+| An autosave written on the calling thread (`Project::autosave()`) | 26.6 ms | 35.1 ms |
+| `makeConsistent()` of 100,000 notes | 196.6 ms | 225.9 ms |
+| `joinSong()` of it | 554.1 ms | 598.7 ms |
+| A song made of a commit's (what a DAWproject import does on the message thread) | 11.4 ms | 18.3 ms |
+
+The model alone, on the branch (`--test-case="*notes as values*"`; `main` has no such case): a step of a drag of
+500 notes 0.74 ms, undone in 0.001 ms; 5,000 notes transposed 6.6 ms, undone in under a microsecond; 500 notes
+deleted 1.16 ms; the song copied whole 4.8 ms; what a drag of 500 notes over 60 moves keeps in the undo history
+132 KB (352 KB while only the notes, the clips and the tempo map were values).
+
+What fell: every edit, its Undo, what views read, the unsaved check and what a save, an autosave and a branch
+switch keep the message thread for. What grew is what makes a song from a file: the file's text is parsed into a
+tree, the tree is made consistent, every area is read from it into values, and the tree is let go (Open 14 ms more
+on the big project, a commit's song 7 ms more), and an autosave written on the calling thread builds the tree from
+the state first (the app's autosave builds it on the writer's thread). Reading and writing the project's text
+straight from and into values would take the tree out of both (`docs/backlog.md`).
 
 ### Benchmark: a sandboxed plug-in's round trip at 128 samples
 

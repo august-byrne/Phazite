@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// What reads the song's tracks outside the tracks' own code (roadmap step S5.20, the tracks' second piece): the selection,
+// What reads the song's tracks outside the tracks' own code: the selection,
 // the project's contents, the DAWproject export, the stems an export writes, the frozen tracks, the drum pads' own tracks,
 // the armed tracks, a track's preset, and the readers by ID they read through (model/arrangement/internal/Tracks.h). Each
 // of these would go silently empty if it read tracks where the song no longer keeps them (it compiles, then finds nothing),

@@ -821,7 +821,8 @@ void forgetWhatNamesTheGone (Song& song)
     // A container's macros, with what they modulate, where the song holds the container no more (removed, ungrouped): erased
     // through modulation's code, in one set of its area, before the IDs the song holds are counted, so that what names a
     // macro (a MIDI link of its value) goes below as what names any item gone.
-    if (auto* values = song.getValues())
+    auto* values = song.getValues();
+
     {
         const auto& devices = values->devices.get();
         std::vector<ModulatorID> macros;
@@ -838,7 +839,6 @@ void forgetWhatNamesTheGone (Song& song)
     auto ids = getItemIDs (song);
 
     // A send to a return that is gone, with the ID it is known by: the sends' next value worked out whole, then set once.
-    if (auto* values = song.getValues())
     {
         const auto held = values->sends.get();
         auto next = held;
@@ -1444,13 +1444,12 @@ AreaChoice chooseSendClash (Song& song, const MergeClash& clash, int value, cons
     if (step < 0)
         return AreaChoice::notTheArea;
 
-    // Refused (nothing written) for what a merge of two songs Phazite holds never makes, but a commit's song may come from
-    // anyone (tests/FuzzTests.cpp chooses every clash of a damaged merge): a path past the send, one whose track the song
-    // hasn't (as the tree's choice found no place for it), a send the song holds on another track, its ID, a property that
-    // isn't a send's, an element of another type or ID, one that stands in for what its version couldn't read where it would
-    // be read (one chosen whole, or put back: SongPieces.h, holdsStandIn()), as modulation's and the curves' choosers refuse
-    // one, and a send the song would read otherwise than it was chosen (SendsValue.h: readHeldSend(): a level finer than a
-    // ten-thousandth).
+    // Refused (nothing written) for what a merge of two songs Phazite holds never makes, but a commit's song may come from anyone
+    // (tests/FuzzTests.cpp chooses every clash of a damaged merge): a path past the send, one whose track the song hasn't, a send
+    // the song holds on another track, its ID, a property that isn't a send's, an element of another type or ID, one that stands
+    // in for what its version couldn't read where it would be read (one chosen whole, or put back: SongPieces.h, holdsStandIn()),
+    // as modulation's and the curves' choosers refuse one, and a send the song would read otherwise than it was chosen
+    // (SendsValue.h: readHeldSend(): a level finer than a ten-thousandth).
     auto* values = song.getValues();
 
     if (step == 0 || clash.path.size() != step + 1 || ! juce::isPositiveAndBelow (value, 3))
@@ -1458,7 +1457,7 @@ AreaChoice chooseSendClash (Song& song, const MergeClash& clash, int value, cons
 
     auto ownerPath = clash.path;
     ownerPath.removeRange (step, clash.path.size() - step);
-    const auto owner = findChannelOnPath (song, ownerPath); // a track's, read from the tracks' area (no TRACK in the tree)
+    const auto owner = findChannelOnPath (song, ownerPath); // a track's, read from the tracks' area
     const auto from = owner.has_value() && ! owner->onMaster ? owner->track : TrackID();
     const auto id = DeviceID::fromRaw (readID (clash.path[step].fromFirstOccurrenceOf (":", false, false)));
     const auto held = getSendValue (song, id);
@@ -1469,13 +1468,13 @@ AreaChoice chooseSendClash (Song& song, const MergeClash& clash, int value, cons
     const juce::ValueTree* elements[] = { &clash.baseElement, &clash.oursElement, &clash.theirsElement };
     const juce::var* chosenValues[] = { &clash.base, &clash.ours, &clash.theirs };
 
-    // Its own property: the value chosen given to it (SendsValue.h: setSendProperty(), a void value taking it away as the tree
-    // did). A send both lines made under one ID (only in a damaged commit's song: the merge renumbers what both lines add),
-    // whose property's clash the side chosen holds no send for, taken away rather than left without the property (known bug
-    // 239's shape), where that side's song can be read; and one the song holds none of (an earlier choice took it away) put
-    // back first as the side chosen holds it, as modulation's chooser puts back a modulation. Where the song holds the send,
-    // the side's element is asked only whether it is there (one that stands in is), never read, as modulation's chooser asks
-    // of a modulation: the value chosen goes to the send the song holds.
+    // Its own property: the value chosen given to it (SendsValue.h: setSendProperty(), a void value taking it away). A send both
+    // lines made under one ID (only in a damaged commit's song: the merge renumbers what both lines add), whose property's clash
+    // the side chosen holds no send for, taken away rather than left without the property (known bug 239's shape), where that
+    // side's song can be read; and one the song holds none of (an earlier choice took it away) put back first as the side chosen
+    // holds it, as modulation's chooser puts back a modulation. Where the song holds the send, the side's element is asked only
+    // whether it is there (one that stands in is), never read, as modulation's chooser asks of a modulation: the value chosen
+    // goes to the send the song holds.
     if (clash.property.isValid())
     {
         if (clash.property == schema::sendID)

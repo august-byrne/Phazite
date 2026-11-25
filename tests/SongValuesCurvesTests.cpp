@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // What hears the song's automation change hears it from one place (model/base/internal/SongValues.h:
-// Listener::curvesChanged()), by the parameters of the curves that changed (roadmap step S5.20). For each edit of the curves
+// Listener::curvesChanged()), by the parameters of the curves that changed. For each edit of the curves
 // made through the model, its Undo and its Redo, the listener is told exactly the parameters whose curves differ before and
 // after, compared as values (independent of what tells it), and nothing of another area; another area's change tells it
 // nothing; and what counts the song's changes hears each change once: the project's count of changes and the versions'
@@ -45,6 +45,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <functional>
 #include <initializer_list>
 #include <optional>
@@ -310,7 +311,8 @@ juce::String writeAutomation (const juce::ValueTree& song)
 // A parameter's curve in a whole copy of a song or a version's song, as the song reads one; none for one without.
 std::optional<phazite::CurveValue> findCurveIn (const juce::ValueTree& song, const phazite::ParameterRef& parameter)
 {
-    const auto curves = phazite::readCurvesValue (song.getChildWithName (phazite::schema::AUTOMATION));
+    std::uint64_t nextKey = 1;
+    const auto curves = phazite::readHeldCurves (song.getChildWithName (phazite::schema::AUTOMATION), nextKey);
 
     if (const auto* curve = curves.find (parameter))
         return *curve;

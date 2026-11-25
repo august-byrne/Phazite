@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// What reads the song's devices outside the devices' own code (roadmap step S5.20, the devices' second piece): the
+// What reads the song's devices outside the devices' own code: the
 // selection, the project's files and plug-ins, the DAWproject export, presets, automation lanes and MIDI links, what a
 // delete reads of plug-ins, automation's owners and parameters, and drum tracks. Each of these readers would go silently
 // empty if it read devices where the song no longer keeps them (it compiles, then finds nothing), so each is held here

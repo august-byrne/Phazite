@@ -94,10 +94,10 @@ namespace
         return form != Form::chain;
     }
 
-    // A container's macros go with it to the channel it is put on, in the same step and the mode of the moment, as its
-    // element carried them while the tree held the devices: their places name its channel (ModulationValue.h:
-    // ModulatorPlace), set through modulation's setter of the whole value (model/modulation/internal/Modulation.h:
-    // setAllModulation()). Nothing for anything else, nor for a container that stays on its channel.
+    // A container's macros go with it to the channel it is put on, in the same step and the mode of the moment: their places name
+    // its channel (ModulationValue.h: ModulatorPlace), set through modulation's setter of the whole value
+    // (model/modulation/internal/Modulation.h: setAllModulation()). Nothing for anything else, nor for a container that stays on
+    // its channel.
     void moveMacrosWith (Song& song, const SongValues& values, const DeviceValue& was, const DevicePlace& to)
     {
         if (was.form != Form::container || (was.place.track == to.track && was.place.onMaster == to.onMaster))

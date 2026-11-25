@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song's sections as a value (roadmap step S5.20, the sections' area): each section, by its ID, in the song's order, in
-// Phazite's own types, and the conversion between the value and the SECTIONS element with its SECTION children (Schema.h),
-// the one place that reads and writes those by name. The song holds this value in an area of its values (SongValues.h,
-// SectionsArea.h), which the sections' code (model/arrangement/internal/Sections.h) computes each edit on; a
-// whole copy writes the sections in a SECTIONS while there is one (WholeState.h).
+// The song's sections as a value: each section, by its ID, in the song's order, in Phazite's own types, and the conversion
+// between the value and the SECTIONS element with its SECTION children (Schema.h), the one place that reads and writes those
+// by name. The song holds this value in an area of its values (SongValues.h, SectionsArea.h), which the sections' code
+// (model/arrangement/internal/Sections.h) computes each edit on; the song's file form writes the sections in a SECTIONS while
+// it has any (SongState.h: writeSongTree()).
 //
 // Its own header, beside SongValues.h and the other areas' (one header for each area's values). The song's reader is here,
 // in the model's base, rather than with the sections' code (model/arrangement/internal/Sections.h), because the selection
@@ -66,16 +66,10 @@ SectionsValue getSectionsValue (const Song&);
 // nothing.
 bool holdsSection (const Song&, SectionID);
 
-// The song's sections read from its SECTIONS element (an invalid tree reads as none): each SECTION child in the element's
-// order, each property as the sections' code has always read it (setSectionProperty()). A child of another type is no section,
-// and a property Phazite doesn't know no part of one. What the tests read
-// sections by.
-SectionsValue readSectionsValue (const juce::ValueTree& sectionsElement);
-
-// The song's sections read from a SECTIONS as the song holds them (a song made of a file's state,
-// SongState.h: readSongTree(); a version's sections and a merge's choice, SectionsArea.h): each SECTION child in the element's
-// order (readHeldSection()), kept as the sections' writers keep them (keepSectionsHeld()). A child of another type, and a
-// property Phazite doesn't know, are no part of it.
+// The song's sections read from a SECTIONS as the song holds them (a song made of a file's state, SongState.h: readSongTree();
+// a version's sections and a merge's choice, SectionsArea.h; an invalid tree reads as none): each SECTION child in the
+// element's order (readHeldSection()), kept as the sections' writers keep them (keepSectionsHeld()). A child of another type,
+// and a property Phazite doesn't know, are no part of it.
 SectionsValue readHeldSections (const juce::ValueTree& sectionsElement);
 
 // One section read so from its SECTION element: its ID as readID() reads one, text or a number; its start and its length
@@ -86,29 +80,28 @@ SectionsValue readHeldSections (const juce::ValueTree& sectionsElement);
 // schema::maxID), which no section holds.
 std::optional<SectionValue> readHeldSection (const juce::ValueTree& sectionElement);
 
-// The sections as the song holds them: one of each ID (of two, the first in the value's order stays), none without an ID
-// the song can count on from, and each one's start and length within their descriptions' ranges (SongText.h:
-// keepDescribed(), as readHeldSection() keeps them). The one rule for what enters the song's sections (readHeldSections(),
-// withSectionTaken()) and for the sections' writers (model/arrangement/Sections.cpp), which give each section an ID of its
-// own already. The same
-// value where it keeps them all. Sections may overlap, as the loader leaves them (the sections' code places a new one
-// between the others, but a file, an outline or an import may hold two that overlap).
+// The sections as the song holds them: one of each ID (of two, the first in the value's order stays), none without an ID the song
+// can count on from, and each one's start and length within their descriptions' ranges (SongText.h: keepDescribed(), as
+// readHeldSection() keeps them). The one rule for what enters the song's sections (readHeldSections()) and for the sections'
+// writers (model/arrangement/Sections.cpp), which give each section an ID of its own already. The same value where it keeps them
+// all. Sections may overlap, as the loader leaves them (the sections' code places a new one between the others, but a file, an
+// outline or an import may hold two that overlap).
 SectionsValue keepSectionsHeld (const SectionsValue&);
 
 // Whether the sections are held as keepSectionsHeld() keeps them (it would change nothing): what the song's consistency check
 // asks of its value.
 bool holdsSectionsHeld (const SectionsValue&);
 
-// How many sections were read into values (readSectionsValue()) since Phazite started, on any thread: for the test that
-// asking whether each section is selected, as a paint does, reads none (tests/PerformanceGateTests.cpp). Allocations can't
-// tell it: immer takes its nodes from lists of freed ones.
+// How many sections were read into values from elements (readHeldSections()) since Phazite started, on any thread: for the
+// test that asking whether each section is selected, as a paint does, reads none (tests/PerformanceGateTests.cpp).
+// Allocations can't tell it: immer takes its nodes from lists of freed ones.
 std::uint64_t countSectionsRead() noexcept;
 
 // A section with a property given a value as the section would read it from an element that held it, or taken away (a void
 // value: as if the element hadn't it): an ID, a start or a length absent reads as 0; a name, a role or a tip as empty; an
 // energy as 0.5, and any kept within 0 to 1; a colour as it is written (one written empty stays empty, so that it isn't taken
-// for none), absent as none. What a merge's clash on a section's property chosen sets (model/versions/VersionsModel.cpp),
-// and what the conversion reads each property with. Nothing else is kept within a range here, which the loader does
+// for none), absent as none. What a merge's clash on a section's property chosen sets (model/arrangement/Sections.cpp:
+// chooseSectionClash()). Nothing else is kept within a range here, which the loader does
 // (model/project/internal/Project.h, makeConsistent()). Whether the property is one of a section's (else nothing changes).
 bool setSectionProperty (SectionValue&, const juce::Identifier& property, const juce::var& value);
 

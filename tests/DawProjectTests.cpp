@@ -424,7 +424,7 @@ TEST_CASE ("What another DAW can't play is bounced beside it: the track muted wi
 TEST_CASE ("A track whose modulators or macros modulate something is bounced for its modulation; one whose modulate nothing isn't")
 {
     // What the export reads of a track's modulation (DawProject.cpp: findWhyBounced(), by Modulation.h's hasModulations()),
-    // built through the model, so that it holds wherever the song keeps its modulation (roadmap step S5.20): a track with no
+    // built through the model, so that it holds wherever the song keeps its modulation: a track with no
     // devices whose LFO moves its volume, one whose macro moves its pan, and one with an LFO that moves nothing.
     TestSong s;
     const auto moved = s.addTrack ("Moved"), panned = s.addTrack ("Panned"), still = s.addTrack ("Still");

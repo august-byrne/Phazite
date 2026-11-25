@@ -3469,7 +3469,7 @@ TEST_CASE ("Benchmark: a clip of 5,000 notes edited in the piano roll, and what 
 TEST_CASE ("Benchmark: a clip's 5,000 notes read and changed through the model: its value whole or a note by its ID, one edit or many"
            * doctest::test_suite ("benchmark") * doctest::skip())
 {
-    // Roadmap step S5.20: what reading a clip's notes and changing them costs, by how a note is reached, the clip's notes a
+    // What reading a clip's notes and changing them costs, by how a note is reached, the clip's notes a
     // value the song holds beside its tree (model/base/internal/SongValues.h; model/notes/internal/Notes.h). Each way does the
     // same work on the same clip, in turns, so that what the machine does meanwhile falls on all of them alike.
     using phazite::test::at;
@@ -3631,7 +3631,7 @@ TEST_CASE ("Benchmark: notes as values on a song of 100 tracks: a drag's step an
            "an edit through aliases, a whole copy, and what a drag keeps"
            * doctest::test_suite ("benchmark") * doctest::skip())
 {
-    // Roadmap step S5.20: the notes as values beside the song's tree (model/base/internal/SongValues.h), each edit one change
+    // The notes as values (model/base/internal/SongValues.h), each edit one change
     // of its clip's value in the song's undo history. A song of 100 tracks, each with a clip of 16 notes, the first with one
     // of 5,000, and a clip of 64 notes with seven aliases on other tracks. Each timing the median of its runs.
     using phazite::test::at;

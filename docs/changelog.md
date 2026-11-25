@@ -10,6 +10,14 @@ The full text of every step, as it was written when it was built, is in the
 
 ## Stage 5. Wide: what a beat maker meets in the first week (from 2026-11-20)
 
+- **S5.20 The song as an immutable value.** The song is values in Phazite's own types (immer), an area for each part of
+  it, made from S5.19's description, in its one undo history: an Undo puts back each area its step changed, and what is
+  written outside the history (mute and solo, a plug-in's own settings, view state) lives in keyed areas or values of its
+  own. What plays it, its views, the versions and the unsaved check hear each area's changes from one listener; the song
+  whole is a state any thread may read, so an autosave, a version and the changes' worker build their trees off the
+  message thread. A file is the same format, its root's children now written in their description's order, and an
+  empty MIDILINKS or SECTIONS is none; what Phazite doesn't know in a file goes as it opens. Found on the way and fixed:
+  known bugs 245 to 248, beats past their range, and a container's macro the closing check didn't compare. 2026-11-24.
 - **Known bug 234, a line put back and an alias group** (found in S5.20's review): Put Back of a track's line, Take from
   This Version and a line restored from a version give the clips of an alias group on other tracks what they restore, in
   the same undo step: a MIDI group's notes, and what an audio group shares (its file, tempo, pitch, direction and warp

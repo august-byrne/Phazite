@@ -241,7 +241,7 @@ namespace
 
     //==============================================================================
     // The song's notes: each clip's value (ClipNotesValue.h: ClipNotes), the same in each of its aliases, which the song holds
-    // beside its tree (getClipNotesValue(), setClipNotesValue()); one note alone is found in its clip's value by its ID.
+    // in its values (getClipNotesValue(), setClipNotesValue()); one note alone is found in its clip's value by its ID.
 
     std::uint64_t notesRead = 0; // message thread
 
@@ -559,8 +559,7 @@ std::uint64_t countNotesRead() noexcept
 
 ClipNotes getClipNotesValue (const Song& song, ClipID clip)
 {
-    // None of a song that keeps everything in its tree (one made to be read or checked: Song::getValues()), whose clips are no
-    // clips of the song's (Clips.h).
+    // None of a clip that isn't a MIDI clip of the song's.
     const auto* values = song.getValues();
     const auto* value = values->findClipNotes (clip);
     return value != nullptr ? *value : ClipNotes();

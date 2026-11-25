@@ -18,16 +18,6 @@ namespace
 {
     namespace versions = schema::versions;
 
-    // Text between an element's tags, which a piece Phazite writes never holds (its values are attributes) and a value tree has
-    // nothing for: left out of a piece from elsewhere before it becomes one.
-    void removeText (juce::XmlElement& element)
-    {
-        element.deleteAllTextElements();
-
-        for (auto* child : element.getChildIterator())
-            removeText (*child);
-    }
-
     // A list of an element's notes or points this long or longer is in runs, each ending after about one in averageRun of
     // them: after one whose text's FNV-1a hash is a multiple of averageRun. Where a run ends depends on what it holds alone,
     // so that a note added, changed or taken away changes its own run, and the runs after it stay. How the writer chooses,
@@ -615,10 +605,7 @@ juce::ValueTree readElement (const juce::MemoryBlock& block)
         return {};
 
     if (const auto xml = juce::parseXML (block.toString()))
-    {
-        removeText (*xml);
-        return juce::ValueTree::fromXml (*xml);
-    }
+        return readTextElement (*xml); // text between its tags left out (SongText.h)
 
     return {};
 }

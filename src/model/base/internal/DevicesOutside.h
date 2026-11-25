@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// What the song holds of its devices outside its undo history alone, as a value (roadmap step S5.20, the devices' area; held
-// in an OutsideValue, OutsideValue.h): where each device's window was (Schema.h: deviceWindowX, deviceWindowY), view state,
+// What the song holds of its devices outside its undo history alone, as a value (held in an
+// OutsideValue, OutsideValue.h): where each device's window was (Schema.h: deviceWindowX, deviceWindowY), view state,
 // which counts as no change and no step holds (decision 4). The functions by ID that read and write a window's place are
 // in model/plugins/internal/DeviceStore.h (getWindowPlace(), setWindowPlace()). immer is the model's
 // alone (tools/check-architecture.sh: immer-outside-model).
@@ -24,7 +24,7 @@ struct WindowPlace
 };
 
 // Each device's window place by the device's ID, of those whose windows moved. Entries of devices the song doesn't hold (one
-// a step took away, which its Undo may bring back) are kept, as the tree keeps a removed element's.
+// a step took away, which its Undo may bring back) are kept.
 struct DevicesOutside
 {
     immer::map<std::uint64_t, WindowPlace> windows {};

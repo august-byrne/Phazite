@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The tracks' writers on values (roadmap step S5.20, the tracks' writers; model/arrangement/internal/Tracks.h): every writer of
+// The tracks' writers on values (model/arrangement/internal/Tracks.h): every writer of
 // the tracks' own code works its next value out and sets it through the tracks' setters (setTrack(), setNewTracks(),
 // eraseTrack(), setTrackPlace(), setTrackListOrder(), setTrackFields(), and the channels' narrow setters, setChannelVolume()
 // and setChannelPan()), which while the song's tree holds the tracks write it by what differs. Their own cases (a set equal to

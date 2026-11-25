@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// What takes a track out of the song erases what it holds in the song's areas beside its tree first, in its own step
-// (model/arrangement/internal/Tracks.h: eraseTrackHoldings(); roadmap step S5.20, the tracks' keepers' end): its clips with
-// their notes, its channel's modulators and macros and its containers' macros, its sends; and each area's own undo action
-// brings its things back with the track's.
-// Each remover: Delete (a track with a return, a folder with its tracks), Ungroup (the folder alone), a version's line of a
-// track added since, a version applied whole (a track gone, a track moved), and a merge's choice of a whole track or the
-// master, which gives the side's track its things through each area's code, leaving no adoption to the keeper.
+// What takes a track out of the song erases what it holds in the song's areas first, in its own step
+// (model/arrangement/internal/Tracks.h: eraseTrackHoldings()): its clips with their notes, its channel's modulators and macros
+// and its containers' macros, its sends; and each area's own undo action brings its things back with the track's. Each remover:
+// Delete (a track with a return, a folder with its tracks), Ungroup (the folder alone), a version's line of a track added since,
+// a version applied whole (a track gone, a track moved), and a merge's choice of a whole track or the master, which gives the
+// side's track its things through each area's code.
 #include "SongCheck.h"
 #include "TestClips.h"
 #include "TestHelpers.h"
@@ -521,7 +520,7 @@ TEST_CASE ("Track holdings: a merge's choice of a whole track gives it the side'
     INFO (chosen.toXmlString() << "\n" << then.toXmlString());
     CHECK (chosen.isEquivalentTo (then));
 
-    // A path to a track's own property is the tracks' chooser's too (roadmap step S5.20, the tracks' versions pass): its field
+    // A path to a track's own property is the tracks' chooser's too: its field
     // the side's, through the tracks' setter (its name taken away: the side held none).
     auto property = clash;
     property.property = schema::trackName;

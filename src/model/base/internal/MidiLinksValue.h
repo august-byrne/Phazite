@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song's MIDI links as a value (roadmap step S5.20, the MIDI links' area): each link of a hardware controller to a
+// The song's MIDI links as a value: each link of a hardware controller to a
 // parameter, in the song's order, in Phazite's own types, and the conversion between the value and the MIDILINKS element with
 // its MIDILINK children (Schema.h), the one place that reads and writes those by name. The song holds this value in an area of
 // its values (SongValues.h, MidiLinksArea.h), which the MIDI links' code (model/midi/internal/MidiLinks.h) computes each edit

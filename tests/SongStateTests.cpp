@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song whole as one value (model/base/internal/SongState.h; roadmap step S5.20, its end): a song's state written as its
+// The song whole as one value (model/base/internal/SongState.h): a song's state written as its
 // file's tree (writeSongTree()) is the song's whole copy (WholeState.h: copyWholeSong(), which every save, version and copy
 // writes the song's file form by), element for element in their order, each property as the file writes it; and read back
 // (readSongTree(), what the song takes its values from as it opens), it is the state it was, area by area (identity aside), so
@@ -235,7 +235,7 @@ TEST_CASE ("Song state: the chord lane's value says whether the song has a lane,
 }
 
 //==============================================================================
-// The song made of a state (Song.h: Song (SongState); roadmap step S5.20, the song without its tree): what it holds, a new
+// The song made of a state (Song.h: Song (SongState)): what it holds, a new
 // project's first save, the empty MIDILINKS and SECTIONS that are none, the root's order in a file, and a chord lane placed
 // with nothing on it.
 namespace
@@ -312,8 +312,7 @@ TEST_CASE ("Song state: a new project's first save holds what its content functi
 TEST_CASE ("Song state: a file with an empty MIDILINKS and an empty SECTIONS opens without them, as saved, and saves without "
            "them")
 {
-    // An empty list is none (the named change of roadmap step S5.20's last piece: before it, an empty MIDILINKS or SECTIONS
-    // stayed in the song's tree, and was written again).
+    // An empty list is none: an empty MIDILINKS or SECTIONS is neither kept nor written again.
     namespace schema = phazite::schema;
     TemporaryFolder temporary;
     const auto file = temporary.folder.getChildFile ("Empty.phazite");
@@ -340,8 +339,7 @@ TEST_CASE ("Song state: a file with an empty MIDILINKS and an empty SECTIONS ope
 
 TEST_CASE ("Song state: a song whose last section is deleted is as saved, against a copy that never had sections")
 {
-    // The named change: before roadmap step S5.20's last piece the song's SECTIONS stayed in its tree, empty, once its first
-    // section made it, and the song was unsaved against a copy without one.
+    // An empty list is none: a song whose last section went is the same song as one that never had sections.
     TestSong s;
     auto& song = *phazite::findSong (s.context);
     REQUIRE (s.getProject().save().wasOk());

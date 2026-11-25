@@ -122,13 +122,11 @@ namespace
         return {};
     }
 
-    // Whether a song's history has moved since this was made, for an answer that comes later than what it answers: an undo or
-    // a redo, a gesture's roll-back and a trial put back (each step taken back alone), told by the history once the move is
-    // whole (Song.h: HistoryListener), whatever the step changed, the song's values alone too (a step that changed only a
-    // value heard no tree callback, which the watch listened to until the tracks' listener's piece of roadmap step S5.20); or
-    // a step begun by hand (countHistoryMoves()). Not what changes the song as it plays (automation written, a take that
-    // grows, a plug-in's own change, a state written, a window's place kept), which moves no history: the review of known bug
-    // 166, a value typed while the song recorded was dropped.
+    // Whether a song's history has moved since this was made, for an answer that comes later than what it answers: an undo or a
+    // redo, a gesture's roll-back and a trial put back (each step taken back alone), told by the history once the move is whole
+    // (Song.h: HistoryListener), whatever the step changed; or a step begun by hand (countHistoryMoves()). Not what changes the
+    // song as it plays (automation written, a take that grows, a plug-in's own change, a state written, a window's place kept),
+    // which moves no history: the review of known bug 166, a value typed while the song recorded was dropped.
     struct HistoryWatch final : private Song::HistoryListener
     {
         explicit HistoryWatch (Song& watched)

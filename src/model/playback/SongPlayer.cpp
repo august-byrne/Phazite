@@ -745,8 +745,7 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
 
     // The devices' store, read once for every container's chains (updateChainAudibility()), and each container's chains as
     // this plan finds them.
-    if (const auto* values = song.getValues())
-        heldStore = values->deviceStore.get();
+    heldStore = song.getValues()->deviceStore.get();
 
     containerChains.clear();
     const auto songTracks = getTracksValue (song); // the song's tracks, read once (a copy, which shares what it holds)
@@ -2629,7 +2628,7 @@ void SongPlayer::loadSoundsChanged (engine::DeviceNode& node, const DeviceValue&
     soundLoads.fetch_add (1, std::memory_order_relaxed);
 
     // What a loader reads of the device's sounds, as an element made of the value after (those of the properties from `first`
-    // on, `count` of them), the song's tree read nowhere: the loaders take a SOUNDS element (DrumKit.h, Wavetables.h,
+    // on, `count` of them), nothing of the song read: the loaders take a SOUNDS element (DrumKit.h, Wavetables.h,
     // SamplerSound.h).
     const auto& properties = getSoundPropertiesOf (std::string_view (now.type.toRawUTF8()));
     const auto makeSounds = [&properties, &now] (int first, int count)

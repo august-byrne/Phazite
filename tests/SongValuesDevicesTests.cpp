@@ -1,15 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // What hears the song's devices, containers and chains change hears it from one place (model/base/internal/SongValues.h:
-// Listener::devicesChanged()), by their IDs (roadmap step S5.20; while the song's tree is still their storage, the devices'
-// part of the keeper tells it from the tree: model/base/internal/DevicesArea.h). For each edit of devices made through the
-// model, its Undo and its Redo, the listener is told every device that differs before and after, compared as values
-// (getDevicesValue(), independent of what tells it), with where it was and is, at least the parts that differ, its value
-// before as findDevice() read it before and after as findDevice() reads it after; one told that doesn't differ was taken
-// out and came back (a track JUCE moves); every owner whose devices came in another order; and nothing of another area. What
-// a step told in all is checked, never how many calls (the tree's count until the devices' switch). Another area's change,
-// and what the devices' value doesn't cover (a plug-in's values, state and program, a chain's mute and solo, a window's
-// place), tell it nothing. And what plays makes the plans it made per edit, and takes a value, a sound, a container's mix and
-// a chain's volume at once without one; the unsaved check, MIDI learn and a frozen track follow them too.
+// Listener::devicesChanged()), by their IDs (model/base/internal/DevicesArea.h). For each edit of devices made through the model,
+// its Undo and its Redo, the listener is told every device that differs before and after, compared as values (getDevicesValue(),
+// independent of what tells it), with where it was and is, at least the parts that differ, its value before as findDevice() read
+// it before and after as findDevice() reads it after; one told that doesn't differ was taken out and came back; every owner whose
+// devices came in another order; and nothing of another area. What a step told in all is checked, never how many calls. Another
+// area's change, and what the devices' value doesn't cover (a plug-in's values, state and program, a chain's mute and solo, a
+// window's place), tell it nothing. And what plays makes the plans it made per edit, and takes a value, a sound, a container's
+// mix and a chain's volume at once without one; the unsaved check, MIDI learn and a frozen track follow them too.
 //   phazite_tests.exe --test-case="Song values' devices*"
 #include "EnginePlayback.h"
 #include "PerformanceCounts.h"

@@ -104,8 +104,8 @@ BeatRange getAudioClipRange (const Song&, const ClipValue&);
 engine::FadeCurve toEngineFade (FadeCurve);
 
 //==============================================================================
-// Whether a clip's element is an audio clip's: for what reads a whole copy of a song's tree, or one before the song holds its
-// values (the loader, a merge: model/versions/), whose clips are elements.
+// Whether a clip's element is an audio clip's: for what reads a song's file form (a whole copy, a file the loader reads, a
+// merge: model/versions/), whose clips are elements.
 bool isAudioState (const juce::ValueTree& clipState);
 
 //==============================================================================
@@ -205,8 +205,8 @@ void setClipTempo (Song&, ClipID, double bpm);
 // each property as read (its default where it has none: no tempo, no pitch, forwards) and the markers in their order, each as
 // juce::ValueTree::isEquivalentTo() compares elements, the first's against the other's: as the loader (makeConsistent())
 // and a merge (model/versions/internal/SongMerge.h) compare them; and the first's given to the other, in place of its own
-// (a merge's keeper's, to every other clip of its group). The last two for whole copies of a song's tree, and its tree before
-// the song holds its values (the loader), whose clips are elements.
+// (a merge's keeper's, to every other clip of its group). The last two for a song's file form (a whole copy, a file the
+// loader reads), whose clips are elements.
 bool isSharedInAliasGroup (const juce::Identifier& property);
 bool shareTheSound (const juce::ValueTree& first, const juce::ValueTree& other);
 void giveSharedSound (const juce::ValueTree& from, juce::ValueTree to, juce::UndoManager*);
@@ -236,12 +236,12 @@ PeakRead readPeak (const juce::File&, FilePart, const std::function<bool()>& sho
 // Every audio clip of the song, on every track.
 std::vector<ClipID> getAudioClips (const Song&);
 
-// The paths of the audio files the song plays, as the song holds them (a path within the project's folder, or a full one),
-// each once: its clips' files, read by their IDs (getClipValues(), whatever holds the clips), in the song's order, track by
-// track; then its devices' sound files (Schema.h: isSoundFileProperty()), in the order its tree holds them. What Clean Up
-// Unused Audio keeps (model/project/UnusedAudio.h), and what an import keeps of the audio it unpacked (model/project/internal/
-// DawProject.h: forgetUnusedAudio()). Never the song's tree read for its clips: the song is to hold them outside it (roadmap
-// step S5.20). For a whole song's tree (a copy, a file read), model/versions/internal/VersionStore.h has its own.
+// The paths of the audio files the song plays, as the song holds them (a path within the project's folder, or a full one), each
+// once: its clips' files, read by their IDs (getClipValues(), whatever holds the clips), in the song's order, track by track;
+// then its devices' sound files (Schema.h: isSoundFileProperty()), in the order the song holds its devices. What Clean Up Unused
+// Audio keeps (model/project/UnusedAudio.h), and what an import keeps of the audio it unpacked (model/project/internal/
+// DawProject.h: forgetUnusedAudio()). For a whole song's tree (a copy, a file read), model/versions/internal/VersionStore.h has
+// its own.
 juce::StringArray findAudioFilePaths (const Song&);
 
 // The commands' switches for the selected clips: the audio clips among them play backwards, or forwards again if all of

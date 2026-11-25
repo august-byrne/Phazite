@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song's tracks as values (roadmap step S5.20, the tracks' first piece): a track's fields written in the undo history
+// The song's tracks as values: a track's fields written in the undo history
 // alone (src/model/base/internal/TracksValue.h: TrackValue, SongTracks, TrackOrder), its switches written in the history and
 // outside it alike, keyed (TrackSwitchesValue.h), and its view, outside the history alone (TracksOutside.h); their
 // conversion from and to TRACK and MASTER elements; the loader's rules (keepTrackAsHeld(), keepSwitchesAsHeld(),
@@ -23,6 +23,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongState.h"
 #include "model/base/internal/SongText.h"
 #include "model/base/internal/TrackSwitchesValue.h"
 #include "model/base/internal/TracksOutside.h"
@@ -112,6 +113,26 @@ std::vector<juce::ValueTree> findTrackElements (const juce::ValueTree& song)
         found.push_back (master);
 
     return found;
+}
+
+// Every track's and the master's switches and view of a tree as it is written, no loader between: each element's read as
+// Phazite's code read them (TrackSwitchesValue.h: readSwitchesOf(); TracksOutside.h: readViewOf()).
+std::pair<phazite::TrackSwitches, phazite::TracksOutside> readSwitchesAndViewAsWritten (const juce::ValueTree& song)
+{
+    phazite::TrackSwitches switches;
+    phazite::TracksOutside outside;
+
+    for (const auto& element : findTrackElements (song))
+    {
+        phazite::readSwitchesOf (element, switches);
+
+        if (element.hasType (schema::MASTER))
+            outside.master = phazite::readViewOf (element);
+        else
+            outside.tracks = outside.tracks.set (phazite::readID (element[schema::trackID]), phazite::readViewOf (element));
+    }
+
+    return { switches, outside };
 }
 
 // Whether a property of an element is one of the tracks' three values (their conversions read and write it).
@@ -206,9 +227,9 @@ void checkRoundTrip (const juce::ValueTree& element)
 void checkReaders (const phazite::Song& song)
 {
     const auto tracks = phazite::getTracksValue (song);
-    const auto whole = phazite::test::copyWholeSong (song); // the switches and the view are written into a whole copy alone
-    const auto switches = phazite::readTrackSwitches (whole);
-    const auto outside = phazite::readTracksOutside (whole);
+    const auto read = phazite::readSongTree (phazite::test::copyWholeSong (song)); // the switches and the view as a file holds them
+    const auto& switches = read.trackSwitches;
+    const auto& outside = read.tracksOutside;
     const auto order = phazite::makeTrackOrder (tracks);
 
     for (const auto id : order.order)
@@ -239,11 +260,12 @@ void checkReaders (const phazite::Song& song)
         CHECK (phazite::isTrackMuted (song, id, false) == (switches.mutes.find (id.getRaw()) != nullptr));
         CHECK (phazite::isTrackSoloed (song, id) == (switches.solos.find (id.getRaw()) != nullptr));
 
-        const auto* view = outside.tracks.find (id.getRaw());
-        REQUIRE (view != nullptr);
-        CHECK (phazite::getSavedTrackHeight (song, id) == view->height);
-        CHECK (phazite::isCollapsed (song, id) == view->collapsed.value_or (false));
-        CHECK (phazite::isPinned (song, id) == view->pinned.value_or (false));
+        // A row the song holds no view of (its file writes none) reads as the default view.
+        const auto* held = outside.tracks.find (id.getRaw());
+        const auto view = held != nullptr ? *held : phazite::TrackView {};
+        CHECK (phazite::getSavedTrackHeight (song, id) == view.height);
+        CHECK (phazite::isCollapsed (song, id) == view.collapsed.value_or (false));
+        CHECK (phazite::isPinned (song, id) == view.pinned.value_or (false));
     }
 
     const auto master = phazite::getMasterID (song);
@@ -516,11 +538,12 @@ TEST_CASE ("Tracks' values: the golden project's tracks and master read the same
     CHECK (snare.key == std::optional (phazite::Key { .root = 2, .scale = phazite::Scale::minor }));
     CHECK (snare.colour == std::optional<juce::uint32> (0xff56b4e9));
 
-    const auto switches = phazite::readTrackSwitches (whole);
+    const auto read = phazite::readSongTree (whole);
+    const auto& switches = read.trackSwitches;
     CHECK (switches.mutes.find (3) != nullptr);
     CHECK (*switches.modes.find (0) == phazite::SavedAutomationMode::touch);
 
-    const auto outside = phazite::readTracksOutside (whole);
+    const auto& outside = read.tracksOutside;
     CHECK (outside.master.lanes.size() == 2);
     CHECK (outside.master.collapsed == std::optional (true));
     REQUIRE (outside.tracks.find (3) != nullptr);
@@ -593,16 +616,17 @@ TEST_CASE ("Tracks' values: the lenient reader reads what the getters it replace
                              R"(<TRACK id="50" kind="whatever" fader="51" colour="#FF336699" automationMode="skip"/>)"
                              R"(</TRACKS><MASTER id="1" fader="2" volume="0" automationMode="latch" pinned="1" drumMode="1"/></PHAZITE>)");
 
-    // The getters read a song's values (roadmap step S5.20, the tracks' switch): a song given, outside the history, what the
-    // lenient readers read of the tree as it is (TracksValue.h: readTracksValue()).
+    // The getters read a song's values: a song given, outside the history, what the lenient readers read of the tree as it is
+    // (TracksValue.h: readTracksValue(); readSwitchesAndViewAsWritten(), above).
     const auto song = phazite::createSong();
+    const auto [switchesWritten, viewWritten] = readSwitchesAndViewAsWritten (tree);
 
     {
         const phazite::Song::OutsideHistory outside (*song);
         auto& values = *song->getValues();
         values.setAllTracks (*song, phazite::readTracksValue (tree));
-        values.setSwitchesOutsideHistory (*song, phazite::readTrackSwitches (tree));
-        values.setTracksOutside (phazite::readTracksOutside (tree));
+        values.setSwitchesOutsideHistory (*song, switchesWritten);
+        values.setTracksOutside (viewWritten);
     }
 
     const auto id = [] (std::uint64_t raw) { return TrackID::fromRaw (raw); };
@@ -694,9 +718,9 @@ TEST_CASE ("Tracks' values: the lenient reader reads what the getters it replace
     CHECK_FALSE (phazite::readHeldTrack (parse (R"(<TRACK kind="track" fader="3"/>)")).has_value()); // no ID
 
     // The switches and the view as the getters read them.
-    const auto switches = phazite::readTrackSwitches (tree);
+    const auto& switches = switchesWritten;
     CHECK (describe (switches) == "mutes 10 | solos 30 | frozen | modes 0=latch");
-    const auto outside = phazite::readTracksOutside (tree);
+    const auto& outside = viewWritten;
     CHECK (outside.master.pinned == std::optional (true));
     CHECK (outside.master.drumMode == std::optional (true));
     CHECK_FALSE (phazite::readHeldViewOf (tree.getChildWithName (schema::MASTER)).pinned.has_value()); // not described there

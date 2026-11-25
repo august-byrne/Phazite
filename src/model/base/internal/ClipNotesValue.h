@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A MIDI clip's notes and its controllers' values as a value (roadmap step S5.20, the notes' area): each note (NoteValues) in
+// A MIDI clip's notes and its controllers' values as a value: each note (NoteValues) in
 // the clip's order with each one's place by its ID, each controller's value (ControlValues) in theirs, as one value for a clip
 // (ClipNotes), and every MIDI clip's of a song by the clip's ID (NotesByClip), with the helpers that change one in batches;
 // and the conversion between a clip's NOTE and CONTROL children and the value, the one place that reads and writes those by

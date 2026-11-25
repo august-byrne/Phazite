@@ -180,7 +180,7 @@ private:
     // again among them (design J.4). The master's, nothing (no track's file holds anything of it); nor the view
     // (tracksViewChanged()), which no frozen file holds. As the frozen tracks are noted at the later moment, a frozen track
     // moved, or deleted and brought back, within one turn of the message loop stays known as frozen and isn't compared with
-    // its file again (the change named, 2026-11-23: the tree's callback noted them as the track came back, as come in).
+    // its file again.
     void tracksChanged (const std::vector<TrackChange>&, const std::vector<TrackID>& reordered, const SongTracks& now) override;
     void trackSwitchesChanged (const std::vector<TrackSwitchChange>&, const TrackSwitches& now) override;
     // What tracksChanged() and trackSwitchesChanged() mark of each: the frozen tracks noted again only where the change can

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // What hears the song's modulation change hears it from one place (model/base/internal/SongValues.h:
-// Listener::modulationChanged()), by the modulators' and macros' IDs (roadmap step S5.20, modulation's second piece). For each
+// Listener::modulationChanged()), by the modulators' and macros' IDs. For each
 // edit of modulation made through the model, its Undo and its Redo, the listener is told every modulator and macro that
 // differs before and after, compared as values (getModulationValue(), independent of what tells it), with where it was and
 // is, the parts that differ among those it was told and its value after as getModulatorValue() reads it; one told that
@@ -608,7 +608,7 @@ TEST_CASE ("Song values' modulation: a version applied whose master has another 
            "modulators by their place, and what is told after it is what the song holds")
 {
     // A version sets a track's ID never in place (a track of another ID is another track, taken out and added: the case above),
-    // the master's always (it is one of its kind: ApplySong.cpp, makeLike()). The master's modulators' and its containers'
+    // the master's always (it is one of its kind: ApplySong.cpp, makeTracksLike()). The master's modulators' and its containers'
     // macros' place names no ID (ModulatorPlace::onMaster), so the ID set changes nothing of what is told of them, then or
     // after.
     Watched w;
@@ -1061,7 +1061,7 @@ TEST_CASE ("Song values' modulation: a version with other modulation applied eac
                                phazite::makeSongLike (song, *other);
                                phazite::removeBrokenReferences (song);
                            });
-        CHECK (phazite::readModulationValue (*other) == phazite::getModulationValue (song));
+        CHECK (phazite::readHeldModulation (*other) == phazite::getModulationValue (song));
         phazite::test::checkSong (song);
     }
 
@@ -1138,9 +1138,8 @@ TEST_CASE ("Song values' modulation: a learning device's removal heard by the MI
 
 TEST_CASE ("Song values' modulation: a container sent to another track by a line brought back keeps its macros, on that track")
 {
-    // The keeper's case (b) on another channel: a version whose container is on another track than in the song, the song's
-    // track's line brought back (ApplySong.cpp, makeTrackLike(): sendItemsHome() moves the container's element there), its
-    // macros taken out with it and given back on the channel it comes to, their places naming it.
+    // A version whose container is on another track than in the song, the song's track's line brought back (ApplySong.cpp,
+    // makeTrackLike()), its macros taken out with it and given back on the channel it comes to, their places naming it.
     phazite::test::TestSong s;
     auto& song = *phazite::findSong (s.context);
     auto& context = s.context;

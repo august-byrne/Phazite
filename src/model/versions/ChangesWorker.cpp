@@ -159,8 +159,8 @@ namespace
         return own;
     }
 
-    // An automation curve by its key, whole, as a state holds it (Automation.h: copyWholeCurve() of a song): none for one the
-    // state hasn't. Any thread.
+    // An automation curve by its key, whole, as a state holds it, written as whole state writes it (CurveValues.h:
+    // writeCurveElement()): none for one the state hasn't. Any thread.
     juce::ValueTree copyCurve (const SongState& state, const juce::String& key)
     {
         const auto parameter = readCurveKeyText (key);

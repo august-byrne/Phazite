@@ -137,6 +137,15 @@ namespace
         writeSpaces (out, indent);
         out << "</" << type << ">\n";
     }
+
+    // The text between an element's tags taken out, at every depth (readTextElement()).
+    void removeText (juce::XmlElement& element)
+    {
+        element.deleteAllTextElements();
+
+        for (auto* child : element.getChildIterator())
+            removeText (*child);
+    }
 } // namespace
 
 juce::String writeValue (const juce::var& value)
@@ -356,5 +365,11 @@ void writeProjectText (juce::OutputStream& out, const juce::ValueTree& element)
 {
     out << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\n";
     writeIndented (out, element, 0);
+}
+
+juce::ValueTree readTextElement (juce::XmlElement& xml)
+{
+    removeText (xml);
+    return juce::ValueTree::fromXml (xml);
 }
 } // namespace phazite

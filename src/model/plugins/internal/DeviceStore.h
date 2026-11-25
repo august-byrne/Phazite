@@ -1,19 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// What the song stores of its devices in its undo history and outside it alike, read and written by IDs (roadmap step S5.20,
-// the devices' area; the store's value: model/base/internal/DeviceStoreValue.h): a plug-in's state, program, format ID and
-// version (Schema.h: pluginState, pluginProgram, pluginFormatID, pluginVersion) and its values set by hand (its VALUE
-// children in a file); a chain's mute and solo (chainMute, chainSolo); and, outside the history alone, a device's window place
-// (deviceWindowX, deviceWindowY; model/base/internal/DevicesOutside.h). The one block of the model that reads and writes them
-// in a live song: the plug-ins' instances (PluginInstances.h), the parameters' code (model/devices/Parameters.cpp), the
-// containers' (model/mixer/Containers.cpp), a preset loaded into a plug-in (model/presets/Presets.cpp), the devices' writers
-// (model/mixer/DeviceWriters.cpp: a copy's and a maker's entries), the versions (model/versions/ApplySong.cpp, a merge's
-// choice: model/mixer/DeviceClashes.cpp) and the plug-in's window (src/app/PluginWindow.cpp) reach them here alone.
+// What the song stores of its devices in its undo history and outside it alike, read and written by IDs (the store's value:
+// model/base/internal/DeviceStoreValue.h): a plug-in's state, program, format ID and version (Schema.h: pluginState,
+// pluginProgram, pluginFormatID, pluginVersion) and its values set by hand (its VALUE children in a file); a chain's mute and
+// solo (chainMute, chainSolo); and, outside the history alone, a device's window place (deviceWindowX, deviceWindowY;
+// model/base/internal/DevicesOutside.h). The one block of the model that reads and writes them in a live song: the plug-ins'
+// instances (PluginInstances.h), the parameters' code (model/devices/Parameters.cpp), the containers'
+// (model/mixer/Containers.cpp), a preset loaded into a plug-in (model/presets/Presets.cpp), the devices' writers
+// (model/mixer/DeviceWriters.cpp: a copy's and a maker's entries), the versions (model/versions/ApplySong.cpp, a merge's choice:
+// model/mixer/DeviceClashes.cpp) and the plug-in's window (src/app/PluginWindow.cpp) reach them here alone.
 //
-// The song's values are their storage (SongValues.h: deviceStore, a keyed area, and devicesOutside, a value outside the
-// history), which the song's tree holds nothing of. Each read is a look in a map: whether the song holds the item asked of
-// (a plug-in, a chain, a device) is found in the devices' area (SongValues.h: devices), so that no read walks the
-// song (tests/PerformanceGateTests.cpp). The store keeps the entries of an item
-// a step took away (its Undo finds them, an answer of its plug-in's is written for it by ID), which no reader here gives and
+// The song's values hold them (SongValues.h: deviceStore, a keyed area, and devicesOutside, a value outside the history). Each
+// read is a look in a map: whether the song holds the item asked of (a plug-in, a chain, a device) is found in the devices' area
+// (SongValues.h: devices), so that no read walks the song (tests/PerformanceGateTests.cpp). The store keeps the entries of an
+// item a step took away (its Undo finds them, an answer of its plug-in's is written for it by ID), which no reader here gives and
 // no comparison sees. What hears the store change hears it from the values' listener (SongValues.h:
 // Listener::deviceStoreChanged()). Message thread only.
 #pragma once

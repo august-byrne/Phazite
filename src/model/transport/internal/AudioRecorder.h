@@ -63,11 +63,10 @@ private:
     // The inputs in line with these tracks (update()'s, from the tracks the song's values tell, or the song's).
     void updateFrom (const SongTracks&);
 
-    // The tracks (SongValues.h): a track's input or monitoring changed (one left without an input disarmed), or a track taken
-    // out (disarmed, the tracks in it too, each told): the inputs brought in line at once from the tracks handed, never the
-    // song, as the tree's callbacks brought them in line from it. A track that comes back (an Undo of its removal) reopens no
-    // input from here, as the tree's callbacks, which heard no track added, didn't (design K.13): its input opens at the next
-    // change of an input, a monitoring, an arming or the audio device.
+    // The tracks (SongValues.h): a track's input or monitoring changed (one left without an input disarmed), or a track taken out
+    // (disarmed, the tracks in it too, each told): the inputs brought in line at once from the tracks handed, never the song. A
+    // track that comes back (an Undo of its removal) reopens no input from here: its input opens at the next change of an input,
+    // a monitoring, an arming or the audio device.
     void tracksChanged (const std::vector<TrackChange>&, const std::vector<TrackID>& reordered, const SongTracks& now) override;
 
     JUCE_DECLARE_NON_COPYABLE (AudioRecorder)

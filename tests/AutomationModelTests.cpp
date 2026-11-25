@@ -706,7 +706,7 @@ TEST_CASE ("Automation is the song's own, in beats, undo and redo too")
     const auto automation = phazite::test::copyWholeSong (document).getChildWithName (phazite::schema::AUTOMATION);
     REQUIRE (automation.getNumChildren() == 1);
     CHECK (phazite::readCurveParameter (automation.getChild (0)) == makeup);
-    CHECK (phazite::readCurveValue (automation.getChild (0)) == *curve);
+    CHECK (phazite::readHeldCurve (automation.getChild (0)) == *curve);
 
     // An undo takes the song's curve away with its last point, and a redo puts it back.
     phazite::undo (document);
@@ -1274,7 +1274,7 @@ phazite::CurveValue makeCurveValue (const std::vector<phazite::AutomationPoint>&
 TEST_CASE ("Automation's point edits give the song's curves one value for each edit, one undo action, a point kept keeping its "
            "key and a point made getting a new one")
 {
-    // Roadmap step S5.20: the edits work on the curve's value and give the curves' area the curve they made, once
+    // The edits work on the curve's value and give the curves' area the curve they made, once
     // (Automation.cpp: SongCurve::commit()), so that the step holds one action of the area, however many points changed, and
     // each point the edit kept keeps its key, which the selection of points holds, as it kept its element when the tree held
     // the curves. Written out by hand here: the keys kept and made, the step's actions, and the song's curves after.
@@ -1616,7 +1616,7 @@ TEST_CASE ("Bending several points gives each its bend in the order given, the c
 
 TEST_CASE ("Automation's time edits, copies and points added together give their curves the points they always did")
 {
-    // Roadmap step S5.20: as "Automation's point edits give the song's curves one value for each edit" above, for the
+    // As "Automation's point edits give the song's curves one value for each edit" above, for the
     // writers the clips' edits and the time edits use. Each built on straight lines that hold their values where edges go,
     // so that every point's beat and value is written out here exactly: the song's automation after the edit, as a whole copy
     // writes it, and the one action of the curves' area its step holds.
@@ -1804,8 +1804,8 @@ TEST_CASE ("Automation's time edits, copies and points added together give their
 TEST_CASE ("A whole curve set, taken out, renamed and put in order by its parameter, each one exact undo step, its points by "
            "their places")
 {
-    // Roadmap step S5.20 (Automation.h: setCurveValue(), eraseCurve(), renameCurve(), setCurveOrder()): what makes, takes out,
-    // renames or moves a whole curve, as a version applied, a merge's choice, a copy's curves and a folder made a bus do.
+    // What makes, takes out, renames or moves (Automation.h: setCurveValue(), eraseCurve(), renameCurve(), setCurveOrder())
+    // a whole curve, as a version applied, a merge's choice, a copy's curves and a folder made a bus do.
     // Written out by hand: the step's actions, the song's curves after, the parameters the listener is told, and the points
     // selected, whose keys a curve set keeps where they stay.
     Song song;

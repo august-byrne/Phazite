@@ -1141,14 +1141,13 @@ void toggleAllRowsCollapsed (Song& song)
 
 namespace
 {
-    // Each copied track given its original's switches, the frozen one aside (a copy plays live: the file is the original's),
-    // and its view, its lanes naming its devices' copies (copied: a lane's device by its copy's ID, design K.12), before the
-    // copy comes into the song: by the pairs, each original with its copy. The switches written outside the history, as a
-    // maker gives a new item's entries in a keyed area (model/plugins/DeviceStore.cpp: setMadeStore()): the copies' IDs are
-    // new (the song's count of IDs is never undone), so the area keeps none of them; the step's Undo takes the copy away,
-    // leaving its entries unseen, and what is written for it since outside the history (the copy unmuted) is what its Redo
-    // brings it back with, as its element carried its mute while the tree held the switches. Written in the step, the Redo
-    // would put the copied mute back over that. The view is never in the history.
+    // Each copied track given its original's switches, the frozen one aside (a copy plays live: the file is the original's), and
+    // its view, its lanes naming its devices' copies (copied: a lane's device by its copy's ID, design K.12), before the copy
+    // comes into the song: by the pairs, each original with its copy. The switches written outside the history, as a maker gives
+    // a new item's entries in a keyed area (model/plugins/DeviceStore.cpp: setMadeStore()): the copies' IDs are new (the song's
+    // count of IDs is never undone), so the area keeps none of them; the step's Undo takes the copy away, leaving its entries
+    // unseen, and what is written for it since outside the history (the copy unmuted) is what its Redo brings it back with.
+    // Written in the step, the Redo would put the copied mute back over that. The view is never in the history.
     void copyTrackLeaves (Song& song, const std::vector<std::pair<TrackID, TrackID>>& originalsAndCopies, const CopiedIDs& copied)
     {
         auto* values = song.getValues();
@@ -1458,8 +1457,8 @@ namespace
             collectTrackElements (child, tracks);
     }
 
-    // The owners of modulators and macros in a channel's element, as modulation's reader of a whole channel takes them
-    // (model/base/ModulationArea.cpp: takeChannelModulatorsIn()): the channel, then each of its containers and, a folder's,
+    // The owners of modulators and macros in a channel's element, in the order modulation's reader takes them
+    // (model/base/ModulationValue.cpp: readHeldModulation()): the channel, then each of its containers and, a folder's,
     // each of its tracks with theirs, in its elements' order.
     void collectModulationOwners (const juce::ValueTree& owner, std::vector<juce::ValueTree>& owners)
     {
@@ -1839,7 +1838,7 @@ AreaChoice chooseTrackClash (Song& song, const MergeClash& clash, int value, con
     // or the master's own (chooseTrackProperty()), a whole track (chooseWholeTrack()) or the master (chooseWholeMaster()),
     // which only a commit's song from anyone makes a clash of (a merge of two songs Phazite holds keeps a track taken away on
     // one side and changed on the other, and merges the rest property by property: SongMerge.cpp). What is deeper in a track
-    // (an element Phazite doesn't know) is refused: nothing through a TRACK or the MASTER is chosen in the song's tree.
+    // (an element Phazite doesn't know) is refused.
     const auto found = findClashTrack (song, clash.path);
 
     if (! found.has_value())

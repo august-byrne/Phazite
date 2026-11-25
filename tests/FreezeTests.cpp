@@ -1137,7 +1137,7 @@ TEST_CASE ("Bounce in Place's freeze is kept across a save, holds a track's cont
 TEST_CASE ("Bounce in Place's Undo unmutes and unfreezes the original and keeps a solo of another track set since, and its Redo "
            "mutes and freezes it again, the solo still kept")
 {
-    // Design J.1 of the tracks' values (roadmap step S5.20) on a real song: the mute and the freeze are in the bounce's step,
+    // Design J.1 of the tracks' values on a real song: the mute and the freeze are in the bounce's step,
     // the solo outside the history, as the tree holds them today and the switches' area must keep them.
     Song song;
     auto& model = song.getSong();

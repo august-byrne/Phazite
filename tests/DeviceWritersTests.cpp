@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The devices' writers on values (roadmap step S5.20, the devices' writers; model/mixer/internal/Mixer.h): every writer of a
+// The devices' writers on values (model/mixer/internal/Mixer.h): every writer of a
 // device, a container or a chain works its next value out and sets it through the devices' setters (setDevice(),
 // setNewDevices(), eraseDevice(), setDeviceListOrder() and the narrow ones beside them), which while the song's tree holds the
 // devices write it by what differs. Their own cases (a set equal to what the song holds writes nothing; an empty SOUNDS and an

@@ -366,7 +366,7 @@ namespace
             key.device = id;
             key.parameter = child[schema::valueParameter].toString();
 
-            if (store.pluginValues.find (key) == nullptr) // the first of one parameter, as the tree's readers find it
+            if (store.pluginValues.find (key) == nullptr) // the first of one parameter, as the loader keeps it
                 store.pluginValues = store.pluginValues.set (key, makeSongsPluginValue (readPluginValue (child, reading)));
         }
     }

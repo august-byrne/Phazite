@@ -92,12 +92,10 @@ std::optional<float> getValueAtControllerPosition (const Song&, const ParameterR
 // Learning ends as its parameter goes, in the call that tells of it: a modulator's or a macro's as the song's values tell it
 // taken out (SongValues::Listener::modulationChanged(), by its ID), a send's level the same (sendsChanged(), by the send's ID),
 // and a device's, a plug-in's or a chain's as its device or chain is (devicesChanged(), by its ID); a fader's as its track is
-// taken out, or given another fader or VCA (tracksChanged(), by the channel it remembers: learningChannel), the master's as
-// its element is put in anew (a merge's choice of the whole MASTER: made) or given another fader. A bus made plain while its
-// fader learns ends the learning now (the change named, 2026-11-23: the tree's callback ended it only as a child of the song
-// was taken out and the parameter wasn't found again). Which of them a
-// learned parameter is, is its source (ParameterSource), found as learning starts. Nothing of it is the song's tree's to tell
-// any more (roadmap step S5.20, the tracks' listener's piece): the linker listens to the song's values alone.
+// taken out, or given another fader or VCA (tracksChanged(), by the channel it remembers: learningChannel), the master's as its
+// element is put in anew (a merge's choice of the whole MASTER: made) or given another fader. A bus made plain while its fader
+// learns ends the learning. Which of them a learned parameter is, is its source (ParameterSource), found as learning starts. The
+// linker listens to the song's values alone.
 class MidiLinker final : private juce::Timer,
                          private SongValues::Listener
 {

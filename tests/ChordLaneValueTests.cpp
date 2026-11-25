@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song's chord lane as a value (model/base/internal/ChordLaneValue.h; roadmap step S5.20, the chord lane's first piece):
-// the conversion between the value and the CHORDLANE element (the one place that reads and writes CHORD and CHORDKEY by
-// name), round trip through the lane of the golden project and through damaged ones; and the lane's readers (model/chords/
-// internal/Chords.h) on the value, the same as the lane's code read the elements before the value came.
+// The song's chord lane as a value (model/base/internal/ChordLaneValue.h): the conversion between the value and the CHORDLANE
+// element (the one place that reads and writes CHORD and CHORDKEY by name), round trip through the lane of the golden project
+// and through damaged ones; and the lane's readers (model/chords/internal/Chords.h) on the value, the same as reading the
+// elements the loader leaves.
 //   phazite_tests.exe --test-case="Chord lane value*"
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
@@ -196,7 +196,7 @@ TEST_CASE ("Chord lane value: the golden project's lane, read into a value and w
     REQUIRE (element != nullptr);
     const auto lane = juce::ValueTree::fromXml (*element);
 
-    const auto value = phazite::readChordLaneValue (lane);
+    const auto value = phazite::readHeldChordLane (lane);
     REQUIRE (value.chords.size() == 6);
     REQUIRE (value.keys.size() == 2);
     CHECK (value.chords[4] == ChordEntry { beat (20.0), phazite::BeatDuration::fromBeats (4.0), 2, -1, 2, "majorSeventh" });
@@ -205,11 +205,10 @@ TEST_CASE ("Chord lane value: the golden project's lane, read into a value and w
     const auto written = writeLane (value);
     const auto differences = findElementDifferences (lane, written);
     CHECK_MESSAGE (differences.isEmpty(), differences.joinIntoString ("\n"));
-    CHECK (phazite::readChordLaneValue (written) == value);
+    CHECK (phazite::readHeldChordLane (written) == value);
 }
 
-TEST_CASE ("Chord lane value: damaged lanes read as the lane's code read them, written as it writes them, and the readers read "
-           "them as before")
+TEST_CASE ("Chord lane value: the readers on a song opened with a damaged lane read it as before")
 {
     // A chord without a start, a length or a degree; one before the song's start; one of a type Phazite doesn't know; numbers
     // beyond their ranges; a key change without a root, one with a root past B, one before the song's start; a child of another
@@ -226,26 +225,6 @@ TEST_CASE ("Chord lane value: damaged lanes read as the lane's code read them, w
                              R"(<CHORD start="16" length="4" degree="5" type="dominantSeventh"/>)"
                              R"(</CHORDLANE>)");
 
-    const auto value = phazite::readChordLaneValue (lane);
-    REQUIRE (value.chords.size() == 5);
-    REQUIRE (value.keys.size() == 3);
-    CHECK (value.chords[0] == ChordEntry { beat (0.0), phazite::BeatDuration(), 1, 0, 0, "major" });
-    CHECK (value.chords[1] == ChordEntry { beat (0.0), phazite::BeatDuration::fromBeats (6.0), 7, 1, 9, "minorSeventh" });
-    CHECK (value.chords[2] == ChordEntry { beat (8.0), phazite::BeatDuration::fromBeats (4.0), 1, -1, -1, "nothingKnown" });
-    CHECK (value.chords[3] == ChordEntry { beat (12.0), phazite::BeatDuration(), 3, 0, 0, "minor" });
-    CHECK (value.keys[0] == KeyEntry { beat (16.0), -1, "dorian" });
-    CHECK (value.keys[1] == KeyEntry { beat (8.0), 11, "nothingKnown" });
-    CHECK (value.keys[2] == KeyEntry { beat (0.0), 3, "minor" });
-
-    // Written as the lane's code writes them (an accidental and an inversion of 0 left out; a key without a root without
-    // one), and read again the same.
-    const auto written = writeLane (value);
-    CHECK (phazite::readChordLaneValue (written) == value);
-    CHECK_FALSE (written.getChild (0).hasProperty (schema::chordAccidental));
-    CHECK_FALSE (written.getChild (0).hasProperty (schema::chordInversion));
-    CHECK_FALSE (written.getChild (5).hasProperty (schema::keyRoot));
-    CHECK (phazite::readChordLaneValue ({}) == ChordLaneValue {});
-
     // The readers on a song opened with the lane (a file from others, which the loader makes consistent and the song takes
     // into its values: ChordLaneValue.h, readHeldChordLane()), the same as the lane's code read the lane the loader left.
     auto state = phazite::writeSongTree (phazite::makeNewSong());
@@ -255,7 +234,7 @@ TEST_CASE ("Chord lane value: damaged lanes read as the lane's code read them, w
     REQUIRE (phazite::hasChordLane (*song));
     const auto held = phazite::test::copyWholeSong (*song).getChildWithName (schema::CHORDLANE);
     checkReadersAsBefore (*song, held, phazite::Key {});
-    CHECK (phazite::getChordLaneValue (*song) == phazite::readChordLaneValue (held));
+    CHECK (phazite::getChordLaneValue (*song) == phazite::readHeldChordLane (held));
     CHECK_FALSE (phazite::getChordLaneValue (*song).chords.empty());
     CHECK_FALSE (phazite::getChordLaneValue (*song).keys.empty());
 }
@@ -285,9 +264,8 @@ TEST_CASE ("Chord lane value: a lane read as the song holds one reads each prope
     CHECK (value.keys[1] == KeyEntry { beat (8.0), 11, "major" });
     CHECK (phazite::readHeldChordLane ({}) == ChordLaneValue {});
 
-    // A lane the song wrote reads the same both ways.
+    // A lane the song wrote reads the same again.
     const auto written = writeLane (value);
-    CHECK (phazite::readChordLaneValue (written) == value);
     CHECK (phazite::readHeldChordLane (written) == value);
 }
 
@@ -311,7 +289,7 @@ TEST_CASE ("Chord lane value: the lane's readers on a lane the model made read i
 
     REQUIRE (phazite::hasChordLane (*song));
     const auto lane = phazite::test::copyWholeSong (*song).getChildWithName (schema::CHORDLANE);
-    CHECK (phazite::getChordLaneValue (*song) == phazite::readChordLaneValue (lane));
+    CHECK (phazite::getChordLaneValue (*song) == phazite::readHeldChordLane (lane));
     checkReadersAsBefore (*song, lane, { 7, phazite::Scale::major });
     CHECK (phazite::getLaneKeyAt (*song, beat (30.0)) == phazite::Key { 2, phazite::Scale::minor });
 

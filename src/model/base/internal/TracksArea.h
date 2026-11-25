@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The tracks' area of the song's values (roadmap step S5.20; SongValues.h, whose recipe this follows): the song's tracks,
+// The tracks' area of the song's values (SongValues.h, whose recipe this follows): the song's tracks,
 // folders, returns and master are values, in three areas: their fields written in the undo history alone (SongValues.h:
 // tracks, TracksValue.h: SongTracks, plain), their switches (trackSwitches, TrackSwitchesValue.h: mute, solo, frozen, the
 // automation mode, keyed) and their view (tracksOutside, TracksOutside.h: the view, LANES and LANE, outside the history), which

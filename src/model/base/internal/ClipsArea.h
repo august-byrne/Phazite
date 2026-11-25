@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The clips' area of the song's values (roadmap step S5.20; SongValues.h, whose recipe this follows): its parts, each of
+// The clips' area of the song's values (SongValues.h, whose recipe this follows): its parts, each of
 // which a list of SongValues.h's, WholeState.h's or IDsHeld.h's asks in turn, a line for each area. Its value and the
 // conversion of its elements are ClipsValue.h's. A clip's notes come in and go out of the song with the clip, in the same
 // loop over its track's elements (NotesArea.h: takeClipNotes()), so the clips' reader and whole state's writer here do the

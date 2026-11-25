@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A merge's clash chosen in an area the song holds as a value beside its tree (roadmap step S5.20; model/base/internal/
-// SongValues.h), which a write of the song's tree can't reach: each such area's chooser, declared here and defined with its
-// area's model code, which chooseClash() (model/versions/VersionsModel.cpp: chooseInAreas()) asks in turn, a line each,
-// before it writes the song's tree. A new area adds its chooser here and its line there (SongValues.h's recipe). Message
-// thread: each sets its area through the area's code, in the choice's undo step.
+// A merge's clash chosen in an area of the song's values (model/base/internal/SongValues.h): each area's chooser, declared here
+// and defined with its area's model code, which chooseClash() (model/versions/VersionsModel.cpp: chooseInAreas()) asks in turn, a
+// line each. A new area adds its chooser here and its line there (SongValues.h's recipe). Message thread: each sets its area
+// through the area's code, in the choice's undo step.
 #pragma once
 
 #include "model/versions/internal/SongMerge.h"
@@ -106,7 +105,6 @@ AreaChoice chooseClipClash (Song&, const MergeClash&, int value, const MergeSide
 //     given through each area's code; refused where the song couldn't hold the side's
 //     there (an ID it holds elsewhere; the master taken away);
 //   - anything deeper in a track or the master (an element Phazite doesn't know): refused.
-// Asked after the clips' (a path through a TRACK to a CLIP is theirs) and the other areas'. Nothing through a TRACK or the
-// MASTER is written into the song's tree.
+// Asked after the clips' (a path through a TRACK to a CLIP is theirs) and the other areas'.
 AreaChoice chooseTrackClash (Song&, const MergeClash&, int value, const MergeSides&);
 } // namespace phazite

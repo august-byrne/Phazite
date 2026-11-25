@@ -61,7 +61,7 @@ std::string findDifference (const juce::String& a, const juce::String& b)
 void leaveOutWhatNamesNothing (phazite::Song& song)
 {
     // The items (the tracks, the master, their faders and devices) of the song whole, never of its live tree alone, which
-    // holds less as the song's areas move beside it (roadmap step S5.20).
+    // holds less as the song's areas move beside it.
     std::set<std::uint64_t> items;
     findIDProblems (phazite::test::copyWholeSong (song), &items);
 

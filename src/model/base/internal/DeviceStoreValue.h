@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// What the song stores of its devices that is written both in its undo history and outside it, as a keyed value (roadmap
-// step S5.20, the devices' area; ValueArea.h, KeyedAreaValue): a plug-in's values set by hand (Schema.h: its VALUE children)
-// by its device and the plug-in's own ID of the parameter, its state, program, format ID and version (pluginState,
-// pluginProgram, pluginFormatID, pluginVersion), and a chain's mute and solo (chainMute, chainSolo), each an entry by its
-// own key, so that an Undo puts back only the entries its step changed, as the tree undoes one property at a time: a value
-// the plug-in's own window set, a state a save stored and a chain soloed after a step all survive that step's Undo (the
-// devices' plain value, DevicesValue.h, covers the rest of a device; a window's place is outside the history alone,
+// What the song stores of its devices that is written both in its undo history and outside it, as a keyed value (ValueArea.h,
+// KeyedAreaValue): a plug-in's values set by hand (Schema.h: its VALUE children) by its device and the plug-in's own ID of the
+// parameter, its state, program, format ID and version (pluginState, pluginProgram, pluginFormatID, pluginVersion), and a chain's
+// mute and solo (chainMute, chainSolo), each an entry by its own key, so that an Undo puts back only the entries its step
+// changed: a value the plug-in's own window set, a state a save stored and a chain soloed after a step all survive that step's
+// Undo (the devices' plain value, DevicesValue.h, covers the rest of a device; a window's place is outside the history alone,
 // DevicesOutside.h). With the conversion between those properties and children of a DEVICE and a CHAIN and the store.
 //
-// The store is the storage: the song holds an area of it (SongValues.h: deviceStore, keyed; DeviceStoreArea.h).
+// The song holds the store as an area (SongValues.h: deviceStore, keyed; DeviceStoreArea.h).
 // The functions by ID that read and write it are in model/plugins/internal/DeviceStore.h. Its own header, beside the other
 // areas' (one header for each area's values); immer is the model's alone (tools/check-architecture.sh: immer-outside-model).
 #pragma once

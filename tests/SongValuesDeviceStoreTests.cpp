@@ -2,7 +2,7 @@
 // What the song's devices store in the history and outside it alike (model/base/internal/DeviceStoreValue.h: a plug-in's
 // values set by hand, its state, program, format ID and version, a chain's mute and solo) is an area of the song's values,
 // keyed (an Undo puts back only the entries its step changed), with each device's window's place outside the history alone
-// (roadmap step S5.20; DeviceStoreArea.h). For each write the model makes, its Undo and its Redo: what the values' listener is
+// (DeviceStoreArea.h). For each write the model makes, its Undo and its Redo: what the values' listener is
 // told in all (SongValues.h: Listener::deviceStoreChanged()), the store handed whole the same as the area's value, what reaches
 // the plug-in (the stand-in of TestPlugin.h, its gain read from its instance and from its helper), and nothing told of
 // another area. The sequences the keyed area exists for (design J.1, on a bare area in DeviceStoreValueTests.cpp) on a real

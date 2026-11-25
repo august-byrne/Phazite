@@ -188,21 +188,6 @@ namespace
         return true;
     }
 
-    // Each TRACK under an element (the track list, a folder) in its order, a folder before the tracks in it.
-    void forEachTrackElement (const juce::ValueTree& parent, const std::function<void (const juce::ValueTree&)>& visit)
-    {
-        for (const auto& child : parent)
-        {
-            if (child.hasType (schema::TRACK))
-            {
-                visit (child);
-
-                if (child[schema::trackKind].toString() == schema::trackIsFolder)
-                    forEachTrackElement (child, visit);
-            }
-        }
-    }
-
     // One view property of an element read into a view, as readView() reads it (held: none where it isn't described there).
     void readViewProperty (const juce::ValueTree& element, const schema::PropertyDescription& property, bool held, TrackView& view)
     {
@@ -406,25 +391,6 @@ bool isViewProperty (const juce::ValueTree& element, const juce::Identifier& pro
 
     return std::any_of (getViewProperties().begin(), getViewProperties().end(),
                         [&element, &property] (const auto* each) { return each->getName() == property && isDescribedOn (element, *each); });
-}
-
-TracksOutside readTracksOutside (const juce::ValueTree& song)
-{
-    TracksOutside outside;
-
-    forEachTrackElement (song.getChildWithName (schema::TRACKS),
-                         [&outside] (const juce::ValueTree& track)
-                         {
-                             const auto id = (std::uint64_t) toWhole<juce::int64> (track[schema::trackID]);
-
-                             if (id != 0 && outside.tracks.find (id) == nullptr)
-                                 outside.tracks = outside.tracks.set (id, readViewOf (track));
-                         });
-
-    if (const auto master = song.getChildWithName (schema::MASTER); master.isValid())
-        outside.master = readViewOf (master);
-
-    return outside;
 }
 
 void forEachIDNamed (const TracksOutside& outside, const std::function<void (std::uint64_t)>& each)

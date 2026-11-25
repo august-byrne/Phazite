@@ -139,7 +139,7 @@ TrackValue held (const phazite::Song& song, TrackID id)
 
 // Whether a change put a track in the song anew rather than moving the one it holds (what a plug-in on it would be taken out
 // and put in again with): whether the tracks' teller told it taken out or added (TracksArea.h: TrackChange::made) rather than
-// come to another folder (TrackChange::place). Since the tracks' switch (roadmap step S5.20) no track has an element whose
+// come to another folder (TrackChange::place). Since the tracks' switch no track has an element whose
 // identity could tell it (named: this read the element's identity in the song's tree before).
 class ElementKept final : private phazite::SongValues::Listener
 {

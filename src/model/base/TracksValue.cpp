@@ -1008,34 +1008,6 @@ std::vector<juce::ValueTree> listTrackElements (const juce::ValueTree& song)
     return found;
 }
 
-juce::ValueTree findTrackElementByID (const juce::ValueTree& song, TrackID id)
-{
-    if (! id.isValid())
-        return {};
-
-    const std::function<juce::ValueTree (const juce::ValueTree&)> findIn = [id, &findIn] (const juce::ValueTree& parent)
-    {
-        for (const auto& child : parent)
-        {
-            if (! child.hasType (schema::TRACK))
-                continue;
-
-            countVisited (1);
-
-            if (readTrackElementID (child) == id)
-                return child;
-
-            if (readKindWord (child[schema::trackKind]) == Kind::folder)
-                if (auto found = findIn (child); found.isValid())
-                    return found;
-        }
-
-        return juce::ValueTree();
-    };
-
-    return findIn (song.getChildWithName (schema::TRACKS));
-}
-
 TrackOrder readTrackOrder (const juce::ValueTree& song)
 {
     TrackOrder order;

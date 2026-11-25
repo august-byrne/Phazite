@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song's sends as values (model/base/internal/SendsValue.h; roadmap step S5.20, the sends' first piece): the conversion
+// The song's sends as values (model/base/internal/SendsValue.h): the conversion
 // between a SEND element and its value (which the sends' readers read a send with), round trip through the golden
 // project's sends and through damaged ones, the helpers that alone write the song's sends, the IDs they hold and name; the
 // sends' readers by ID (model/mixer/internal/Mixer.h), the same as the tree; and the readers that would find nothing without

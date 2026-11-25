@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The chord lane's area of the song's values (roadmap step S5.20; SongValues.h, whose recipe this follows): its parts, each
+// The chord lane's area of the song's values (SongValues.h, whose recipe this follows): its parts, each
 // of which a list of SongValues.h's or WholeState.h's asks in turn, a line for each area. Its value and the conversion of its
 // elements are ChordLaneValue.h's. It holds no IDs (IDsHeld.h). Message thread, but for whole state's parts, which read only
 // the values they are given.

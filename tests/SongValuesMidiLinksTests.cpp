@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later The song's MIDI links as an area of its values (model/base/internal/SongValues.h,
-// MidiLinksArea.h; roadmap step S5.20, the MIDI links' switch). What hears the links change hears it from one place
+// MidiLinksArea.h). What hears the links change hears it from one place
 // (Listener::midiLinksChanged()), which the links' area tells: for each edit made through the model, its Undo and its Redo, once
 // for each change of the value, and nothing of another area; another area's change tells it nothing. A song's file holds a
 // MIDILINKS while it has a link (an empty one is none); a set equal to the links held makes no step; every edit is one exact undo

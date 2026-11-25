@@ -16,7 +16,8 @@ namespace phazite
 {
 namespace
 {
-    // How a reader reads: as Phazite's code always read the tree, or as the song holds it (each by its description).
+    // How a grid is read: as Phazite's code always read the tree (readSavedGrid()), or as the song holds it (each property by
+    // its description).
     enum class Reading
     {
         lenient,
@@ -30,14 +31,13 @@ namespace
         return std::any_of (words.begin(), words.end(), [&text] (const char* word) { return text == word; });
     }
 
-    // A text as the song holds one: as it is, or, held, only where it is of its description's hexadecimal digits (the loader's
-    // rule: a var that is text, of that form), else none.
-    juce::String readText (const juce::ValueTree& element, const schema::PropertyDescription& property, Reading reading)
+    // A text as the song holds one: as it is, but one of a description's hexadecimal digits only where it is of that form (the
+    // loader's rule: a var that is text, of that form), else none.
+    juce::String readText (const juce::ValueTree& element, const schema::PropertyDescription& property)
     {
         const auto& value = element[property.getName()];
 
-        if (reading == Reading::held && property.getHexDigits() > 0
-            && ! (value.isString() && schema::isVersionsID (value.toString(), property.getHexDigits())))
+        if (property.getHexDigits() > 0 && ! (value.isString() && schema::isVersionsID (value.toString(), property.getHexDigits())))
             return {};
 
         return value.toString();
@@ -67,7 +67,7 @@ namespace
     }
 
     //==============================================================================
-    std::optional<SavedKey> readKey (const juce::ValueTree& phazite, Reading reading)
+    std::optional<SavedKey> readKey (const juce::ValueTree& phazite)
     {
         const auto element = phazite.getChildWithName (schema::LASTKEY);
 
@@ -76,16 +76,6 @@ namespace
 
         SavedKey key;
         const auto& scale = element[schema::keyScale];
-
-        if (reading == Reading::lenient)
-        {
-            // As model/notes/Notes.cpp read it: the root as an int, within 0 to 11; the scale as it is (major for none or any
-            // other word).
-            key.root = juce::jlimit (0, 11, toWhole<int> (element[schema::keyRoot]));
-            key.scale = scale.toString();
-            return key;
-        }
-
         const auto root = readHeldWhole (element[schema::keyRoot], schema::keyRoot);
 
         if (! root.has_value())
@@ -293,16 +283,16 @@ namespace
     }
 
     //==============================================================================
-    SongOwnValue readOwn (const juce::ValueTree& phazite, Reading reading)
+    SongOwnValue readOwn (const juce::ValueTree& phazite)
     {
         SongOwnValue own;
 
         if (! phazite.hasType (schema::PHAZITE))
             return own;
 
-        own.outline = readText (phazite, schema::outline, reading);
-        own.notes = readText (phazite, schema::notes, reading);
-        own.idNumbering = readText (phazite, schema::idNumbering, reading);
+        own.outline = readText (phazite, schema::outline);
+        own.notes = readText (phazite, schema::notes);
+        own.idNumbering = readText (phazite, schema::idNumbering);
         own.patternsKeepTheirSpeed = (bool) phazite.getProperty (schema::patternsKeepTheirSpeed, false);
 
         if (const auto merging = phazite.getChildWithName (schema::MERGING); merging.isValid())
@@ -311,20 +301,20 @@ namespace
         return own;
     }
 
-    SongStanding readStanding (const juce::ValueTree& phazite, Reading reading)
+    SongStanding readStanding (const juce::ValueTree& phazite)
     {
         SongStanding standing;
 
         if (! phazite.hasType (schema::PHAZITE))
             return standing;
 
-        standing.lastKey = readKey (phazite, reading);
-        standing.versionsBranch = readText (phazite, schema::versionsBranch, reading);
-        standing.versionsBase = readText (phazite, schema::versionsBase, reading);
+        standing.lastKey = readKey (phazite);
+        standing.versionsBranch = readText (phazite, schema::versionsBranch);
+        standing.versionsBase = readText (phazite, schema::versionsBase);
         return standing;
     }
 
-    SongOutside readOutside (const juce::ValueTree& phazite, Reading reading)
+    SongOutside readOutside (const juce::ValueTree& phazite)
     {
         SongOutside outside;
 
@@ -340,35 +330,34 @@ namespace
         for (const auto& [property, field] :
              { std::pair (&schema::loopStart, &outside.loopStart), std::pair (&schema::loopEnd, &outside.loopEnd) })
             if (const auto* number = phazite.getPropertyPointer (*property))
-                *field = reading == Reading::lenient ? std::optional ((double) *number) : readHeldNumber (*number, *property);
+                *field = readHeldNumber (*number, *property);
 
-        // Held, a range looped on purpose is both its ends, the end past the start (Playback.cpp: getLoopBeats() loops the
-        // song without either, and an empty range plays nothing sensible): else none, as the loader leaves it
-        // (keepSongOwnAsHeld()).
-        if (reading == Reading::held
-            && (! outside.loopStart.has_value() || ! outside.loopEnd.has_value() || ! (*outside.loopEnd > *outside.loopStart)))
+        // A range looped on purpose is both its ends, the end past the start (Playback.cpp: getLoopBeats() loops the song
+        // without either, and an empty range plays nothing sensible): else none, as the loader leaves it (keepSongOwnAsHeld()).
+        if (! outside.loopStart.has_value() || ! outside.loopEnd.has_value() || ! (*outside.loopEnd > *outside.loopStart))
         {
             outside.loopStart.reset();
             outside.loopEnd.reset();
         }
 
-        // Within its description's range, held (0 where it is no finite number, which the loader takes out); as Playback.cpp
-        // read it otherwise. The project takes it out as it opens.
+        // Within its description's range (0 where it is no finite number, which the loader takes out). The project takes it
+        // out as it opens.
         if (const auto* start = phazite.getPropertyPointer (schema::playStart))
-            outside.playStart = reading == Reading::lenient ? (double) *start : readHeldNumber (*start, schema::playStart).value_or (0.0);
+            outside.playStart = readHeldNumber (*start, schema::playStart).value_or (0.0);
 
         if (const auto* punch = phazite.getPropertyPointer (schema::punch))
             outside.punch = (bool) *punch;
 
         outside.lastInput = phazite[schema::lastInput].toString();
 
-        if (holdsGridOn (phazite, reading))
-            outside.playlistGrid = readGrid (phazite, reading);
+        if (holdsGridOn (phazite, Reading::held))
+            outside.playlistGrid = readGrid (phazite, Reading::held);
 
         // A PIANOROLL that holds none of a grid's properties holds no grid (the loader takes it out): the defaults, as a song
         // without one reads.
-        if (const auto pianoRoll = phazite.getChildWithName (schema::PIANOROLL); pianoRoll.isValid() && holdsGridOn (pianoRoll, reading))
-            outside.pianoRollGrid = readGrid (pianoRoll, reading);
+        if (const auto pianoRoll = phazite.getChildWithName (schema::PIANOROLL);
+            pianoRoll.isValid() && holdsGridOn (pianoRoll, Reading::held))
+            outside.pianoRollGrid = readGrid (pianoRoll, Reading::held);
 
         return outside;
     }
@@ -426,34 +415,19 @@ bool SongOutside::operator== (const SongOutside& other) const
 }
 
 //==============================================================================
-SongOwnValue readSongOwnValue (const juce::ValueTree& phazite)
-{
-    return readOwn (phazite, Reading::lenient);
-}
-
-SongStanding readSongStanding (const juce::ValueTree& phazite)
-{
-    return readStanding (phazite, Reading::lenient);
-}
-
-SongOutside readSongOutside (const juce::ValueTree& phazite)
-{
-    return readOutside (phazite, Reading::lenient);
-}
-
 SongOwnValue readHeldSongOwn (const juce::ValueTree& phazite)
 {
-    return readOwn (phazite, Reading::held);
+    return readOwn (phazite);
 }
 
 SongStanding readHeldSongStanding (const juce::ValueTree& phazite)
 {
-    return readStanding (phazite, Reading::held);
+    return readStanding (phazite);
 }
 
 SongOutside readHeldSongOutside (const juce::ValueTree& phazite)
 {
-    return readOutside (phazite, Reading::held);
+    return readOutside (phazite);
 }
 
 namespace

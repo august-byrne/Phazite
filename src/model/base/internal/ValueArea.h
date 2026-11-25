@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // An area of a song held as an immutable value (the immer library's containers, or a plain value that holds them), which
-// changes through the song's own undo history (Song::getUndoManager(), a Song::History) while the rest of the song is still
-// its juce::ValueTree: how the song moves to values one area at a time (roadmap step S5.20; docs/design/engine.md).
+// changes through the song's own undo history (Song::getUndoManager(), a Song::History): the song is an area for each part
+// of it (SongValues.h; docs/design/engine.md).
 //
-// Each change of the area is a part of the history's step in progress, as a change of the tree's with the undo manager is.
-// The step's first change of the area performs one action that holds the value before and the value after; the step's later
-// changes only give that action another value after. So a step, a gesture and a trial (model/commands/internal/Undo.h) hold
-// the tree's changes and the area's alike, unchanged, and Undo and Redo put the area's value back in one move, however often
-// the step changed it and wherever the tree's changes fell between its own: a drag keeps two values, not one for each move
-// of the mouse. JUCE's own coalescing (UndoableAction::createCoalescedAction()) couldn't do it: it joins an action only with
-// the one performed right before it, which in a step that changes the tree too is often the tree's. "The same step" is the
+// Each change of the area is a part of the history's step in progress. The step's first change of the area performs one
+// action that holds the value before and the value after; the step's later changes only give that action another value
+// after. So a step, a gesture and a trial (model/commands/internal/Undo.h) hold each area's changes alike, and Undo and Redo
+// put the area's value back in one move, however often the step changed it and wherever the other areas' changes fell
+// between its own: a drag keeps two values, not one for each move of the mouse. JUCE's own coalescing
+// (UndoableAction::createCoalescedAction()) couldn't do it: it joins an action only with the one performed right before it,
+// which in a step that changes several areas is often another area's. "The same step" is the
 // history's current transaction while the area's last action is still among its actions
 // (UndoManager::getActionsInCurrentTransaction(): none once another step began, nor after an undo or a redo); an action tells
 // the area as it is destroyed (a step the history lets go, the history cleared), so that the pointer compared is never
@@ -28,12 +28,12 @@
 // is first used (the area asserts it), findChanges (before, after), the entries that differ between two values (each by
 // its key, with the entry before and after, either none: added or removed), and withChanges (now, changes, direction), the
 // value now with exactly those entries as they were before (ChangeDirection::back) or after (forward). Its Undo and Redo
-// then put back only the entries their step changed, as the tree undoes a property at a time: where the area is still at
+// then put back only the entries their step changed, an entry at a time: where the area is still at
 // the value the step left (or, for a redo, the value it found), the move is to the step's very other value, identity and
 // all, as for a plain value; where something was written outside the history meanwhile, it is to the value now with the
 // step's entries moved. So a write outside the history to entries a step did not change survives that step's Undo and
-// Redo; one to an entry a step changed is lost by that step's Undo, which puts back the entry's value before the step, as
-// the tree's Undo of a property does (and its Redo puts back the step's value after).
+// Redo; one to an entry a step changed is lost by that step's Undo, which puts back the entry's value before the step (and
+// its Redo puts back the step's value after).
 //
 // A write outside the history while the area's action is in the history's current step (a drag or a trial in progress, or
 // the step that ended last, until another begins or an undo or a redo) is taken into that action's values before and after,
@@ -54,11 +54,11 @@
 //
 // Listeners are told of every change, a step's, an undo's and a redo's alike, with the value left and the value come to:
 // what plays the song and its views compare to know what changed. A listener only marks what
-// changed, and reads nothing else of the song while it is told: the spikes found that during an undo the rest of the step
-// (the tree's changes, the other areas') may not be back yet when an area's turn comes. Nor does it change the area.
+// changed, and reads nothing else of the song while it is told: during an undo the rest of the step (the other areas') may
+// not be back yet when an area's turn comes. Nor does it change the area.
 //
 // An undo step's size: the song's history keeps its steps by their count (Song::History, which keeps the units at 1), so an
-// action's size in units is JUCE's default. Message thread only, as the song's tree is: nothing here is on the audio thread,
+// action's size in units is JUCE's default. Message thread only, as the song is: nothing here is on the audio thread,
 // which gets what plays from what the model compiles.
 #pragma once
 
@@ -209,7 +209,7 @@ public:
     // whole value it held), so what writes outside the history does so only where the history starts again or is held. So
     // what is on purpose no undo step (view state, mute and solo) lives in a value of its own, never in an area's undoable value.
     // For a keyed value (above), a write outside the history to entries a step did not change survives that step's Undo and
-    // Redo, and one to an entry a step changed is lost by that step's Undo, as the tree loses it; written while the area's
+    // Redo, and one to an entry a step changed is lost by that step's Undo; written while the area's
     // action is in the history's current step, it is taken into that action's values, but for the entries the step changed;
     // written while the history undoes or redoes (an action of the step writing the area as it is undone or redone), it is
     // only written, taken into no action's values.
@@ -365,8 +365,8 @@ private:
         }
 
         // A write outside the history while the step is open, from the value now to the next: taken into both values but for the
-        // entries the step changed already, which keep the step's before and after (so its Undo and Redo put those back as the
-        // tree's do). Where the write changed none of the step's entries, the value after is the next itself, as the area's
+        // entries the step changed already, which keep the step's before and after (so its Undo and Redo put those back). Where
+        // the write changed none of the step's entries, the value after is the next itself, as the area's
         // value is, so that an undo with nothing written since is the plain move. The step's entries, and each one's before and
         // after, stay as they were, so the changes kept stay the step's (above).
         void takeInOutsideWrite (const Value& now, const Value& next)

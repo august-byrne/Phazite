@@ -179,7 +179,7 @@ private:
     Song::Ptr song;
     PlaybackHost& host;
     bool lentToRender = false;
-    bool latencyWaits = false; // a new plan for a device's latency waits for the gesture that drags it (valueTreePropertyChanged())
+    bool latencyWaits = false; // a new plan for a device's latency waits for the gesture that drags it (devicesChanged())
     // An undo or a redo set a value by hand that plays at once: what writes automation follows it once the move is whole
     // (historyMoved()).
     bool followAfterMove = false;
@@ -239,18 +239,14 @@ private:
     void clipsChanged (const std::vector<SongValues::ClipChange>&, const std::vector<TrackID>&) override { triggerAsyncUpdate(); }
     void tempoMapChanged() override { triggerAsyncUpdate(); }
 
-    // The chord lane (SongValues.h; a lane placed or taken away too): a
-    // new plan, as a change in its element made one, though no plan holds chords (kept so until a piece lowers the counts of
-    // plans on purpose, roadmap step S5.20).
+    // The chord lane (SongValues.h; a lane placed or taken away too): a new plan, though no plan holds chords (a piece that
+    // lowers the counts of plans may drop it on purpose).
     void chordLaneChanged() override { triggerAsyncUpdate(); }
 
-    // The sections (SongValues.h): a new
-    // plan, as a change in their element made one, though no plan holds sections, as the chord lane's (kept so until a piece
-    // lowers the counts of plans on purpose, roadmap step S5.20).
+    // The sections (SongValues.h): a new plan, though no plan holds sections, as the chord lane's.
     void sectionsChanged (const std::vector<SectionID>&) override { triggerAsyncUpdate(); }
 
-    // What the song holds of its own (SongValues.h):
-    // a new plan only where what plays changed, the loop's four or the
+    // What the song holds of its own (SongValues.h): a new plan only where what plays changed, the loop's four or the
     // metronome, which a plan holds (SongPlayer.cpp: compile(), getLoop(), isMetronomeOn()). Nothing else of it makes one:
     // the notes, an outline applied, patterns' speed (which a tempo edit reads as it is made, no plan), the numbering, a merge
     // waiting, the key set last, the versions' names, the play start (movePlayhead() locates the engine itself), punch, the
@@ -263,25 +259,22 @@ private:
 
     void curvesChanged (const std::vector<ParameterRef>&) override { triggerAsyncUpdate(); } // the curves: a new plan, as above
 
-    // The modulators and macros (SongValues.h),
-    // by the parts that changed, as the tree's changes of them were taken: one changed in
-    // place in its values set by hand, its steps, its switch or a macro's value plays at once, from the value it is told
-    // (SongPlayer::takeModulator()), and while the history undoes or redoes, what a pass writing it writes from then follows
-    // (known bug 174) once the move is whole (historyMoved()), as for a macro's name, which plays nothing; one added, taken
-    // out, come to another place or of another kind, its modulations, its first value set by hand or its last set back to its
-    // default (as its VALUES came or went), and modulators in another order: a new plan.
+    // The modulators and macros (SongValues.h), by the parts that changed: one changed in place in its values set by hand, its
+    // steps, its switch or a macro's value plays at once, from the value it is told (SongPlayer::takeModulator()), and while the
+    // history undoes or redoes, what a pass writing it writes from then follows (known bug 174) once the move is whole
+    // (historyMoved()), as for a macro's name, which plays nothing; one added, taken out, come to another place or of another
+    // kind, its modulations, its first value set by hand or its last set back to its default (as its VALUES came or went), and
+    // modulators in another order: a new plan.
     void modulationChanged (const std::vector<SongValues::ModulationChange>&, const std::vector<ModulatorPlace>& reordered) override;
 
-    // The sends (SongValues.h), by the parts that changed, as the tree's changes of them were
-    // taken while it held them: a level changed in place plays at once, from the value it is
-    // told (SongPlayer::takeSendLevel()), and while the history undoes or redoes, what a pass writing it writes from then
-    // follows once the move is whole (historyMoved()); one added, taken out, come to another track or routed elsewhere,
-    // and sends in another order: a new plan.
+    // The sends (SongValues.h), by the parts that changed: a level changed in place plays at once, from the value it is told
+    // (SongPlayer::takeSendLevel()), and while the history undoes or redoes, what a pass writing it writes from then follows once
+    // the move is whole (historyMoved()); one added, taken out, come to another track or routed elsewhere, and sends in another
+    // order: a new plan.
     void sendsChanged (const std::vector<SongValues::SendChange>&, const std::vector<TrackID>& reordered, const SongSends& now) override;
 
-    // The devices, containers and chains (SongValues.h;
-    // the store's: deviceStoreChanged(), below), by the parts that changed, as the tree's changes of them were
-    // taken: one changed in place in its values set by hand, its sounds, a container's mix or a chain's volume, pan, crossover
+    // The devices, containers and chains (SongValues.h; the store's: deviceStoreChanged(), below), by the parts that changed:
+    // one changed in place in its values set by hand, its sounds, a container's mix or a chain's volume, pan, crossover
     // or notes plays at once, from the values before and after it is told (SongPlayer::takeDevice()), and while the history
     // undoes or redoes, what a pass writing it writes from then follows once the move is whole (historyMoved()), as for a name
     // alone, which plays nothing; values that make its sound come later or sooner, a new plan, after the gesture that drags
@@ -292,20 +285,19 @@ private:
     void devicesChanged (const std::vector<SongValues::DeviceChange>&, const std::vector<DevicePlace>& reordered,
                          const SongDevices& now) override;
 
-    // The devices' store (SongValues.h), as the tree's changes of it were taken while it held
-    // it: a plug-in's value set by hand and a chain's mute and solo play at once (SongPlayer::takeStoreEntry()), and while the
-    // history undoes or redoes, what a pass writing them writes from then follows once the move is whole (historyMoved()); a
-    // plug-in's first value set by hand or its last set back to its default (as its VALUE came or went): a new plan too. A
-    // plug-in's state, program, format ID and version: nothing (its instance takes them: PluginInstances.h).
+    // The devices' store (SongValues.h): a plug-in's value set by hand and a chain's mute and solo play at once
+    // (SongPlayer::takeStoreEntry()), and while the history undoes or redoes, what a pass writing them writes from then follows
+    // once the move is whole (historyMoved()); a plug-in's first value set by hand or its last set back to its default (as its
+    // VALUE came or went): a new plan too. A plug-in's state, program, format ID and version: nothing (its instance takes them:
+    // PluginInstances.h).
     void deviceStoreChanged (const std::vector<SongValues::DeviceStoreChange>&, const DeviceStore& now) override;
 
-    // The tracks (SongValues.h), as the
-    // tree's changes of them were taken: a volume or a pan changed in place plays at once, from the value it is told
+    // The tracks (SongValues.h): a volume or a pan changed in place plays at once, from the value it is told
     // (SongPlayer::takeTracks()), and while the history undoes or redoes, what a pass writing it writes from then follows once
-    // the move is whole (historyMoved()); anything else of a track (added, taken out, renamed, coloured, a bus switch, a key,
-    // an input...), and tracks in another order: a new plan. Their switches: a mute and a solo play at once
-    // (SongPlayer::takeTrackSwitches()), followed after an undo or a redo as a volume is; a frozen switch and an automation
-    // mode, a new plan. Their view (tracksViewChanged()): nothing, as no plan holds how a track shows.
+    // the move is whole (historyMoved()); anything else of a track (added, taken out, renamed, coloured, a bus switch, a key, an
+    // input...), and tracks in another order: a new plan. Their switches: a mute and a solo play at once
+    // (SongPlayer::takeTrackSwitches()), followed after an undo or a redo as a volume is; a frozen switch and an automation mode,
+    // a new plan. Their view (tracksViewChanged()): nothing, as no plan holds how a track shows.
     void tracksChanged (const std::vector<TrackChange>&, const std::vector<TrackID>& reordered, const SongTracks& now) override;
     void trackSwitchesChanged (const std::vector<TrackSwitchChange>&, const TrackSwitches& now) override;
 

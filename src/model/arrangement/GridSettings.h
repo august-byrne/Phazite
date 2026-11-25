@@ -7,7 +7,7 @@
 #include "model/base/Beats.h"
 #include "model/transport/TempoValues.h"
 
-#include <juce_data_structures/juce_data_structures.h>
+#include <juce_core/juce_core.h>
 
 #include <functional>
 #include <optional>

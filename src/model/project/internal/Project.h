@@ -351,9 +351,8 @@ private:
     bool channelsToCompare = false;
     void clearToCompare();
 
-    // The clips whose notes and controllers' values changed (the song holds them beside its tree: SongValues.h), compared
-    // with savedState's values when asked, as an element that notified is (holdSameNotes()). A clip taken out of the song
-    // compares as its track does, which notified.
+    // The clips whose notes and controllers' values changed (SongValues.h), compared with savedState's values when asked
+    // (holdSameNotes()). A clip taken out of the song compares as its track does, which notified.
     std::vector<ClipID> notesToCompare;
     void clipNotesChanged (const std::vector<ClipID>&) override;
 

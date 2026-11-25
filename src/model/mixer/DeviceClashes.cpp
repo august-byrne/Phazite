@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A merge's clash on a device, a container or a chain chosen through the devices' values (roadmap step S5.20; the choosers
-// declared in model/versions/internal/AreaClashes.h): what the device's own value covers through its setter
+// A merge's clash on a device, a container or a chain chosen through the devices' values (the choosers declared
+// in model/versions/internal/AreaClashes.h): what the device's own value covers through its setter
 // (internal/Mixer.h: setDevice()), what the store holds of it through the store's functions
-// (model/plugins/internal/DeviceStore.h: setStoreEntries()), never the song's tree.
+// (model/plugins/internal/DeviceStore.h: setStoreEntries()).
 #include "internal/Mixer.h"
 #include "model/base/Numbers.h"
 #include "model/base/internal/DeviceStoreValue.h"
@@ -135,11 +135,11 @@ AreaChoice chooseDeviceStoreClash (Song& song, const MergeClash& clash, int valu
     if (! item.has_value() || ! isStoreClash (clash, *item))
         return AreaChoice::notTheArea;
 
-    // Refused (nothing written) for what a merge of two songs Phazite holds never makes, but a commit's song may come from
-    // anyone (tests/FuzzTests.cpp chooses every clash of a damaged merge): a path past a VALUE, a VALUE's property that isn't
-    // its value or a VALUE of what isn't a plug-in, an item the song hasn't at the place the path names (as the tree's choice
-    // found no element there), and a value the song would hold otherwise than it was chosen (DeviceStoreValue.h:
-    // readHeldStoreOf(): a state that isn't base 64 of some bytes, a value set by hand outside 0 to 1).
+    // Refused (nothing written) for what a merge of two songs Phazite holds never makes, but a commit's song may come from anyone
+    // (tests/FuzzTests.cpp chooses every clash of a damaged merge): a path past a VALUE, a VALUE's property that isn't its value
+    // or a VALUE of what isn't a plug-in, an item the song hasn't at the place the path names, and a value the song would hold
+    // otherwise than it was chosen (DeviceStoreValue.h: readHeldStoreOf(): a state that isn't base 64 of some bytes, a value set
+    // by hand outside 0 to 1).
     const auto isValue = isStepOf (item->inside, schema::VALUE);
 
     if (item->step == 0 || ! juce::isPositiveAndBelow (value, 3) || clash.path.size() > item->step + 2

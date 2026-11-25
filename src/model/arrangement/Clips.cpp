@@ -50,13 +50,8 @@ namespace
     // track's elements counted).
     const SongClips& getSongClips (const Song& song)
     {
-        static const SongClips none;
         countVisited (1);
-
-        if (const auto* values = song.getValues())
-            return values->clips.get();
-
-        return none;
+        return song.getValues()->clips.get();
     }
 
     // Whether a track holds clips: a track's, not a folder's or a return's (Schema.h: trackKind).

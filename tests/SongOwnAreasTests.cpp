@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// What the song holds of its own is three areas of its values (roadmap step S5.20, the song's own switch; model/base/internal/
+// What the song holds of its own is three areas of its values (model/base/internal/
 // SongOwnArea.h), with its count of IDs (Song.h: makeID(), which tells no one), which a whole copy writes in their places;
 // the keyed standing undoes by entry, a key set outside the history surviving the Undo of a step that changed another entry;
 // each writer's step is exact (UndoCheck); a file with what Phazite doesn't know at its root opens and saves without it, and

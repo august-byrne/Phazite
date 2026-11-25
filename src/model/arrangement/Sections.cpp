@@ -612,11 +612,11 @@ AreaChoice chooseSectionClash (Song& song, const MergeClash& clash, int value, c
     // merges by its ID, a property at a time (SongMerge.cpp),
     // so its clash is one section's property, or the whole section's (added or taken out on a side), by its ID, the path's
     // second step. A property: the value chosen given to the section of that ID (SectionsValue.h: setSectionProperty(), a void
-    // value taking it away as the tree did), refused where the song holds no section of that ID, for the ID itself (the path's
+    // value taking it away), refused where the song holds no section of that ID, for the ID itself (the path's
     // key), for a property that isn't a section's, and where the section would not hold what was chosen (one the song reads
     // otherwise: SectionsValue.h, readHeldSection(): a length of 0 or less, a number that is none or beyond its range). A whole
     // section: the side chosen's section put in the place of the song's section of that ID, or after the others where it has
-    // none; or the song's taken away where that side had none: as the song's tree had it chosen, in the choice's step. Refused
+    // none; or the song's taken away where that side had none, in the choice's step. Refused
     // (nothing written) for any other clash on its path, which a merge of two songs Phazite holds never makes, but a commit's
     // song may come from anyone (tests/FuzzTests.cpp chooses every clash of a damaged merge): the SECTIONS itself, an element
     // of another type, a section the song can't hold or of another ID, and one that stands in for what its version couldn't

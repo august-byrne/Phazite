@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song's automation as values (roadmap step S5.20, automation's area): a point of a parameter's curve, a curve with its
-// points in their order, and the song's curves by the parameter each automates, in the order the song made them; and the
-// conversion between those values and the AUTOMATION element with its CURVE and POINT children (Schema.h), the one place
-// that reads and writes those by name. The song holds its curves as one such value in an area of its values (SongValues.h:
-// SongValues::curves), its tree's AUTOMATION an empty place a whole copy writes them in (CurvesArea.h); automation's code
+// The song's automation as values: a point of a parameter's curve, a curve with its points in their order, and the song's
+// curves by the parameter each automates, in the order the song made them; and the conversion between those values and the
+// AUTOMATION element with its CURVE and POINT children (Schema.h), the one place that reads and writes those by name. The
+// song holds its curves as one such value in an area of its values (SongValues.h: SongValues::curves, CurvesArea.h), which
+// the song's file form writes into an AUTOMATION while it has any (SongState.h: writeSongTree()); automation's code
 // (model/automation/internal/Automation.h) reads and changes them.
 //
 // Its own header, beside SongValues.h and TempoMapValue.h (one header for each area's values): the model's base includes no
@@ -108,46 +108,31 @@ std::optional<ParameterRef> readCurveKeyText (const juce::String&);
 // or a number), its parameter's text.
 ParameterRef readCurveParameter (const juce::ValueTree& curve);
 
-// A curve's value read from its CURVE element (an invalid tree reads as one without points): its POINT children in the
-// element's order, each property as automation's code has always read it (a beat that is absent reads as 0, a curve as 0;
-// nothing kept within a range here, which the loader does: model/project/internal/Project.h, makeConsistent()); a point
-// without a value is no point, and is left out (the loader takes one out as the song opens). A property Phazite doesn't
-// know is no part of it, nor a child (the loader takes such a child out as the song opens).
-CurveValue readCurveValue (const juce::ValueTree& curve);
-
-// The same as the song holds a curve (Schema.h's descriptions: SongText.h, readDescribed()): each point's beat within 0 and
-// the longest song (0 where it has none), its value within 0 and 1, its bend within -1 and 1 (0 where it has none), in the
-// element's order; a point without a value that is a finite number left out; what Phazite doesn't know of the curve and its
-// points (a property, a child that is no point) no part of it. Each point given the next key from nextKey where it is given
-// (SongValues.h: the song's point keys, which the song made of its state gives: CurvesArea.h), else none. What
-// enters the song's curves reads a curve so: the song's own as it opens (SongState.h: readSongTree()), a version's
-// (model/versions/ApplySong.cpp: makeCurvesLike()) and a merge's choice (model/automation/internal/Automation.h:
-// chooseCurveClash()).
+// A curve's value read from its CURVE element as the song holds a curve (an invalid tree reads as one without points;
+// Schema.h's descriptions: SongText.h, readDescribed()): each point's beat within 0 and the longest song (0 where it has
+// none), its value within 0 and 1, its bend within -1 and 1 (0 where it has none), in the element's order; a point without a
+// value that is a finite number left out; what Phazite doesn't know of the curve and its points (a property, a child that is
+// no point) no part of it. Each point given the next key from nextKey where it is given (SongValues.h: the song's point keys,
+// which the song made of its state gives: CurvesArea.h), else none. What enters the song's curves reads a curve so: the
+// song's own as it opens (SongState.h: readSongTree()), a version's (model/versions/ApplySong.cpp: makeCurvesLike()) and a
+// merge's choice (model/automation/internal/Automation.h: chooseCurveClash()).
 CurveValue readHeldCurve (const juce::ValueTree& curve, std::uint64_t* nextKey = nullptr);
 
 // The song's curves read from its AUTOMATION as the song holds them (readHeldCurve()), each CURVE child in the element's
 // order, one for each parameter (the first; the loader keeps the first: makeConsistent()), each point given a key from
-// nextKey; a child of another type no curve.
+// nextKey; a child of another type no curve; an invalid tree reads as none.
 SongCurves readHeldCurves (const juce::ValueTree& automation, std::uint64_t& nextKey);
 
-// How many points were read into curves' values (readCurveValue(), readHeldCurve()) or compared one by one with another
-// curve's (CurveValue's ==, where the two aren't shared) since Phazite started, on any thread: for the tests that an edit of
-// several points of a curve reads the curve once, however many they are (tests/PerformanceGateTests.cpp), and that a frozen
-// track's curves are compared only where one changed (tests/FreezeTests.cpp). Allocations can't tell it: immer takes its
-// nodes from lists of freed ones.
+// How many points were read into curves' values (readHeldCurve()) or compared one by one with another curve's (CurveValue's
+// ==, where the two aren't shared) since Phazite started, on any thread: for the tests that an edit of several points of a
+// curve reads the curve once, however many they are (tests/PerformanceGateTests.cpp), and that a frozen track's curves are
+// compared only where one changed (tests/FreezeTests.cpp). Allocations can't tell it: immer takes its nodes from lists of
+// freed ones.
 std::uint64_t countCurvePointsRead() noexcept;
 
-// Whether a CURVE element holds a point readCurveValue() would read, without reading them all.
-bool holdsPoints (const juce::ValueTree& curve);
-
-// The song's curves read from its AUTOMATION element (an invalid tree reads as none): each CURVE child in the element's
-// order, one for each parameter (the first, should the element hold two: a tree not made consistent; the loader keeps the
-// first of one parameter, its device's ID read as a number, as here: makeConsistent()). A child of another type is no curve.
-SongCurves readCurvesValue (const juce::ValueTree& automation);
-
-// A curve appended to an AUTOMATION element (a copy of the song's, emptied, outside any song: WholeState.h) as a CURVE, as
-// automation's code writes one: its device's ID as text ("1042") and its parameter; then its POINTs, each with its beat
-// and value, and its curve only while it isn't 0 (a point's key never). And the song's curves, each so, in their order.
+// A curve appended to an AUTOMATION element (outside any song: SongState.h, writeSongTree()) as a CURVE, as automation's code
+// writes one: its device's ID as text ("1042") and its parameter; then its POINTs, each with its beat and value, and its
+// curve only while it isn't 0 (a point's key never). And the song's curves, each so, in their order.
 void writeCurveElement (const ParameterRef&, const CurveValue&, juce::ValueTree& automationCopy);
 void writeCurves (const SongCurves&, juce::ValueTree& automationCopy);
 } // namespace phazite

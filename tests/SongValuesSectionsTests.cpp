@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later The song's sections as an area of its values (model/base/internal/SongValues.h,
-// SectionsArea.h; roadmap step S5.20, the sections' switch). What hears the sections change hears it from one place
+// SectionsArea.h). What hears the sections change hears it from one place
 // (Listener::sectionsChanged()), which the sections' area tells, by the IDs of the sections added, taken out or changed: for each
 // edit made through the model, once for each change of the value, its Undo and its Redo once, and nothing of another area;
 // another area's change tells it nothing. A song's file writes a SECTIONS while the song has a section, and none for an empty

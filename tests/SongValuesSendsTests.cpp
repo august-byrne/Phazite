@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // What hears the song's sends change hears it from one place (model/base/internal/SongValues.h: Listener::sendsChanged()), by
-// the sends' IDs (roadmap step S5.20). For each edit
+// the sends' IDs. For each edit
 // of sends made through the model, its Undo and its Redo, the listener is told every send that differs before and after,
 // compared as values (getSendsValue(), independent of what tells it), with the track it was on and is on, the return it went
 // to and goes to, the parts that differ among those it was told and its value after as getSendValue() reads it, and the
@@ -92,7 +92,7 @@ struct Told final : phazite::SongValues::Listener
     void clipsChanged (const std::vector<phazite::SongValues::ClipChange>&, const std::vector<TrackID>&) override { ++clips; }
     void tempoMapChanged() override { ++tempo; }
 
-    // The tracks', which a track removed, duplicated or moved comes and goes with since the tracks' switch.
+    // The tracks', which a track removed, duplicated or moved comes and goes with.
     void tracksChanged (const std::vector<phazite::TrackChange>&, const std::vector<phazite::TrackID>&, const phazite::SongTracks&) override
     {
         ++tracksTold;
@@ -549,8 +549,7 @@ TEST_CASE ("Song values' sends: what takes sends along tells them: a track with 
         CHECK_FALSE (entry.wasThere);
     }
 
-    // Into a folder: the same sends, on the same track, told nothing since the tracks' switch (roadmap step S5.20): a track
-    // moved changes its place in the tracks' lists alone.
+    // Into a folder: the same sends, on the same track, told nothing: a track moved changes its place in the tracks' lists alone.
     TrackID folder;
 
     {

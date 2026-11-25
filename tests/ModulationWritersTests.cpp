@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Modulation's writers on its values (roadmap step S5.20, modulation's third piece; model/modulation/internal/Modulation.h):
+// Modulation's writers on its values (model/modulation/internal/Modulation.h):
 // every edit of a modulator or a macro works its next value out and sets it through modulation's setters (setModulator(),
 // eraseModulator(), setModulatorOrder(), setAllModulation()) into modulation's area. Each edit leaves the song, written whole
 // (WholeState.h), holding the element Phazite's writers always left (built here as they built it, on an element of the test's

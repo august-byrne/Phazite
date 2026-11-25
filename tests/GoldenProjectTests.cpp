@@ -869,7 +869,7 @@ const std::map<juce::String, juce::String>& getNamesNotInTheProject()
         { "ownDeviceFormat", "the format a device of Phazite's own names in the device lists, never saved" },
         { "fadeIsCurve", "the shape of a fade without a shape of its own, which no clip writes" },
         { "modulatorIsEnvelopeFollower", "the representative project holds an LFO and a step sequencer, as it did before a "
-                                         "modulator's type had its words (roadmap step S5.20), and the golden project changes "
+                                         "modulator's type had its words, and the golden project changes "
                                          "with none: tests/GoldenModulationTests.cpp plays every kind" },
         { "modulatorIsRandom", "as modulatorIsEnvelopeFollower" },
         { "modulatorIsBreakpoints", "as modulatorIsEnvelopeFollower" },

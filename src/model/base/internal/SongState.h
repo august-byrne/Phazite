@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song whole, as values, at one moment (roadmap step S5.20, its end: DESIGN's SongState): every area of the song's values
+// The song whole, as values, at one moment: every area of the song's values
 // (SongValues.h) as it was when it was taken, and the two converters between it and the file's form of the song, a tree of
 // elements (Schema.h): writeSongTree(), the tree a whole copy of the song is (WholeState.h: copyWholeSong()), and
 // readSongTree(), the areas read from a tree the loader made consistent (model/project/internal/Project.h: makeConsistent()),

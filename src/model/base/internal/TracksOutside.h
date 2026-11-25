@@ -1,17 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// What the song holds of its tracks outside its undo history alone, as a value (roadmap step S5.20, the tracks' area; held
+// What the song holds of its tracks outside its undo history alone, as a value (held
 // in an OutsideValue, OutsideValue.h): how each track's row shows, view state, which counts as no change and no step holds
 // (decision 4): its height, whether it is collapsed or pinned, its drum mode and drum rows (Schema.h: trackHeight,
 // trackCollapsed, trackPinned, drumMode, drumOrder, drumHidden) and its automation lanes (LANES, LANE), the master's row's
 // too. With the conversion between those properties and elements of a TRACK and the MASTER and the value.
 //
-// The song holds it outside its history (SongValues.h: tracksOutside; TracksArea.h), and its tree's TRACK and MASTER elements
-// hold none of it (no view property, no LANES): the functions by ID that read and write it are in
-// model/arrangement/internal/Tracks.h (getTrackView(), getViewOf(), setTrackView(), getSavedTrackHeight(),
-// isCollapsed(), isPinned() and their setters), model/notes/internal/Notes.h (the drum rows) and
-// model/automation/internal/Automation.h (getLanes() and the lanes' writers). The conversion below is what a file's, a whole
-// copy's or a version's element is read from and written into. immer is the model's alone (tools/check-architecture.sh:
-// immer-outside-model).
+// The song holds it outside its history (SongValues.h: tracksOutside; TracksArea.h): the functions by ID that read and write it
+// are in model/arrangement/internal/Tracks.h (getTrackView(), getViewOf(), setTrackView(), getSavedTrackHeight(), isCollapsed(),
+// isPinned() and their setters), model/notes/internal/Notes.h (the drum rows) and model/automation/internal/Automation.h
+// (getLanes() and the lanes' writers). The conversion below is what a file's, a whole copy's or a version's element is read from
+// and written into. immer is the model's alone (tools/check-architecture.sh: immer-outside-model).
 #pragma once
 
 #include "model/base/IDs.h"
@@ -62,8 +60,7 @@ struct TrackView
 };
 
 // Each track's view by its ID, and the master's row's, whatever its ID (which a version applied sets anew). Entries of
-// tracks the song doesn't hold (one a step took away, which its Undo may bring back) are kept, as the tree keeps a removed
-// element's, and never written.
+// tracks the song doesn't hold (one a step took away, which its Undo may bring back) are kept, and never written.
 struct TracksOutside
 {
     immer::map<std::uint64_t, TrackView> tracks {};
@@ -86,9 +83,9 @@ TracksOutside withMasterView (const TracksOutside&, TrackView);
 
 // A TRACK's or the MASTER's view as Phazite's code always read it (model/arrangement/Tracks.cpp, model/notes/Notes.cpp,
 // model/automation/Automation.cpp): its height as an int truncates it, where it has one; collapsed, pinned and drum mode as a
-// cast's bool where it has each; the drum rows' texts where it has them; and each LANE of its LANES (readLaneValue()), in
-// their order. Every one the element holds, wherever it is described (a MASTER's pinned too). An empty view for any other
-// element.
+// cast's bool where it has each; the drum rows' texts where it has them; and each LANE of its LANES (readLaneValue()), in their
+// order. Every one the element holds, wherever it is described (a MASTER's pinned too). An empty view for any other element.
+// Called by the song's check (tests/SongCheck.cpp) and the tests alone, against readHeldViewOf().
 TrackView readViewOf (const juce::ValueTree& trackOrMaster);
 
 // The same as the song holds it: only what is described on the element's type (a MASTER's height, collapsed and lanes), its
@@ -96,10 +93,11 @@ TrackView readViewOf (const juce::ValueTree& trackOrMaster);
 // reads as none left out.
 TrackView readHeldViewOf (const juce::ValueTree& trackOrMaster);
 
-// A LANE as Phazite's code always read it (model/automation/Automation.cpp: getLanes()): its device as a cast reads its
-// text, its parameter as text, its height as an int truncates it where it has one, collapsed as a cast's bool. And as the
-// song holds it: its device one the song can count on from and a parameter that isn't empty (Schema.h: laneParameter,
-// always), else none (no lane); its height within its range, made whole.
+// A LANE as Phazite's code always read it (model/automation/Automation.cpp: getLanes()): its device as a cast reads its text, its
+// parameter as text, its height as an int truncates it where it has one, collapsed as a cast's bool. And as the song holds it:
+// its device one the song can count on from and a parameter that isn't empty (Schema.h: laneParameter, always), else none (no
+// lane); its height within its range, made whole: readHeldLane(). The first called by readViewOf() alone (the song's check and
+// the tests).
 LaneValue readLaneValue (const juce::ValueTree& lane);
 std::optional<LaneValue> readHeldLane (const juce::ValueTree& lane);
 
@@ -120,15 +118,11 @@ bool keepViewAsHeld (juce::ValueTree trackOrMaster);
 // Whether a property of a TRACK or the MASTER is one of the view's described on its type.
 bool isViewProperty (const juce::ValueTree& trackOrMaster, const juce::Identifier& property); // described on its type
 
-// Every track's view and the master's of a song's tree (PHAZITE), read as readViewOf() reads them. For the tests, and what
-// reads them whole while the tree holds them.
-TracksOutside readTracksOutside (const juce::ValueTree& song);
-
 // Each device a lane names (laneDevice), of every track's and the master's: what goes with the device (IDsHeld.h).
 void forEachIDNamed (const TracksOutside&, const std::function<void (std::uint64_t)>& each);
 
-// One field of one element as readViewOf() reads it, without reading the rest: what the readers by ID read the view by at
-// every row of the playlist. None of an element that is no TRACK or MASTER.
+// One field of one element as readViewOf() reads it, without reading the rest: what the conversion reads each with. None of an
+// element that is no TRACK or MASTER.
 std::optional<int> readSavedHeight (const juce::ValueTree& trackOrMaster);
 std::optional<bool> readCollapsed (const juce::ValueTree& trackOrMaster);
 std::optional<bool> readPinned (const juce::ValueTree& trackOrMaster);

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song's devices as values (roadmap step S5.20, the devices' area; its first piece): each device, container and chain
+// The song's devices as values (its first piece): each device, container and chain
 // (Schema.h: DEVICE, CONTAINER, CHAIN) by its ID as a DeviceValue, with where it is (DevicePlace), Phazite's own device's
 // values set by hand (its VALUES) by the parameter's index and its sounds (its SOUNDS) by their index among its type's; every
 // one of a song (SongDevices) with the lists that order them, and the helpers that alone write it; and the conversion between
@@ -203,13 +203,13 @@ std::optional<DeviceValue::Form> readDeviceForm (const juce::ValueTree& element)
 // A device, a container or a chain read from its element at a place, as Phazite's code always read it (model/mixer/,
 // model/devices/ before the value): its ID as readID() reads one; a DEVICE's switch and sidechain, and Phazite's own device's
 // type, every value its VALUES hold of a parameter its description has (a choice by its name or its number, any other by its
-// number: SavedValues.h, readSavedValue(), whatever it is, at its default too) and every sound its SOUNDS hold of a property
-// its type has (getSoundPropertiesOf(), but an empty one); a plug-in's identity and mix (1 for none or what is no finite
-// number); a CONTAINER's switch, mix, name, split (layers for none and any other word) and whether it is an instrument
-// container; a CHAIN's name, its volume and pan (0 for none), its crossover (none for none) and its ranges (each end its
-// number as an int truncates it, the range's end for none), each number as it is, in its range or not. None for an element
-// that is none of the three, and for a DEVICE of a type Phazite doesn't know (nor a plug-in), which every reader of the song
-// left out of what plays and the loader takes away. For a song whose tree is the storage, and for tests. Counted
+// number: SavedValues.h, readSavedValue(), whatever it is, at its default too) and every sound its SOUNDS hold of a property its
+// type has (getSoundPropertiesOf(), but an empty one); a plug-in's identity and mix (1 for none or what is no finite number); a
+// CONTAINER's switch, mix, name, split (layers for none and any other word) and whether it is an instrument container; a CHAIN's
+// name, its volume and pan (0 for none), its crossover (none for none) and its ranges (each end its number as an int truncates
+// it, the range's end for none), each number as it is, in its range or not. None for an element that is none of the three, and
+// for a DEVICE of a type Phazite doesn't know (nor a plug-in), which every reader of the song left out of what plays and the
+// loader takes away. Called by the song's check (tests/SongCheck.cpp) and the tests alone, against readHeldDevice(). Counted
 // (countDevicesReadAsValues()).
 std::optional<DeviceValue> readDeviceValue (const juce::ValueTree& element, const DevicePlace&);
 
@@ -260,16 +260,12 @@ juce::ValueTree writeDeviceElement (const DeviceValue&);
 // readDeviceValue() reads it and as readHeldDevice() does, and is the element writeDeviceElement() writes of that.
 bool keepDeviceAsHeld (juce::ValueTree element);
 
-// Every device, container and chain of a song's tree (PHAZITE), read as readDeviceValue() reads one: each TRACK's (in the
-// track list, a folder's before the tracks in it) and the MASTER's, each channel's DEVICEs and CONTAINERs in its element's
-// order, each CONTAINER's CHAINs and each CHAIN's DEVICEs in theirs; of two with one ID (which the loader leaves none of),
-// the first, and none of a type Phazite doesn't know. What reads a tree's devices whole: a whole copy's, and a song that holds no
-// values (Mixer.h: getDevicesValue()), and the tests.
-SongDevices readDevicesValue (const juce::ValueTree& song);
-
-// The same items in the same lists, each read as readHeldDeviceFields() reads it, without its values set by hand and its
-// sounds (not counted: countDevicesReadAsValues()): what the loader's check of the sidechains' loops reads of a
-// file's tree (Sidechain.h: forgetSidechainLoopsIn()), never a device's values whole.
+// Every device, container and chain of a song's tree (PHAZITE): each TRACK's (in the track list, a folder's before the tracks
+// in it) and the MASTER's, each channel's DEVICEs and CONTAINERs in its element's order, each CONTAINER's CHAINs and each
+// CHAIN's DEVICEs in theirs; of two with one ID (which the loader leaves none of), the first, and none of a type Phazite
+// doesn't know; each read as readHeldDeviceFields() reads it, without its values set by hand and its sounds (not counted:
+// countDevicesReadAsValues()): what the loader's check of the sidechains' loops reads of a file's tree (Sidechain.h:
+// forgetSidechainLoopsIn()), never a device's values whole.
 SongDevices readDevicesFields (const juce::ValueTree& song);
 
 // A device, a container or a chain with one of its own properties given a value as readHeldDevice() reads one, or taken

@@ -74,11 +74,12 @@ to it.
 
 ## How the song becomes sound
 
-The song lives in the model (`src/model/base/Song.h`): its tree, and beside it its clips and their notes and
-controllers' values as immutable values (`src/model/base/internal/SongValues.h`). Each open song has a playback session
-(`src/model/playback/internal/PlaybackSession.h`), which compiles the song into a plan (`src/engine/core/Plan.h`)
-through `SongPlayer` (`src/model/playback/internal/SongPlayer.h`), the notes read from their values, and gives the
-engine a new plan as the song or its values change, at most once a turn of the message loop; values set by hand reach what plays at once, without a new plan. A plan is
+The song lives in the model (`src/model/base/Song.h`) as immutable values, an area for each part of it
+(`src/model/base/internal/SongValues.h`); a project file is the song's form, written from a state of it and read into one.
+Each open song has a playback session (`src/model/playback/internal/PlaybackSession.h`), which hears each area's changes
+through the song's one listener (`SongValues::Listener`), marks what changed and compiles the song's values into a plan
+(`src/engine/core/Plan.h`) through `SongPlayer` (`src/model/playback/internal/SongPlayer.h`), giving the engine a new
+plan at most once a turn of the message loop; values set by hand reach what plays at once, without a new plan. A plan is
 built on the message thread and handed to the audio thread whole (`src/engine/core/Handover.h`); what sounds on from one
 plan to the next, such as a reverb's tail or a fader, is kept by the song's IDs, so that a new plan doesn't reset it.
 The engine (`src/engine/core/Engine.h`) plays each block from the audio device's callback, with worker threads for the
@@ -112,6 +113,10 @@ Exports, freezes and bounces compile the song the same way and play it offline, 
   (IDs, plain values, handles) across, so that the model can change its insides without breaking the UI.
 - **Every change to a project is one named undo step with one owner**: a command, or a model function that is a change
   of its own. Then Undo always takes back exactly what the user did, by a name the user recognizes.
+- **Each part of the song is changed by its own code alone** (the tracks' by `Tracks.h`, the clips' by `Clips.h`...),
+  which works out the next value and sets it once, so that every edit of a part is in one place. What is never an undo
+  step (mute and solo, view state, a plug-in's own settings) lives in a value written outside the history, never in one
+  an Undo puts back whole.
 - **View state is saved without an undo step** and doesn't count as an unsaved change: scrolling or folding a track is
   not an edit.
 - **Every name saved in a project is defined once**, in `src/model/base/internal/Schema.h`, and Phazite saves its own
@@ -121,14 +126,15 @@ Exports, freezes and bounces compile the song the same way and play it offline, 
   them in one place.
 - **Values that change many times a second are polled**, never stored in the project or sent as change messages, and a
   display repaints only when what it draws moved, so that a quiet song costs nothing to show.
-- **Whatever listens to a song listens to its values** (`SongValues::Listener`), never to one of its elements nor through a
-  `juce::Value` of an element's property.
+- **Whatever listens to a song listens to its values** (`SongValues::Listener`): a function for each area, told once for
+  each change of its value, which only marks what changed and reads the song at a later moment, as during an Undo the
+  step's other areas may not be back yet.
 
 `tools/check-architecture.sh` counts what breaks these rules, and more: includes that point up a layer, window modules
 and classes below the UI, undo steps begun outside the undo code or in the UI, include loops in the model and the
 services, `internal/` headers included in the UI, source files outside an area's folder, includes and CMake source paths
-that name no file exactly, Tracktion Engine, threads ended by force, listeners on a song's elements rather than its root, immer's headers included
-outside the model, and colours, font sizes and corner radii written
+that name no file exactly, Tracktion Engine, threads ended by force, immer's headers included outside the
+model, and colours, font sizes and corner radii written
 as literals in the UI rather than taken from the design tokens. It compares each count with its budget in
 `tools/architecture-budget.txt`, where every budget is 0 but the literals', the count there was when that rule came,
 which only falls; every count must equal its budget. CI and the pre-commit hook run it; run

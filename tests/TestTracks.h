@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Tracks and the master read by the tests by the song and IDs, never by the live song's elements of them, as
-// TestDeviceValues.h does for devices: the tracks are moving beside the song's tree (roadmap step S5.20), after which the
-// live tree holds no TRACK or MASTER, and what a test reads through these keeps working as they move. Their bodies are what
-// the steps that move the tracks change; a test never reads or writes a live song's TRACKS, TRACK, MASTER, LANES or LANE
-// element itself. What a test sets (a name, a volume, a height, a mute, a lane shown) it sets through the model's functions
-// by ID (model/arrangement/internal/Tracks.h, model/mixer/internal/Mixer.h, model/automation/internal/Automation.h), and a
-// state no model function makes it opens from a whole copy edited by hand (findTrackIn(), then makeSong()).
+// Tracks and the master read by the tests by the song and IDs, as TestDeviceValues.h does for devices: the song holds its tracks
+// as values, and what a test reads as a file holds them it reads from a whole copy (copyTrack()). What a test sets (a name, a
+// volume, a height, a mute, a lane shown) it sets through the model's functions by ID (model/arrangement/internal/Tracks.h,
+// model/mixer/internal/Mixer.h, model/automation/internal/Automation.h), and a state no model function makes it opens from a
+// whole copy edited by hand (findTrackIn(), then makeSong()).
 #pragma once
 
 #include "TestHelpers.h"

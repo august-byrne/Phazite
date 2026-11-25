@@ -2114,15 +2114,14 @@ std::vector<ClashInfo> getClashes (const ProjectContext& context)
 
 namespace
 {
-    // A clash in an area the song holds as a value beside its tree (AreaClashes.h): each area asked in turn, a line each, in
-    // this order: the song's own (a property of the song's own, or its LASTKEY), the tempo map (a path into the song's
-    // TEMPOMAP), the chord lane (a path into the song's CHORDLANE), the MIDI links, the sections, modulation (a path through a
-    // modulator or a macro: a container's macro's before the container's), the sends (a path through a send), the devices (a
-    // path through a device, a container or a chain: the store's first), a curve (a path to a CURVE of the song's AUTOMATION,
-    // or through one, refused), a note (a note's property: its path goes through its clip, so before the clip's), a clip (a
-    // clip's property, or any other path through a clip, refused), a whole track or the master, or a switch of one
-    // (chooseTrackClash()). What the first whose path it is did with it; none of them (notTheArea) for a clash in the song's
-    // tree.
+    // A clash in an area of the song's values (AreaClashes.h): each area asked in turn, a line each, in this order: the song's
+    // own (a property of the song's own, or its LASTKEY), the tempo map (a path into the song's TEMPOMAP), the chord lane (a path
+    // into the song's CHORDLANE), the MIDI links, the sections, modulation (a path through a modulator or a macro: a container's
+    // macro's before the container's), the sends (a path through a send), the devices (a path through a device, a container or a
+    // chain: the store's first), a curve (a path to a CURVE of the song's AUTOMATION, or through one, refused), a note (a note's
+    // property: its path goes through its clip, so before the clip's), a clip (a clip's property, or any other path through a
+    // clip, refused), a whole track or the master, or a switch of one (chooseTrackClash()). What the first whose path it is did
+    // with it; none of them (notTheArea) for a clash in no area.
     AreaChoice chooseInAreas (Song& song, const MergeClash& clash, int value, const MergeSides& sides)
     {
         if (const auto choice = chooseSongOwnClash (song, clash, value, sides); choice != AreaChoice::notTheArea)
@@ -2185,10 +2184,10 @@ bool chooseClash (ProjectContext& context, int index, int value)
     // A change of its own, one undo step, named for the choice: "Take the Other Branch's: Bass volume".
     const UndoStep step (*song, getClashChoiceName (value) + ": " + clash.line + " " + clash.what);
 
-    // Each area the song holds as a value beside its tree asked. Nothing should reach a clash none of them has: only what
-    // Phazite doesn't know at the song's top could, which the song drops as it opens (SongOwnArea.h) and a merge leaves out,
-    // making no clash of it (SongMerge.cpp: mergeSongs()). Should one come all the same, it is chosen with nothing of the
-    // song's to write but the choice itself, below.
+    // Each area of the song's values asked. Nothing should reach a clash none of them has: only what Phazite doesn't know at the
+    // song's top could, which the song drops as it opens (SongOwnArea.h) and a merge leaves out, making no clash of it
+    // (SongMerge.cpp: mergeSongs()). Should one come all the same, it is chosen with nothing of the song's to write but the
+    // choice itself, below.
     const auto choice = chooseInAreas (*song, clash, value, { merging.base, merging.before, merging.theirs });
     jassert (choice != AreaChoice::notTheArea); // a clash no area holds: the merge makes none (above)
 

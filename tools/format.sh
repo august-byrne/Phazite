@@ -1,10 +1,15 @@
 #!/bin/sh
 # Formats Phazite's own C/C++ files with clang-format and the repository's .clang-format (JUCE style).
 #   sh tools/format.sh           format every tracked C/C++ file in place
-#   sh tools/format.sh --check   only list the files that aren't formatted
-#   sh tools/format.sh --staged  the same, for the staged versions (.githooks/pre-commit runs this)
-#   sh tools/format.sh --which   print the clang-format it uses
+#   sh tools/format.sh --check    only list the files that aren't formatted (the whole tree, as CI checks it)
+#   sh tools/format.sh --changed  the same, for the files that differ from HEAD (worktree or index) and the
+#                                 untracked ones git doesn't ignore: the quick check while working. Plain
+#                                 format.sh formats tracked files alone, so an untracked one it names is formatted
+#                                 by name with clang-format (--which), or after git add -N
+#   sh tools/format.sh --staged   the same, for the staged versions (.githooks/pre-commit runs this)
+#   sh tools/format.sh --which    print the clang-format it uses
 # Exit codes: 0 = done or all formatted, 1 = files need formatting, 2 = clang-format missing or too old.
+# With --changed or --staged and no C/C++ file to check, it exits 0 without needing clang-format.
 # It uses $CLANG_FORMAT if set, else clang-format-23, clang-format or clang-format-22 from PATH, then
 # (on Windows) LLVM's install folder, then VS Code's C/C++ extension, which bundles one. .clang-format
 # needs version 22 or newer; Phazite uses 23.
@@ -14,9 +19,9 @@ cd "$(git rev-parse --show-toplevel)" || exit 2
 
 mode=${1:-}
 case "$mode" in
-    '' | --check | --staged | --which) ;;
+    '' | --check | --changed | --staged | --which) ;;
     *)
-        echo "usage: sh tools/format.sh [--check | --staged | --which]" >&2
+        echo "usage: sh tools/format.sh [--check | --changed | --staged | --which]" >&2
         exit 2 ;;
 esac
 
@@ -25,8 +30,16 @@ cxx_files() {
     git -c core.quotepath=off "$@" -- '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hh' '*.hpp' '*.hxx' '*.inl' '*.ipp' '*.mm'
 }
 
-# Nothing C/C++ staged: nothing to check, so clang-format isn't needed.
+# The C/C++ files that differ from HEAD, in the worktree or the index, and the untracked ones git doesn't ignore.
+changed_files() {
+    { cxx_files diff --name-only --diff-filter=ACMR HEAD; cxx_files ls-files --others --exclude-standard; } | sort -u
+}
+
+# Nothing C/C++ staged (or changed): nothing to check, so clang-format isn't needed.
 if [ "$mode" = --staged ] && [ -z "$(cxx_files diff --cached --name-only --diff-filter=ACMR)" ]; then
+    exit 0
+fi
+if [ "$mode" = --changed ] && [ -z "$(changed_files)" ]; then
     exit 0
 fi
 
@@ -82,6 +95,17 @@ case "$mode" in
     --check)
         unformatted=$(cxx_files ls-files | while IFS= read -r file; do
             "$clang_format" --style=file --dry-run --Werror "$file" >/dev/null 2>&1 || printf '    %s\n' "$file"
+        done)
+        [ -z "$unformatted" ] || { printf '%s\n' "$unformatted"; exit 1; } ;;
+    --changed)
+        unformatted=$(changed_files | while IFS= read -r file; do
+            "$clang_format" --style=file --dry-run --Werror "$file" >/dev/null 2>&1 && continue
+
+            if git ls-files --error-unmatch -- "$file" >/dev/null 2>&1; then
+                printf '    %s\n' "$file"
+            else
+                printf '    %s (untracked: plain format.sh skips it; format it by name, or git add -N it first)\n' "$file"
+            fi
         done)
         [ -z "$unformatted" ] || { printf '%s\n' "$unformatted"; exit 1; } ;;
     --staged)

@@ -14,41 +14,6 @@ namespace phazite
 {
 namespace
 {
-    // A property's number as the song reads one (SongText.h: readValueNumber(), the loader's reading, so that a text reads as
-    // the same number wherever it is read), or the one given where the element has none, or what it has is no finite number.
-    double readOr (const juce::var& held, double absent)
-    {
-        const auto number = readValueNumber (held);
-        return number.has_value() && std::isfinite (*number) ? *number : absent;
-    }
-
-    //==============================================================================
-    // As the chord lane's code has always read them (readChordLaneValue()).
-    BeatPosition readStart (const juce::ValueTree& element)
-    {
-        return BeatPosition::fromBeats (std::max (0.0, readOr (element[schema::chordStart], 0.0)));
-    }
-
-    ChordEntry readChord (const juce::ValueTree& chord)
-    {
-        ChordEntry entry;
-        entry.start = readStart (chord);
-        entry.length = BeatDuration::fromBeats (std::max (0.0, readOr (chord[schema::chordLength], 0.0)));
-        entry.degree = juce::jlimit (1, 7, toWhole<int> (readOr (chord[schema::chordDegree], 1.0)));
-        entry.accidental = juce::jlimit (-1, 1, toWhole<int> (readOr (chord[schema::chordAccidental], 0.0)));
-        entry.inversion = toWhole<int> (readOr (chord[schema::chordInversion], 0.0));
-        entry.type = chord[schema::chordType].toString();
-        return entry;
-    }
-
-    KeyEntry readKey (const juce::ValueTree& key)
-    {
-        return { readStart (key),
-                 key.hasProperty (schema::keyRoot) ? juce::jlimit (0, 11, toWhole<int> (readOr (key[schema::keyRoot], 0.0))) : -1,
-                 key[schema::keyScale].toString() };
-    }
-
-    //==============================================================================
     // As the song holds them (readHeldChordLane()): each number by its description, a whole one made whole.
     int readWhole (const juce::ValueTree& element, const schema::PropertyDescription& property)
     {
@@ -122,11 +87,6 @@ bool ChordLaneValue::isSameAs (const ChordLaneValue& other) const noexcept
 bool ChordLaneValue::operator== (const ChordLaneValue& other) const
 {
     return placed == other.placed && chords == other.chords && keys == other.keys;
-}
-
-ChordLaneValue readChordLaneValue (const juce::ValueTree& lane)
-{
-    return readLane (lane, readChord, readKey);
 }
 
 ChordLaneValue readHeldChordLane (const juce::ValueTree& lane)

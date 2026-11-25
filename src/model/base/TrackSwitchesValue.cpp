@@ -4,7 +4,6 @@
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
 
-#include <functional>
 #include <optional>
 #include <utility>
 
@@ -122,21 +121,6 @@ namespace
         return element.hasType (schema::TRACK)
                && (property == schema::trackMute.getName() || property == schema::trackSolo.getName()
                    || property == schema::trackFrozen.getName());
-    }
-
-    // Each TRACK under an element (the track list, a folder) in its order, a folder before the tracks in it.
-    void forEachTrackElement (const juce::ValueTree& parent, const std::function<void (const juce::ValueTree&)>& visit)
-    {
-        for (const auto& child : parent)
-        {
-            if (child.hasType (schema::TRACK))
-            {
-                visit (child);
-
-                if (child[schema::trackKind].toString() == schema::trackIsFolder)
-                    forEachTrackElement (child, visit);
-            }
-        }
     }
 } // namespace
 
@@ -300,18 +284,6 @@ bool keepSwitchesAsHeld (juce::ValueTree element)
 bool isSwitchProperty (const juce::ValueTree& element, const juce::Identifier& property)
 {
     return (element.hasType (schema::TRACK) || element.hasType (schema::MASTER)) && isSwitch (element, property);
-}
-
-TrackSwitches readTrackSwitches (const juce::ValueTree& song)
-{
-    TrackSwitches switches;
-    forEachTrackElement (song.getChildWithName (schema::TRACKS),
-                         [&switches] (const juce::ValueTree& track) { readSwitchesOf (track, switches); });
-
-    if (const auto master = song.getChildWithName (schema::MASTER); master.isValid())
-        readSwitchesOf (master, switches);
-
-    return switches;
 }
 
 bool readTrackMute (const juce::ValueTree& element)

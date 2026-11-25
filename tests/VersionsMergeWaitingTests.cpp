@@ -1150,9 +1150,9 @@ TEST_CASE (
 TEST_CASE ("A line restored from a damaged commit takes away the curves it brought in of devices the song hasn't, and a device "
            "removed before it comes back with its curve by its own Undo")
 {
-    // What a restore takes away again are the curves it brought in (VersionsModel.cpp: findCurves(), by their parameters,
-    // before the song is taken in), and what names what the song hasn't (removeBrokenReferences()). A device removed before
-    // it took its curve along in its own step: the restore brings neither back, and the removal's Undo brings both.
+    // What a restore takes away again are the curves it brought in and what names what the song hasn't (VersionsModel.cpp:
+    // removeBrokenReferences()). A device removed before it took its curve along in its own step: the restore brings neither
+    // back, and the removal's Undo brings both.
     Named n;
     const auto lead = n.s.addTrack ("Lead");
     const auto compressor = n.s.addEffect (lead, phazite::devices::Compressor::typeID);

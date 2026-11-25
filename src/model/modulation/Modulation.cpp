@@ -103,9 +103,8 @@ namespace
     }
 
     // The place of the owner a clash's path names in the song (model/versions/SongMerge.cpp: its steps): a track's or the
-    // master's by its element, and a container's, whose element the song's tree holds no more (the devices' area holds it:
-    // Mixer.h, findContainerPlace()), by its ID, where the song holds it on the channel the path names before it; none for
-    // another.
+    // master's by its element, and a container's (the devices' area holds it: Mixer.h, findContainerPlace()), by its ID, where
+    // the song holds it on the channel the path names before it; none for another.
     std::optional<ModulatorPlace> findOwnerByPath (const Song& song, juce::StringArray path)
     {
         const auto containerStep = schema::CONTAINER.toString() + ":";
@@ -961,13 +960,12 @@ AreaChoice chooseModulationClash (Song& song, const MergeClash& clash, int value
     if (step < 0)
         return AreaChoice::notTheArea;
 
-    // Refused (nothing written) for what a merge of two songs Phazite holds never makes, but a commit's song may come from
-    // anyone (tests/FuzzTests.cpp chooses every clash of a damaged merge): a path deeper than what is in one, one whose owner
-    // the song hasn't (as the tree's choice found no place for it), one the song holds as the other kind or on another owner,
-    // its ID, a property of what is in one that is its key (a modulation's parameter) or that it can't hold (a value of a
-    // parameter its kind hasn't), an element of another type or key, one that stands in for what its version couldn't read
-    // (SongPieces.h: holdsStandIn()), and one the song would read otherwise than it was chosen (ModulationValue.h:
-    // readHeldModulator()).
+    // Refused (nothing written) for what a merge of two songs Phazite holds never makes, but a commit's song may come from anyone
+    // (tests/FuzzTests.cpp chooses every clash of a damaged merge): a path deeper than what is in one, one whose owner the song
+    // hasn't, one the song holds as the other kind or on another owner, its ID, a property of what is in one that is its key (a
+    // modulation's parameter) or that it can't hold (a value of a parameter its kind hasn't), an element of another type or key,
+    // one that stands in for what its version couldn't read (SongPieces.h: holdsStandIn()), and one the song would read otherwise
+    // than it was chosen (ModulationValue.h: readHeldModulator()).
     if (step == 0 || clash.path.size() > step + 2 || ! juce::isPositiveAndBelow (value, 3))
         return AreaChoice::refused;
 
@@ -984,8 +982,7 @@ AreaChoice chooseModulationClash (Song& song, const MergeClash& clash, int value
     const juce::ValueTree* elements[] = { &clash.baseElement, &clash.oursElement, &clash.theirsElement };
     const juce::var* values[] = { &clash.base, &clash.ours, &clash.theirs };
 
-    // One's own property: the value chosen given to it (ModulationValue.h: setModulatorProperty(), a void value taking it
-    // away as the tree did).
+    // One's own property: the value chosen given to it (ModulationValue.h: setModulatorProperty(), a void value taking it away).
     if (clash.path.size() == step + 1 && clash.property.isValid())
     {
         if (! held.has_value() || clash.property == schema::modulatorID)
@@ -1025,8 +1022,8 @@ AreaChoice chooseModulationClash (Song& song, const MergeClash& clash, int value
         return AreaChoice::chosen;
     }
 
-    // What is in one (a MODULATES, a modulator's VALUES): chosen in an element of the one the song holds, as the tree's choice
-    // chose it in the song's, and the element read as the song holds one.
+    // What is in one (a MODULATES, a modulator's VALUES): chosen in an element of the one the song holds, and the element read as
+    // the song holds one.
     const auto& inPath = clash.path[step + 1];
     const auto isModulates = inPath.startsWith (schema::MODULATES.toString() + ":");
 

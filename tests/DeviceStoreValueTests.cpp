@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// What the song stores of its devices in its undo history and outside it alike, as a keyed value (roadmap step S5.20, the
-// devices' store: model/base/internal/DeviceStoreValue.h), with the value outside the history (OutsideValue.h,
-// DevicesOutside.h), and the store's readers and writers by ID, which still read and write the song's tree
-// (model/plugins/internal/DeviceStore.h). The value's conversion: the golden project's plug-ins and chains, and damaged ones,
-// read the same both ways once the song has opened, and written back as the file holds them; its changes over every map;
-// and the plug-in sequences the keyed area must give as the tree gives them today (design J.1: a value a plug-in's window
-// set, a plug-in's held value, a state stored after a preset, a chain soloed, an answer for a device gone), each on a
-// ValueArea of the store in a song's history, and where the tree's own result is in question, on a real song beside it.
-// And on real songs: a plug-in's values through Undo, a chain's switches through Undo, a window's place.
+// What the song stores of its devices in its undo history and outside it alike, as a keyed value
+// (model/base/internal/DeviceStoreValue.h), with the value outside the history (OutsideValue.h, DevicesOutside.h), and the
+// store's readers and writers by ID (model/plugins/internal/DeviceStore.h). The value's conversion: the golden project's plug-ins
+// and chains, and damaged ones, read the same both ways once the song has opened, and written back as the file holds them; its
+// changes over every map; and the plug-in sequences the keyed area must give (design J.1: a value a plug-in's window set, a
+// plug-in's held value, a state stored after a preset, a chain soloed, an answer for a device gone), each on a ValueArea of the
+// store in a song's history. And on real songs: a plug-in's values through Undo, a chain's switches through Undo, a window's
+// place.
 //   phazite_tests.exe --test-case="Device store*"
 #include "GoldenFiles.h"
 #include "TestDeviceValues.h"

@@ -65,7 +65,7 @@ namespace
         return files;
     }
 
-    // What the song plays: its clips read by their IDs (AudioClips.h), not its tree, which is to hold them no more.
+    // What the song plays: its clips read by their IDs (AudioClips.h).
     juce::StringArray findSongPaths (const ProjectContext& context)
     {
         return findAudioFilePaths (*findSong (context));

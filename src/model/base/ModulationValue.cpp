@@ -703,24 +703,9 @@ bool isWrittenAsHeld (const juce::ValueTree& element, const ModulatorPlace& plac
     return held.has_value() && isWrittenAs (element, writeModulatorElement (*held));
 }
 
-SongModulation readModulationValue (const juce::ValueTree& song)
-{
-    SongModulation modulation;
-
-    forEachModulatorElement (song,
-                             [&modulation] (const juce::ValueTree& element)
-                             {
-                                 if (auto value = readModulatorValue (element, readModulatorPlace (element));
-                                     value.has_value() && modulation.find (value->id) == nullptr)
-                                     modulation = withModulator (modulation, std::move (*value));
-                             });
-
-    return modulation;
-}
-
 std::optional<ModulatorValue> readModulatorValueIn (const juce::ValueTree& song, ModulatorID id)
 {
-    // The elements' walk of readModulationValue(), only the first of the ID read whole: the others' IDs looked at alone.
+    // The elements' walk of readHeldModulation(), only the first of the ID read whole: the others' IDs looked at alone.
     std::optional<ModulatorValue> found;
 
     forEachModulatorElement (song,

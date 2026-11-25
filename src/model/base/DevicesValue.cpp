@@ -1322,12 +1322,6 @@ namespace
     }
 } // namespace
 
-SongDevices readDevicesValue (const juce::ValueTree& song)
-{
-    return readTreeDevices (song,
-                            [] (const juce::ValueTree& element, const DevicePlace& place) { return readDeviceValue (element, place); });
-}
-
 SongDevices readDevicesFields (const juce::ValueTree& song)
 {
     return readTreeDevices (song, [] (const juce::ValueTree& element, const DevicePlace& place)

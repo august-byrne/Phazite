@@ -26,7 +26,7 @@ between them, which compiles the song into what plays. The layers and where the 
 | Audio clips stretched, pitched and reversed | Built | Offline, with one stretcher |
 | Browser previews on an engine of their own | Built | |
 | Every element of the song described once in code: its type, range, default and kind | Built | `src/model/base/internal/Schema.h`, `SchemaDescription.h`; `tests/SchemaTests.cpp` |
-| The song as an immutable value, one area at a time | Partly built | Roadmap step S5.20: every area is a value beside the tree (built): the clips, a clip's notes and controllers' values, the tempo map, the chord lane, the MIDI links, automation's curves, the sections, modulation, the sends, the devices' store (keyed, with the windows' places outside the history), the devices, containers and chains, the tracks' switches (keyed, with their rows' view outside the history), the tracks, folders, returns and master themselves, and the song's own (plain, keyed and outside the history, its count of IDs on the song); the song's tree holds only empty placeholders, which the end step takes away next |
+| The song as immutable values, an area for each part, in one undo history | Built | Roadmap step S5.20: `src/model/base/internal/SongValues.h`; the song holds no `juce::ValueTree`, and a file's tree is its form alone |
 | Other stretch modes (slices at the hits, re-pitch) | Planned | No roadmap step |
 | Tracks pre-rendered in the background | Planned | After v1; no roadmap step |
 
@@ -50,25 +50,30 @@ sends, automation, modulators and macros, sections and the chord lane.
   counts differs from it.
 - **Aliases.** The clips of an alias group hold ONE value of notes, the same under each clip's ID, so an edit through
   any of them changes every clip of the group in the same undo step.
-- **Clips and notes as values beside the tree.** The song's clips are immutable values (`src/model/base/internal/
-  ClipsValue.h`: `SongClips`, each clip's properties and warp markers a `ClipValue`, each track's clips in their order,
-  each alias group's clips), and a MIDI clip's notes and controllers' values are one
-  (`ClipNotes`, `ClipNotesValue.h`, by the clip's ID, one value for an alias group); the song holds them in two areas of
-  values (`ValueArea.h`), in its one undo history, rather than as elements of its tree: the song's tree holds no CLIP
-  element. An area's Undo puts its whole value back, except for a keyed value (entries by key, `KeyedAreaValue`), whose
-  Undo and Redo put back only the entries their step changed, so that what is written outside the history to other
-  entries survives them, as the tree undoes a property at a time. Every clip edit and every note edit is a function
-  from one value to the next; a MIDI clip that joins an alias group takes the group's notes. A keeper, a listener of the
-  song's tree, keeps the values and the tree together: a track taken out of the song has its clips remembered with its
-  element and erased, and given back if the same element comes back (a move); a track that comes into the
-  song with its clips' elements (a safety net: the versions give a track its clips through the clips'
-  functions) has them read into the values and taken out of the tree. An undo puts the tree back before the clips, so no
-  tree callback reads the clips: what reads them reads them at its listener's later moment. Whatever needs the song whole
-  (a save, a version, the clipboard, a comparison) asks for it (`WholeState.h`), and gets each track's clips written back
-  in, first among its elements, in the track's order, each property only while it is set, a clip's warp markers, NOTE
-  elements and CONTROL elements after it. What hears the song's changes (what plays it, the open project's views, the
-  unsaved mark, the versions, frozen tracks) hears the values' changes too, by clip, and reads them only once the step is
-  whole.
+- **The song is values.** The song holds immutable values in Phazite's own types, kept with the immer library, which
+  share what a change leaves alone (`src/model/base/internal/SongValues.h`): an area for each part of it (the tracks,
+  their switches and their rows' view; the clips; a MIDI clip's notes; the tempo map; the chord lane; the MIDI links;
+  automation's curves; the sections; modulation; the sends; the devices, what they store and their windows' places; the
+  song's own). It holds no `juce::ValueTree`. Only an area's own code changes it: every edit is a function from one value
+  to the next, set once, and a value equal to the one held is no change.
+- **Three kinds of area.** A plain area (`ValueArea.h`) is undone whole: what only a step writes (the clips, the
+  devices, the tracks). A keyed area (`undoesByEntry`) is undone by entry, so that a write outside the history to an
+  entry a step didn't change survives that step's Undo: what is written in steps and outside the history alike (the
+  devices' store, the tracks' switches, the song's standing). A value outside the history (`OutsideValue.h`) is never
+  in a step: view state and how the song plays (the rows' view, the windows' places, the loop, the grids).
+- **The history.** The song's undo history is JUCE's `UndoManager` holding, for each step, one action for each area the
+  step changed, with the area's value before and after; Undo puts each back by its area's rule. A whole song can't simply
+  be put back, because three areas are written outside steps too. Gestures and trials (`src/model/commands/internal/
+  Undo.h`) are steps kept open.
+- **One listener.** What hears the song change (what plays it, the open project's views, the unsaved mark, the versions,
+  frozen tracks) implements `SongValues::Listener`: a function for each area, told once for each change of its value, with
+  what changed by ID. A listener only marks; it reads the song at a later moment, as during an Undo the step's other areas
+  may not be back yet.
+- **The song whole** is a state (`SongState.h`), a copy of every area's value at one moment, cheap to take and safe to
+  read on any thread. A file's tree is the song's form alone: written from a state where a file, a version's piece, the
+  clipboard or a comparison needs it (`writeSongTree()`), and read into one as the song is made (`readSongTree()`, after
+  the loader makes the tree consistent). An autosave, a version and the changes' worker take a state on the message
+  thread and build their trees on their own threads.
 - **Time edits** make a section longer or shorter rather than cutting it in two.
 
 ### Time
@@ -340,37 +345,15 @@ with Rubber Band Library's R3 engine, into the project's `Cache` folder.
   its renders, so that each can be fixed and measured where it is. Nothing else is built on for playback.
 - **The song is the model's; the engine plays plans.** The engine and the devices know nothing of the song, so
   that either side can change, or be replaced, without the other.
-- **The song becomes an immutable value** (the owner, 2026-11-21): plain values that share what a change leaves
-  alone, kept with the immer library, where it is a JUCE `ValueTree` today. Undo is then a root put back, a save, a
-  render and a merge read a song that no edit can change under them, and what changed is found by comparing two
-  roots. Written for the notes and measured beside the song's own, it was faster in every edit but one (notes
-  deleted, only twice as fast, and its undo step larger), most of all in Undo, a merge and the copy a save takes
-  ([decisions.md](decisions.md), "Engineering"). Every element is described once in code first (roadmap step S5.19),
-  which the values, the loader and the merge are made from; then the song moves one area at a time behind the
-  model's functions (S5.20), the notes first, then the clips, then the tempo map, then the chord lane, then the MIDI
-  links, then automation, then the sections, then modulation, then the sends, then the devices' store, then the devices,
-  then the tracks' switches and view, then the tracks themselves, then the song's own (done: every area is a value
-  beside the tree, the song's tree holding only empty placeholders: no device, container or chain, nor a track, nor a
-  track's switch, view property or lanes, nor a property of its root, its TRACKS and MASTER left as empty places a whole
-  copy writes the tracks into, the chord lane's element left
-  as the sign that the song has one, the MIDI links' and the sections' as the places their first link and section made,
-  automation's AUTOMATION as the place of its curves, each point with a key the selection of points holds, never saved,
-  modulation under the tracks that stay and the containers its keeper follows by their places, the sends under the
-  tracks, as the clips, the devices' store, the first keyed area, by its items' IDs, which keeps a removed item's entries
-  for an Undo and the windows' places outside the history in a value no step holds, and the devices under the tracks and
-  the master, each owner's list in its order, a channel's written right after its clips in a whole copy; the tracks'
-  switches, the second keyed area, by their tracks' IDs (the master's mode under 0), which keeps a removed track's for an
-  Undo, and their view, each row by its track's ID and the master's, outside the history in a value no step holds, both
-  written on their tracks' elements in a whole copy, the lanes after a track's devices and a folder's tracks; and the
-  tracks, folders, returns and master themselves, each by its ID with each folder's list and the top list in their order
-  and the master a member, which a move changes the place of alone, every other area naming its track by ID, written by
-  one function into a whole copy's TRACKS and MASTER; and the
-  song's own, its root's properties and its LASTKEY, PIANOROLL and MERGING, in three values by how the song writes them, a
-  plain one for what a step alone writes, the third keyed one for the key set last and the versions' names, and one
-  outside the history for how it plays and shows, its count of IDs a member of the song's that tells no one, written on
-  the root of a whole copy, what Phazite doesn't know at the root dropped as the song opens; the end step, the history
-  as a list of roots without the tree, still to come), with one undo history for the tree's changes and the values'
-  while both are there, and the project file as it is.
+- **The song is immutable values** (the owner, 2026-11-21; roadmap step S5.20, built 2026-11-24): plain values that
+  share what a change leaves alone, kept with the immer library, in place of a JUCE `ValueTree`. A save, a render and a
+  merge read a state of the song that no edit can change under them, and what changed is found by comparing values,
+  identity first. Written for the notes and measured beside the tree, it was faster in every edit but one (notes deleted,
+  only twice as fast, and its undo step larger), most of all in Undo, a merge and the copy a save takes
+  ([decisions.md](decisions.md), "Engineering"). Every element is described once in code (roadmap step S5.19), which the
+  values, the loader and the merge are made from. The history keeps one action for each area a step changed, not a whole
+  song for each step, because the keyed areas must be undone entry by entry; the project file stays a tree of elements
+  as its form.
 - **Beats are quarter notes everywhere,** and a time signature only sets the bar's length and the counted beat.
   Everything that keeps time then agrees, in every meter.
 - **Control points every 32 samples from the song's start,** so that what a song sounds like does not depend on
@@ -389,12 +372,6 @@ with Rubber Band Library's R3 engine, into the project's `Cache` folder.
 
 ## Not built
 
-- The song as an immutable value: being built, before the beta (roadmap step S5.20). The clips, a clip's notes and
-  controllers' values, the tempo map, the chord lane, the MIDI links, automation's curves, the sections, modulation and the
-  sends, the devices' store, the devices, the tracks' switches and view, the tracks themselves and the song's own (every
-  area) are values beside the tree (built: the engine's tempo map is made once for each change of the song's); the song's
-  `ValueTree` holds only empty placeholders, every name of the song described in `Schema.h` (S5.19), and the end step
-  takes it away next.
 - Other stretch modes, such as slicing drums at their hits or re-pitching: Planned.
 - Tracks that aren't being edited pre-rendered in the background: Planned, after v1.
 - Audio Units and CLAP in the helper: Planned, after v1 ([plugin-hosting.md](plugin-hosting.md)).
@@ -403,6 +380,8 @@ with Rubber Band Library's R3 engine, into the project's `Cache` folder.
 
 - `src/model/base/Song.h`: the song, its undo history, `Song::makeID()`, `Song::storeDeviceStates()`.
 - `src/model/base/internal/Schema.h`: every name the song holds.
+- `src/model/base/internal/SongValues.h`: the song's values, an area for each part, with the recipe for a new one;
+  `SongState.h`: the song whole as a state, and its file's form (`writeSongTree()`, `readSongTree()`).
 - `src/model/commands/internal/Undo.h`: undo steps, `phazite::undo()` and `redo()`.
 - `src/model/transport/TempoValues.h` (`TimeSignature`, `Bars`), `src/engine/core/TempoMap.h`,
   `src/devices/dsp/NoteValues.h`: time.

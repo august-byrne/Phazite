@@ -299,7 +299,9 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   plug-in** (2026-11-17, twice on `main`'s runs; 2026-11-19 on `b3d34c37`, in "A save asks slow plug-ins for their
   states at once...": after 20.5 s, "no parameter 60"). Probably again on 2026-11-22 (`693cb6b6`, in "A close and a
   save that wait on a slow plug-in...": the progress window of a save that should wait never came in two minutes,
-  which a plug-in without parameters explains; the test says why the load ended since then). The plug-in is no
+  which a plug-in without parameters explains; the test says why the load ended since then). And on 2026-11-24
+  with a real VST3 (`72a89aaa`, `Vst3PluginTests`, "A VST3 instrument bends for a pitch bend...": 20.6 s, then
+  every tone silent; the same job run again passed). The plug-in is no
   longer loading and has no parameters, so
   the next thing the test asks of it fails. Not the first lead (a load that meets a helper on its way out): there is
   one helper for each plug-in file, and the helpers crashed or ended by the cases before were other files'; that a

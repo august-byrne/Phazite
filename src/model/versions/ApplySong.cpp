@@ -94,8 +94,8 @@ namespace
     }
 
     // Whether an element is modulation's: a MODULATOR or a MACRO (of a channel or a container), with what is in it. The
-    // modulation pass makes the song's modulators and macros like the other's (makeModulationLike(), below), through
-    // modulation's setters by their IDs (model/modulation/internal/Modulation.h), never the passes over elements.
+    // modulation pass makes the song's modulators and macros like the other's (makeModulationLike(), below), through modulation's
+    // setters by their IDs (model/modulation/internal/Modulation.h).
     bool isModulation (const juce::ValueTree& element)
     {
         return element.hasType (schema::MODULATOR) || element.hasType (schema::MACRO);
@@ -801,13 +801,13 @@ namespace
     }
 
     // The song's MIDI links made the other song's: links or none, as the other has a MIDILINKS (read as the song holds links:
-    // MidiLinksValue.h, readHeldMidiLinks()), through the MIDI links' code, which adds or takes away the song's MIDILINKS and
-    // sets its value, in the mode of the moment (model/midi/internal/MidiLinks.h: makeMidiLinksAs(), which writes nothing for
-    // the links the song holds already). The rule for what the other's version couldn't read, as the passes over elements had
-    // it: a MIDILINKS that stands in for what could not be read is left as the song has it, whole, its being there too; a link
-    // that does keeps the song's link of its controller (a link's key) in its place, or none where the song has none, and the
-    // rest are the other's. Whether it wrote. Only for the whole song (makeSongLike(), makeSongTheSame(), makeSongAsCopied()):
-    // no line's restore gives the song another's links (makeSongOwnLikeIn() and makeTrackLikeIn() never did).
+    // MidiLinksValue.h, readHeldMidiLinks()), through the MIDI links' code, which sets its value, in the mode of the moment
+    // (model/midi/internal/MidiLinks.h: makeMidiLinksAs(), which writes nothing for the links the song holds already). The rule
+    // for what the other's version couldn't read: a MIDILINKS that stands in for what could not be read is left as the song has
+    // it, whole, its being there too; a link that does keeps the song's link of its controller (a link's key) in its place, or
+    // none where the song has none, and the rest are the other's. Whether it wrote. Only for the whole song (makeSongLike(),
+    // makeSongTheSame(), makeSongAsCopied()): no line's restore gives the song another's links (makeSongOwnLikeIn() and
+    // makeTrackLikeIn() never did).
     bool makeMidiLinksLike (Song& song, const juce::ValueTree& other)
     {
         auto then = other.getChildWithName (schema::MIDILINKS);
@@ -845,14 +845,13 @@ namespace
     }
 
     // The song's sections made the other song's: sections or none, as the other has a SECTIONS (read as the song holds them:
-    // SectionsValue.h, readHeldSections()), through the sections' code, which adds or takes away the song's SECTIONS and sets
-    // its value, in the mode of the moment (model/arrangement/internal/Sections.h: makeSectionsAs(), which writes nothing for
-    // the sections the song holds already). The rule for what the other's version couldn't read, as the passes over elements
-    // had it: a SECTIONS that stands in for what could not be read is left as the song has it, whole, its being there too; a
-    // section that does keeps the song's section of its ID (a section's key) in its place, or none where the song has none,
-    // and the rest are the other's. Whether it wrote. For the whole song (makeSongLike(), makeSongTheSame(),
-    // makeSongAsCopied()) and the song's own line (makeSongOwnLikeIn()), whose restore gave the song another's sections as it
-    // gave its tempo map.
+    // SectionsValue.h, readHeldSections()), through the sections' code, which sets its value, in the mode of the moment
+    // (model/arrangement/internal/Sections.h: makeSectionsAs(), which writes nothing for the sections the song holds already).
+    // The rule for what the other's version couldn't read: a SECTIONS that stands in for what could not be read is left as the
+    // song has it, whole, its being there too; a section that does keeps the song's section of its ID (a section's key) in its
+    // place, or none where the song has none, and the rest are the other's. Whether it wrote. For the whole song (makeSongLike(),
+    // makeSongTheSame(), makeSongAsCopied()) and the song's own line (makeSongOwnLikeIn()), whose restore gave the song another's
+    // sections as it gave its tempo map.
     bool makeSectionsLike (Song& song, const juce::ValueTree& other)
     {
         auto then = other.getChildWithName (schema::SECTIONS);
@@ -1079,15 +1078,15 @@ namespace
     // other's).
     using ModulatorsTaken = std::function<bool (const ModulatorValue&)>;
 
-    // The song's modulators and macros that which takes made like the other song's, once the passes over elements put each
-    // owner (a track, the master, a container) where the other has it, through modulation's setters by their IDs, in the mode
-    // of the moment (model/modulation/internal/Modulation.h: setModulator(), eraseModulator(), setModulatorOrder(), each of
+    // The song's modulators and macros that which takes made like the other song's, once the tracks' and the devices' passes put
+    // each owner (a track, the master, a container) where the other has it, through modulation's setters by their IDs, in the
+    // mode of the moment (model/modulation/internal/Modulation.h: setModulator(), eraseModulator(), setModulatorOrder(), each of
     // which writes nothing for what the song holds already): each the song has that the other hasn't taken out; each the other
-    // has (read as the song holds one: OtherModulation) set as it holds it, at its place in its owner's order there (one the
-    // song has keeping its place, one it hasn't added there), on the owner it names there; then each owner's in the other's
-    // order. What the other's version couldn't read (an owner that stands in for it, a modulator or a macro that holds a
-    // stand-in) is left as the song has it, there or not, in its place. The whole song's: every modulator and macro. A line's:
-    // those of its channel and of the containers on it (in the song now, or in the other). How many writes it made.
+    // has (read as the song holds one: OtherModulation) set as it holds it, at its place in its owner's order there (one the song
+    // has keeping its place, one it hasn't added there), on the owner it names there; then each owner's in the other's order.
+    // What the other's version couldn't read (an owner that stands in for it, a modulator or a macro that holds a stand-in) is
+    // left as the song has it, there or not, in its place. The whole song's: every modulator and macro. A line's: those of its
+    // channel and of the containers on it (in the song now, or in the other). How many writes it made.
     int makeModulationLike (Song& song, const juce::ValueTree& other, const ModulatorsTaken& which)
     {
         // The song's next modulation worked out whole, then set once (modulation's area tells it once).
@@ -1281,17 +1280,16 @@ namespace
     // Which of the song's sends a sends pass makes like the other's, by the track it is on (the song's, and the other's).
     using SendTracksTaken = std::function<bool (TrackID)>;
 
-    // The song's sends that which takes made like the other song's, once the passes over elements put each track where the
-    // other has it, in one set of the sends' area, in the mode of the moment (SongValues.h: setAllSends(), which writes
-    // nothing for sends alike to those the song holds), as the passes over elements made a track's SEND elements like the
-    // other's: each the song has on a track taken that the other holds on no track taken, taken out, or sent, as it is now, to
-    // the track the other holds it on where the song has that track (placed as the other has it: findSendPlaceLike()); each the
-    // other has on a track taken that the song has (read as the song holds one: OtherSends) set as it holds it, on that track,
-    // from wherever the song holds it now; then each track taken's in the other's order, those it holds that the other doesn't
-    // name after them. A send to a return the song hasn't is set too, as the passes over elements set it, and goes as what
-    // names the gone does (removeBrokenReferences()). What the other's version couldn't read (a track that stands in for it,
-    // a send that does) is left as the song has it, there or not, in its place. The whole song's: every track. A line's: its
-    // track, and those that come back with it (a folder's, gone since). How many writes it made.
+    // The song's sends that which takes made like the other song's, once the tracks' pass put each track where the other has it,
+    // in one set of the sends' area, in the mode of the moment (SongValues.h: setAllSends(), which writes nothing for sends alike
+    // to those the song holds): each the song has on a track taken that the other holds on no track taken, taken out, or sent, as
+    // it is now, to the track the other holds it on where the song has that track (placed as the other has it:
+    // findSendPlaceLike()); each the other has on a track taken that the song has (read as the song holds one: OtherSends) set as
+    // it holds it, on that track, from wherever the song holds it now; then each track taken's in the other's order, those it
+    // holds that the other doesn't name after them. A send to a return the song hasn't is set too, and goes as what names the
+    // gone does (removeBrokenReferences()). What the other's version couldn't read (a track that stands in for it, a send that
+    // does) is left as the song has it, there or not, in its place. The whole song's: every track. A line's: its track, and those
+    // that come back with it (a folder's, gone since). How many writes it made.
     int makeSendsLike (Song& song, const juce::ValueTree& other, const SendTracksTaken& which)
     {
         auto* values = song.getValues();
@@ -1410,7 +1408,7 @@ namespace
         return kind (a) == kind (b);
     }
 
-    // An item's name as the passes over elements named its element (nameOf()): "DEVICE:44", "CONTAINER:40", "CHAIN:41".
+    // An item's name as a stand-in names its element (nameOf()): "DEVICE:44", "CONTAINER:40", "CHAIN:41".
     juce::String nameOfItem (const DeviceValue& item)
     {
         const auto& type = item.form == DeviceValue::Form::container ? schema::CONTAINER
@@ -1634,24 +1632,23 @@ namespace
     }
 
     // The song's devices, containers and chains that which takes made like the other's (OtherDevices), through the devices'
-    // setters by their IDs and places, in the mode of the moment (model/mixer/internal/Mixer.h: setDevice(),
-    // setNewDevices(), eraseDevice(), setDeviceListOrder(), each of which writes nothing for what the song holds already),
-    // once the passes over elements put each channel where the other has it; now: the song's devices as the pass leaves
-    // them. In three rounds, so that what moves is the same element, a plug-in keeping its instance, its values, its state and
-    // its window's place (a device moved into a container on another track by a version comes home without being loaded
-    // again; a container taken apart since gets its devices back from the channel, one made since gives them back to it):
+    // setters by their IDs and places, in the mode of the moment (model/mixer/internal/Mixer.h: setDevice(), setNewDevices(),
+    // eraseDevice(), setDeviceListOrder(), each of which writes nothing for what the song holds already), once the tracks' pass
+    // put each channel where the other has it. In three rounds, so that what moves is the same element, a plug-in keeping its
+    // instance, its values, its state and its window's place (a device moved into a container on another track by a version comes
+    // home without being loaded again; a container taken apart since gets its devices back from the channel, one made since gives
+    // them back to it):
     //   - each the other holds (its owners before what they hold), on a channel taken there or held by the song on one taken
     //     here: set as the other holds it, at its place there (after the one before it there that the song's list holds),
     //     which moves one the song holds in another list as the same element with all it holds; one the song hasn't (or holds
     //     as another form of a device: a plug-in for one of Phazite's own) made with what the store holds of it, its state and
-    //     values, and its window's place, in the one action that puts it in (setNewDevices()), as the passes over elements
-    //     added the other's element whole; one the song holds as another kind of item under its ID (a device for a chain:
-    //     two computers can make the same ID) taken out first, wherever the song holds it: on a line's restore, even on a
-    //     track outside the line (a known limit, not a fault: it needs two computers that made the same ID, and a merge
-    //     gives what it adds IDs of its own). One the song holds on a channel taken that the other holds on
-    //     one not taken (a line's: what the line's track holds that the other holds on another track) sent there as it is now
-    //     where the song holds what holds it there, else taken out; one whose place there the song holds nothing to hold
-    //     (a track the song hasn't) left where it is;
+    //     values, and its window's place, in the one action that puts it in (setNewDevices()); one the song holds as
+    //     another kind of item under its ID (a device for a chain: two computers can make the same ID) taken out first,
+    //     wherever the song holds it: on a line's restore, even on a track outside the line (a known limit, not a fault: it
+    //     needs two computers that made the same ID, and a merge gives what it adds IDs of its own). One the song holds on a
+    //     channel taken that the other holds on one not taken (a line's: what the line's track holds that the other holds on
+    //     another track) sent there as it is now where the song holds what holds it there, else taken out; one whose place
+    //     there the song holds nothing to hold (a track the song hasn't) left where it is;
     //   - each the song holds on a channel taken that the other holds none of (of its kind) taken out with what it holds,
     //     but one the other's version couldn't read (OtherDevices::standsIn(), or one the other holds as a stand-in somewhere
     //     else that standIns names): left as the song has it;
@@ -1919,20 +1916,18 @@ namespace
         return clips.run();
     }
 
-    // The areas the song holds as values made like the other's, once the rest of the song is (its tracks
-    // first: makeTracksLike(), whose tracks the clip pass gives their clips), each through its pass, a line each, in this
-    // order: the clips with their notes (makeClipsLike()), then the devices with what the
-    // store holds of them (makeDevicesLike(), every channel's: before modulation's pass, which gives a container's macros
-    // their container, and the curves'), then the tempo map (makeTempoMapLike()), then the chord lane (makeChordLaneLike()),
-    // then the MIDI links (makeMidiLinksLike()), then the curves (makeAllCurvesLike()), then the sections
-    // (makeSectionsLike()), then modulation (makeAllModulationLike()), then the sends (makeAllSendsLike()), none of which
-    // reads another's but modulation's the devices'. Taken and standIns as the passes over elements had them (the devices'
-    // store and a window's place; what the other's version couldn't read that stays where the song has it). How many writes
-    // they made (the tempo map's one, where it wrote; the chord lane's one, where it wrote), of what the undo history alone
-    // writes: not the devices' store's, which is written outside it too, and which a song made as copied takes back
-    // (makeSongAsCopied()), as the passes over elements took back a plug-in's state and a chain's solo. A channel's devices
-    // stand before its other children in a whole copy, always (DevicesArea.h: writeDevicesIn()), so that a folder's tracks have
-    // no place among its devices to be given.
+    // The areas the song holds as values made like the other's, once the rest of the song is (its tracks first: makeTracksLike(),
+    // whose tracks the clip pass gives their clips), each through its pass, a line each, in this order: the clips with their
+    // notes (makeClipsLike()), then the devices with what the store holds of them (makeDevicesLike(), every channel's: before
+    // modulation's pass, which gives a container's macros their container, and the curves'), then the tempo map
+    // (makeTempoMapLike()), then the chord lane (makeChordLaneLike()), then the MIDI links (makeMidiLinksLike()), then the curves
+    // (makeAllCurvesLike()), then the sections (makeSectionsLike()), then modulation (makeAllModulationLike()), then the sends
+    // (makeAllSendsLike()), none of which reads another's but modulation's the devices'. Taken and standIns as the tracks' pass
+    // has them (the devices' store and a window's place; what the other's version couldn't read that stays where the song has
+    // it). How many writes they made (the tempo map's one, where it wrote; the chord lane's one, where it wrote), of what the
+    // undo history alone writes: not the devices' store's, which is written outside it too, and which a song made as copied takes
+    // back (makeSongAsCopied()). A channel's devices stand before its other children in a whole copy, always (DevicesArea.h:
+    // writeDevicesIn()), so that a folder's tracks have no place among its devices to be given.
     int makeValuesLike (Song& song, const juce::ValueTree& other, bool standInsStay, Taken taken, const StandIns& standIns)
     {
         auto writes = makeClipsLike (song, other, standInsStay);
@@ -1990,10 +1985,9 @@ namespace
 
     // The tracks that came into the song in an apply: each a track of the other's that the song didn't hold (an ID it didn't
     // hold before the apply: newToSong), put in the song as an element of its own (elements), which the switches' and the
-    // view's pass gives the other's switches and view (makeTrackLeavesLike()). Since the tracks' pass writes through the
-    // tracks' setters (roadmap step S5.20), two kinds of track the passes over elements counted as come in are not: a track
-    // a version moves to another folder, and the tracks inside a folder a version moves, which the song held and which stay
-    // the same elements. Where the song kept no row for one, it keeps the default view; before, they took the version's.
+    // view's pass gives the other's switches and view (makeTrackLeavesLike()). A track a version moves to another folder, and
+    // the tracks inside a folder a version moves, which the song held, are none of them: where the song kept no row for one,
+    // it keeps the default view.
     struct TracksCameIn
     {
         std::set<std::uint64_t> elements {};
@@ -2475,13 +2469,12 @@ void makeSongAsCopied (Song& song, const SongState& now)
     [[maybe_unused]] const auto ownWrites = makeSongOwnValuesLike (song, copy, Taken::everything, MergingTaken::taken);
     [[maybe_unused]] const auto valueWrites = makeValuesLike (song, copy, false, Taken::everything, noStandIns());
     jassert (tracks.writes + valueWrites + ownWrites == 0);
-    makeTrackLeavesLike (song, copy, isEveryTrack, true, Taken::everything, {}); // written outside the history too
 
-    // What the song keeps of items it no longer holds for an Undo that may bring one back (the tracks' switches and view, the
-    // devices' store and windows' places) put back whole as it was when the state was taken, outside the history: so what the
-    // passes wrote of a track or a device the song doesn't hold now (a version's track of an ID Now deleted, which an Undo
-    // brings back with its own) is gone, and so is all a version's kept under IDs past the state's count (known bugs 246 and
-    // 248). Then its count of IDs the state's, as it was: never a change.
+    // The tracks' switches and view, the devices' store and windows' places, which the song writes outside the history too and
+    // keeps of items it no longer holds for an Undo that may bring one back, put back whole as they were when the state was
+    // taken, outside the history: so what the passes wrote of a track or a device the song doesn't hold now (a version's
+    // track of an ID Now deleted, which an Undo brings back with its own) is gone, and so is all a version's kept under IDs
+    // past the state's count. Then its count of IDs the state's, as it was: never a change.
     auto* values = song.getValues();
     values->setSwitchesOutsideHistory (song, now.trackSwitches);
     values->setTracksOutside (now.tracksOutside);

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song's sends as values (roadmap step S5.20, the sends' area): a send as a value (SendValue), every send of a song
+// The song's sends as values: a send as a value (SendValue), every send of a song
 // (SongSends) with the helpers that alone write it, and the conversion between a SEND element and the value (Schema.h). The
 // song holds its sends in an area of its values (SongValues.h: sends; SendsArea.h): the sends'
 // code (model/mixer/internal/Mixer.h: getSendValue(), getSendValues(), getSendTrack(), and the writers) reads and sets the

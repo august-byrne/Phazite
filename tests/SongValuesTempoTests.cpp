@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // What hears the song's tempo map change hears it from one place (model/base/internal/SongValues.h:
-// Listener::tempoMapChanged()), which the tempo map's area tells (roadmap step S5.20). For each edit of the tempo map made
+// Listener::tempoMapChanged()), which the tempo map's area tells. For each edit of the tempo map made
 // through the model, its Undo and its Redo, the listener is told, and told nothing of the clips or their notes; another
 // area's change tells it nothing; and what listens to the song's root hears each change once: the project's count of
 // changes and the versions' count of the song's changes go up by what the listener was told, and by nothing else; and an

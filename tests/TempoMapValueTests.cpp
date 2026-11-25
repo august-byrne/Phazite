@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song's tempo map as a value (model/base/internal/TempoMapValue.h; roadmap step S5.20, the tempo map's first piece): the
+// The song's tempo map as a value (model/base/internal/TempoMapValue.h): the
 // conversion between the value and the TEMPOMAP element (the one place that reads and writes TEMPO and TIMESIGNATURE by
 // name), round trip through every tempo map of the golden files and through damaged ones; a merge's clash on an entry's
 // property; the engine's tempo map made from the value, the same as the one made from the tree before the value came; and

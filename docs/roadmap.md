@@ -43,7 +43,7 @@ would have found them are built, and the eight stages below are the plan for the
 | Phase 4. Release | Half built: the Windows installer, the update check, the notices, the Sampler, the FM synth, the tempo lane, warping and Consolidate, containers' chains, the 128-pad drum sampler, the Exciter and the Vinyl. Open: 4.3 (code signing), 4.4 (the guide, five pages so far), 4.5 (the release process) and 4.10 (the Multisampler), now in stages 5, 7 and 8. |
 | Versions | Built: versions saved, what changed by track, branches, merge, hearing a version against the song, the automatic saves in the history, DAWproject export and import. Stage 4 cut it down to what producers use and gave it plain words, made removed versions recoverable and tied the song to the version it grew from; freeing the store's room by hand is open (S4.4). |
 | Architecture track | A0 to A3, A5's decided parts and A6 are built: the layers with their check, one path for every edit, the UI on IDs and plain values, and Phazite's own song model, engine and plug-in hosting on JUCE alone ([architecture.md](architecture.md)). A4 (a token file, a gallery, a strings table) is not started. |
-| The plan below | Stages 1 and 2 built (2026-11-15): on Windows, and by CI on Linux with GCC, Clang and the sanitizers, with a nightly run that passes. Then the known bugs were fixed before stage 3's hand checks (2026-11-15 and 16; in `main` since 2026-11-17): every entry but four that say why they stay ([known-bugs.md](known-bugs.md)), each fix with its test and its line in the [changelog](changelog.md), and what the fixes' reviews found fixed with them. Built with them: stage 4's untrusted files (S4.9) and mute that silences the output only (S4.8), and stage 5's plan rebuilt only for what changed (S5.7). Stage 4 is built but for one part (2026-11-17 and 18): the versions' design note approved (S4.1), the cut and the plain words (S4.2), versions that left every branch recoverable for 30 days (S4.3), Verify History, Clean Up and the packs' joining (S4.4), the song tied to the version it grew from with its changes worked out in the background (S4.5), backups kept by age (S4.6), and automation along the control's travel with logarithmic frequency knobs (S4.7). Open: the store letting go of what nothing names (S4.4's last part, known bug 196). Stage 6 is built (2026-11-19), and of stage 5 its MIDI steps, S5.2 to S5.4 (2026-11-20). Stages 3, 7 and 8, and the rest of stage 5, are not started. |
+| The plan below | Stages 1 and 2 built (2026-11-15): on Windows, and by CI on Linux with GCC, Clang and the sanitizers, with a nightly run that passes. Then the known bugs were fixed before stage 3's hand checks (2026-11-15 and 16; in `main` since 2026-11-17): every entry but four that say why they stay ([known-bugs.md](known-bugs.md)), each fix with its test and its line in the [changelog](changelog.md), and what the fixes' reviews found fixed with them. Built with them: stage 4's untrusted files (S4.9) and mute that silences the output only (S4.8), and stage 5's plan rebuilt only for what changed (S5.7). Stage 4 is built but for one part (2026-11-17 and 18): the versions' design note approved (S4.1), the cut and the plain words (S4.2), versions that left every branch recoverable for 30 days (S4.3), Verify History, Clean Up and the packs' joining (S4.4), the song tied to the version it grew from with its changes worked out in the background (S4.5), backups kept by age (S4.6), and automation along the control's travel with logarithmic frequency knobs (S4.7). Open: the store letting go of what nothing names (S4.4's last part, known bug 196). Stage 6 is built (2026-11-19), and of stage 5 its MIDI steps, S5.2 to S5.4 (2026-11-20), the song's schema as data (S5.19, 2026-11-21) and the song as an immutable value (S5.20, 2026-11-24). Stages 3, 7 and 8, and the rest of stage 5, are not started. |
 
 ## The plan from here
 
@@ -58,26 +58,8 @@ anyone can download. What the comparison left for later is under [After 1.0](#af
 
 Added on 2026-11-20 and 2026-11-21 (the owner's decisions, so that the model under Phazite is robust before the
 beta): the song's schema as data (S5.19) and the song as an immutable value (S5.20), which was weighed and left at
-first and taken once it was measured ([decisions.md](design/decisions.md), "Engineering"). S5.19 comes before S5.20,
-and both before the stage's other steps that add to the model, which then write through them. Of S5.20, every
-area is built (2026-11-21 to 24): a clip's notes and its controllers' values, the clips themselves (with each
-track's order of clips and the alias groups), the tempo map, the chord lane (its element kept as the sign that the
-song has one), the MIDI links (their element kept as the place the first link made), automation's curves (their
-AUTOMATION kept as their place, each point with a key the selection of points holds), the sections (theirs kept as
-the place the first section made), modulation (each track's, the master's and each container's modulators and macros,
-kept as their tracks and containers come and go), the sends (each track's, kept as its track comes and goes), and what
-the devices store in the history and outside it alike (a plug-in's values set by hand, state, program, format ID and
-version, a chain's mute and solo: the first keyed area, undone by entry, with the windows' places outside the history)
-and the devices, containers and chains themselves (each by its ID, each owner's list in its order, kept as their tracks
-come and go), and the tracks' switches (mute, solo, frozen and the automation mode: keyed, undone by entry) with their
-view (each row's height, collapsed and pinned switches, drum rows and automation lanes, outside the history), and the
-tracks, folders, returns and master themselves (each by its ID, each folder's list and the top list in their order, the
-master a member: the tree's TRACKS and MASTER kept as empty places a whole copy writes them into), and the song's own (its
-root's properties and its LASTKEY, PIANOROLL and MERGING: what a step alone writes, plain; the key set last and the
-versions' names, keyed; the loop, the play start, the grids and the rest of how it plays and shows, outside the history;
-its count of IDs on the song, told to no one; what Phazite doesn't know at its root dropped as it opens) are values
-beside the song's tree, in the song's one undo history, with immer in `external/`, and the song's tree holds only empty
-placeholders. The end step is still to come: the history as a list of roots, and the tree goes.
+first and taken once it was measured ([decisions.md](design/decisions.md), "Engineering"). Both are built, before the
+stage's other steps that add to the model, which write through them.
 
 ### Stage 1. Safe: the bugs that lose work or sound
 
@@ -121,9 +103,23 @@ what they found is fixed or in known-bugs.md.
 
 Built, each in the [changelog](changelog.md): S5.7 (the plan rebuilt only for what changed, with the known bugs), S5.2
 (MIDI channels and program changes), S5.3 (controller lanes in the piano roll) and S5.4 (MIDI learn), the last three
-on 2026-11-20, and S5.19 (the song's schema as data) on 2026-11-21. What they left is in the [backlog](backlog.md): a track's own channel, which waits for S7.3, several
-lanes at once, and pick-up, ranges and relative encoders for a link. Their rows of the [hand checks](hand-checks.md)
-(W1 to W13) need a MIDI keyboard with knobs and a plug-in with several parts.
+on 2026-11-20, S5.19 (the song's schema as data) on 2026-11-21, and S5.20 (the song as an immutable value) on
+2026-11-24. What they left is in the [backlog](backlog.md): a track's own channel, which waits for S7.3, several
+lanes at once, and pick-up, ranges and relative encoders for a link; a history of Phazite's own, project text written
+straight from the values, and the recursive `std::function`s on an edit's path. The MIDI steps' rows of the
+[hand checks](hand-checks.md) (W1 to W13) need a MIDI keyboard with knobs and a plug-in with several parts.
+
+S5.20, as built: the song is values (immer, in `external/`), an area for each part of it, each a value type in Phazite's
+own types made from S5.19's description, in the song's one undo history, which holds one action for each area a step
+changed (a keyed area, undone by entry, where something writes it outside the history too; a value outside the history
+for view state); one listener with a function for each area tells what changed; the song whole is a state any thread
+may read (`SongState`), and a file's tree is its form alone, written from a state and read into one. Its "Done when":
+the song holds no tree (the compiler keeps one out of `Song`, so the `check-architecture.sh` rule it planned was not
+built, and the rule that counted listeners on a song's elements went with its subject); a value read as another type does
+not build; the golden projects are as they were, and `tests/golden/format/song.txt` and `song.pack` changed
+on purpose in three pieces, each named in its commit (the clips, the devices, and the song without its tree), and
+`song-schema.json` as each area described its names; Undo, the copy a save takes and a merge are measured
+in [performance.md](performance.md); and the speed gates pass.
 
 | Step | Size | What | Done when |
 |---|---|---|---|
@@ -141,7 +137,6 @@ lanes at once, and pick-up, ranges and relative encoders for a link. Their rows 
 | S5.16 | M | MP3 export, beside WAV and FLAC (the owner, 2026-11-17), with an encoder under a compatible licence in the notices | An exported MP3 plays in another player, and imported again its first note is where the song's is |
 | S5.17 | M | Resampling: an audio track records what another track, a bus or the master plays | A track armed with the master as its input records what is heard, placed to the sample |
 | S5.18 | M | Presets heard in the browser before they go into the song: an instrument's plays a phrase, an effect's a loop | A preset selected in the browser is heard, and the song is unchanged |
-| S5.20 | XL | The song as an immutable value: each area's elements as plain values in Phazite's own types (a clip's start in beats, a choice as its enum), made from S5.19's description and kept with the immer library, which share what a change leaves alone. One area at a time behind the model's functions, the notes first (their code reaches them through typed views alone already: `src/model/notes/internal/NoteElements.h`). While both are there, an area's value changes through the song's one undo history, as an action that puts a root in another's place, so that steps, gestures and trials hold the tree's changes and the values' alike; the song's index, what plays it and its views learn what changed by comparing roots; and the project file stays as it is, an area read into its value as the song opens and written from it as it saves. The code that walks any element (the song's text, the versions' pieces, differences and merge, the loader) goes by the description. immer joins `external/` with its notice (Boost Software License 1.0, which joins the licences Phazite takes). A `check-architecture.sh` rule counts `juce::ValueTree` and raw property access in the model outside the song's own files (about 1,340 and 1,080 today), whose budget only falls | That budget is 0 and the song holds no tree; a value read as another type does not build; the golden files are as they were; Undo, the copy a save takes and a merge no longer grow with the song ([performance.md](performance.md)); and the speed gates pass |
 | 4.5 | S | The release process: the version from the tag, release builds and the installer from CI, the changelog by version | A tag produces a release with the installer, its SHA-256 and `phazite-update.json` |
 
 **Beta.** The steps above are done, stage 3's rows are checked, and the beta is a release made by 4.5 that anyone can

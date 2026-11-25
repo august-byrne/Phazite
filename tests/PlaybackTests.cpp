@@ -541,12 +541,8 @@ TEST_CASE ("Two tracks moved past each other, a version applied whose tracks hol
     // Known bug 145's review: a track's notes and audio are kept by its ID, and the plan after an edit must be the one a whole
     // compile makes. Three edits, each checked so: two tracks moved past each other (their places swapped, their IDs kept); a
     // version applied whose two tracks hold each other's contents (the versions' pass matches tracks by ID in place, so the
-    // tracks keep their IDs and their names, devices and clips move between them); and the master given another ID by a
-    // version applied, the one ID a version sets in place (ApplySong.cpp: makeLike()).
-    // This case once swapped two live tracks' IDs in place, which no code in src/ does: only a new element comes with a
-    // track's ID, and a version sets the master's alone. So the player's branch for a TRACK's ID changed in place
-    // (SongPlayer.cpp, the trackID case of valueTreePropertyChanged()) is now run by no test and by no code path; it goes with
-    // the tracks' pieces (roadmap step S5.20).
+    // tracks keep their IDs and their names, devices and clips move between them); and the master given another ID by a version
+    // applied, the one ID a version sets in place (ApplySong.cpp: makeTracksLike()).
     TwoSynths two;
     auto& song = *two.song;
     phazite::SongPlayer kept (song);

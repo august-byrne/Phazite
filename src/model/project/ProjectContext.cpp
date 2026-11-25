@@ -82,8 +82,7 @@ namespace
         bool masterDevices = false;       // the master's devices changed: its channel named as the changes are delivered
         int version = 0;                  // ProjectContext::getSongVersion()
 
-        // A clip's notes and controllers' values, which the song holds beside its tree (SongValues.h): a change in the clip,
-        // as one of its elements was.
+        // A clip's notes and controllers' values (SongValues.h): a change in the clip.
         void clipNotesChanged (const std::vector<ClipID>& clips) override
         {
             notesChanged.insert (notesChanged.end(), clips.begin(), clips.end());
@@ -125,14 +124,12 @@ namespace
         // The sections (SongValues.h): their group.
         void sectionsChanged (const std::vector<SectionID>&) override { add (pending.sections); }
 
-        // The modulators and macros (SongValues.h): their group, for one added, taken out or come to another place, and for
-        // any part of one but a value set by hand, its first or its last, and a macro's value, which no view shows as a
-        // change (controls read values as they show them);
-        // nothing for their order alone, which views show nowhere as a change. The song's tree holds none of
-        // them. A track or a container that comes or goes with modulators or macros in it (added, removed, duplicated, moved
-        // into a folder, brought back by an Undo) tells them added or taken out, so their group comes beside what the tree
-        // raises for the track or the device: one group more than the tree alone raised, for a rare edit (the devices' view
-        // shows its modulator slots again), which the area can't tell from a modulator added or removed by itself.
+        // The modulators and macros (SongValues.h): their group, for one added, taken out or come to another place, and for any
+        // part of one but a value set by hand, its first or its last, and a macro's value, which no view shows as a change
+        // (controls read values as they show them); nothing for their order alone, which views show nowhere as a change. A track
+        // or a container that comes or goes with modulators or macros in it (added, removed, duplicated, moved into a folder,
+        // brought back by an Undo) tells them added or taken out, so their group comes beside the tracks' or the devices' (the
+        // devices' view shows its modulator slots again), which the area can't tell from a modulator added or removed by itself.
         void modulationChanged (const std::vector<SongValues::ModulationChange>& modulators, const std::vector<ModulatorPlace>&) override
         {
             using Change = SongValues::ModulationChange;
@@ -143,16 +140,14 @@ namespace
                     return add (pending.modulation);
         }
 
-        // The sends (SongValues.h): the devices' group, as a SEND's change was, naming the tracks each was on and is on and the
-        // returns it went to and goes to (a return's strip lists the tracks that send to it); and, for one added, taken out, come
-        // to another track or sent to another return, which changes where sound can go, any channel (every strip's send knobs
-        // follow the whole routing, as devicesChanged() says of a device's sidechain). Not a level alone, a parameter's value,
-        // which no view shows as a change (controls read values as they show them). A track whose sends came in another order:
-        // its channel, as a SEND moved past another was. The song's tree holds no send. A track that comes or
-        // goes with sends on it (added, removed, duplicated, moved into a folder, brought back by an Undo) tells them added or
-        // taken out, so the devices' group and any channel come beside what the tree raises for the track: more than the tree
-        // alone raised while it held the sends, for a rare edit (every strip shows its send knobs again), which the area can't
-        // tell from a send added or removed by itself.
+        // The sends (SongValues.h): the devices' group, naming the tracks each was on and is on and the returns it went to and
+        // goes to (a return's strip lists the tracks that send to it); and, for one added, taken out, come to another track or
+        // sent to another return, which changes where sound can go, any channel (every strip's send knobs follow the whole
+        // routing, as devicesChanged() says of a device's sidechain). Not a level alone, a parameter's value, which no view shows
+        // as a change (controls read values as they show them). A track whose sends came in another order: its channel. A track
+        // that comes or goes with sends on it (added, removed, duplicated, moved into a folder, brought back by an Undo) tells
+        // them added or taken out, so the devices' group and any channel come beside the tracks' (every strip shows its send
+        // knobs again), which the area can't tell from a send added or removed by itself.
         void sendsChanged (const std::vector<SongValues::SendChange>& sends, const std::vector<TrackID>& reordered,
                            const SongSends&) override
         {
@@ -184,21 +179,18 @@ namespace
                 add (pending.devices);
         }
 
-        // The devices, containers and chains (SongValues.h): the devices' group, naming the channel each was on and is on, as a
-        // change in a DEVICE's or a CONTAINER's element was, and as one added, taken out or moved past another was
-        // (markRemoved()); and any channel where what sound can reach changed (every strip's send knobs follow
-        // the whole routing, a send that would make a loop has none): a sidechain set or cleared, or carried by one that came,
-        // went or moved (as the tree's callbacks said of an element added or taken out), and a value that switches what a
+        // The devices, containers and chains (SongValues.h): the devices' group, naming the channel each was on and is on, for
+        // one whose settings, mix, sounds or notes shown changed, and for one added, taken out or moved; and any channel where
+        // what sound can reach changed (every strip's send knobs follow the whole routing, a send that would make a loop has
+        // none): a sidechain set or cleared, or carried by one that came, went or moved, and a value that switches what a
         // sidechain hears (a compressor's mode: DeviceChange::sidechainSwitched). No group for a parameter's value alone (its
         // values set by hand, its first or last of them), nor a chain's volume, pan or crossover: controls read values as they
         // show them, and a knob's drag makes one at each move (docs/archive/performance-audit.md, U1). The master's channel is
         // named by its ID as the changes are delivered (a listener of the values reads nothing of the song). A track that
         // comes or goes with devices in it (added, removed, duplicated, moved into a folder, brought back by an Undo) tells
         // them added or taken out, and a track given another ID in place (a merge's renumbering) tells them come to another
-        // place, so the devices' group comes beside what the tree raises for the track (and any channel, where one of them
-        // listens to a sidechain): one group more than the tree alone raised while it held the devices, for a rare edit (the
-        // devices' view and the strips of those channels show them again), which the area can't tell from a device added,
-        // removed or moved by itself.
+        // place, so the devices' group comes beside the tracks' (and any channel, where one of them listens to a sidechain),
+        // which the area can't tell from a device added, removed or moved by itself.
         void devicesChanged (const std::vector<SongValues::DeviceChange>& devices, const std::vector<DevicePlace>& reordered,
                              const SongDevices&) override
         {
@@ -265,10 +257,9 @@ namespace
                 add (pending.devices);
         }
 
-        // The devices' store (SongValues.h; the song's tree holds none of it): the devices' group, naming the channel of the
-        // item, as a change of a DEVICE's or a CHAIN's property was, for a plug-in's state, program, format ID or
-        // version and a chain's mute or solo; nothing for a plug-in's value set by hand, its first or its last, as no VALUE
-        // was (a parameter's value is no change that views show), nor for an item the song doesn't hold (an answer of a
+        // The devices' store (SongValues.h): the devices' group, naming the channel of the item, for a plug-in's state,
+        // program, format ID or version and a chain's mute or solo; nothing for a plug-in's value set by hand, its first or its
+        // last (a parameter's value is no change that views show), nor for an item the song doesn't hold (an answer of a
         // plug-in a step took away).
         void deviceStoreChanged (const std::vector<SongValues::DeviceStoreChange>& entries, const DeviceStore&) override
         {
@@ -296,11 +287,14 @@ namespace
         // of the song as it is told: this is later); one gone since was named as it was taken off its track.
         void nameNotesChanged()
         {
-            const auto* values = song != nullptr ? song->getValues() : nullptr;
+            const auto changed = std::exchange (notesChanged, {});
 
-            for (const auto clip : std::exchange (notesChanged, {}))
+            if (song == nullptr)
+                return;
+
+            for (const auto clip : changed)
             {
-                if (const auto* value = values != nullptr ? values->findClip (clip) : nullptr)
+                if (const auto* value = song->getValues()->findClip (clip))
                 {
                     name (pending.changedClips, clip);
                     name (pending.clipTracks, value->track);
@@ -398,9 +392,8 @@ namespace
                 add (pending.tracks);
         }
 
-        // How the tracks show (view state, Schema.h; not the song): the view's group, the master's row's too (design K.7: a
-        // MASTER's view property raised the tracks' group while the tree told it). None for a write of the view that changes
-        // nothing of it (an empty LANES added), which the tree's callbacks raised the view's group for.
+        // How the tracks show (view state, Schema.h; not the song): the view's group, the master's row's too. None for a write of
+        // the view that changes nothing of it.
         void tracksViewChanged (const std::vector<TrackID>&, bool) override { add (pending.view); }
     };
 } // namespace

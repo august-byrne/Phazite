@@ -941,9 +941,9 @@ private:
     // which a version may give anew (ChangesWorker::masterKey; known bug 244).
     void markLine (TrackID);
 
-    // The clips whose notes changed (the song holds them beside its tree: SongValues.h), heard as the values change and their
-    // tracks marked (markTrack()) as the changes are next asked for: a listener of the values reads nothing of the song. With
-    // them the master's line, where a modulator of its changed (masterHeard). And whether any waits.
+    // The clips whose notes changed (SongValues.h), heard as the values change and their tracks marked (markTrack()) as the
+    // changes are next asked for: a listener of the values reads nothing of the song. With them the master's line, where a
+    // modulator of its changed (masterHeard). And whether any waits.
     std::vector<ClipID> notesHeard;
     void markHeard();
     bool isHeardWaiting() const noexcept { return ! notesHeard.empty() || masterHeard; }

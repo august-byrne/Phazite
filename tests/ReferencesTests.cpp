@@ -276,7 +276,7 @@ TEST_CASE ("What names a modulator, a macro or a send stays while it does, when 
     // A MIDI link of a macro's value and one of a modulator's parameter, and a modulation of a send's level, name items that
     // are no devices: what finds the items still there (Mixer.cpp: forgetWhatNamesTheGone(); ApplySong.cpp:
     // removeBrokenReferences()) finds those the song's values hold too (IDsHeld.h: forEachNameableIDHeld()), so that this
-    // holds wherever the song keeps them (roadmap step S5.20): it fails on modulation's switch unless that turns its line on.
+    // holds wherever the song keeps them: it fails on modulation's switch unless that turns its line on.
     TestSong s;
     auto& song = *phazite::findSong (s.context);
     const auto track = s.firstTrack;

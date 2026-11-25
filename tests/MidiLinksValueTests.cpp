@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song's MIDI links as a value (model/base/internal/MidiLinksValue.h; roadmap step S5.20, the MIDI links' first piece):
+// The song's MIDI links as a value (model/base/internal/MidiLinksValue.h):
 // the conversion between the value and the MIDILINKS element (the one place that reads and writes MIDILINK by name), round
 // trip through the links of the golden files and through damaged ones; and the links' readers (model/midi/internal/
 // MidiLinks.h) on the value, against what the song's elements hold.
@@ -98,10 +98,10 @@ TEST_CASE ("MIDI links value: damaged links read as the links' code read them, i
 TEST_CASE ("MIDI links value: links read as the song holds them keep what their descriptions keep, one of each controller and of "
            "each parameter, in the element's order")
 {
-    // What enters the song's links (MidiLinksValue.h: readHeldMidiLinks(), withLinkTaken()): a link without its controller, or
-    // with one that is no number or outside its range (which brought within it would be another), goes, as the loader takes
-    // it away; so does one that names no parameter; numbers written as text, or not whole, read as the loader reads them; a
-    // second link of a controller or of a parameter goes, the first staying.
+    // What enters the song's links (MidiLinksValue.h: readHeldMidiLinks()): a link without its controller, or with one that is no
+    // number or outside its range (which brought within it would be another), goes, as the loader takes it away; so does one that
+    // names no parameter; numbers written as text, or not whole, read as the loader reads them; a second link of a controller or
+    // of a parameter goes, the first staying.
     const auto links = parse (R"(<MIDILINKS colour="red"><MIDILINK device="12" parameter="cutoff"/>)"
                               R"(<MIDILINK channel="17" number="3" device="12" parameter="gain"/>)"
                               R"(<MIDILINK channel="2" number="120" device="12" parameter="gain"/>)"

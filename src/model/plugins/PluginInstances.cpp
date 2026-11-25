@@ -98,9 +98,7 @@ PluginInstances::PluginInstances (Song& s, PluginHost& h, double rate)
                 storeTrack (TrackID::fromRaw (track));
         });
 
-    if (auto* values = song.getValues())
-        values->addListener (this);
-
+    song.getValues()->addListener (this);
     host.addChangeListener (this);
 }
 
@@ -111,10 +109,7 @@ PluginInstances::~PluginInstances()
     stopTimer();
     callWaiting (false);
     host.removeChangeListener (this);
-
-    if (auto* values = song.getValues())
-        values->removeListener (this);
-
+    song.getValues()->removeListener (this);
     song.setDeviceStateStore ({});
 
     // Told of nothing more: what plays them may hold them a little longer.

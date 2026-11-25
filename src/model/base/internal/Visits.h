@@ -2,7 +2,7 @@
 // How many elements and clips the model looked at to find what it was asked for, since the program started: one for each
 // answer the clips' storage gave and each clip of a list it walked (model/arrangement/Clips.cpp), one for each look a
 // drag's notes made (model/notes/Notes.cpp), and one for each TRACK element a walk of a file's tree looked at
-// (model/base/TracksValue.cpp: listTrackElements(), findTrackElementByID()). What the speed gates read
+// (model/base/TracksValue.cpp: listTrackElements()). What the speed gates read
 // (tests/PerformanceGateTests.cpp, tests/TracksValueTests.cpp), which count what an edit looks at. Atomic: songs made on
 // other threads count into it too.
 #pragma once

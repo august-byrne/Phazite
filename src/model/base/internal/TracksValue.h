@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song's tracks as values (roadmap step S5.20, the tracks' area): each track, folder and return
+// The song's tracks as values: each track, folder and return
 // (Schema.h: TRACK) and the master (MASTER) as a TrackValue, its fields that are written in the undo history alone; every
 // one of a song (SongTracks) by its ID, with each folder's list and the top list that order them, the master a member, and
 // the helpers that alone write it; the song's order made of those lists (TrackOrder); and the conversion between those
@@ -121,8 +121,8 @@ struct SongTracks
 
     // How many times the master was put in anew whole (a merge's choice of the whole MASTER: model/arrangement/internal/
     // Tracks.h, setMasterAnew()), so that the tracks' teller tells the master made (TracksArea.h: TrackChange::made) as that
-    // step, its Undo and its Redo move it, as the MASTER element put in anew was told while the tree held the tracks. No part
-    // of the song's: never read from an element nor written into one, nor compared (operator== leaves it out).
+    // step, its Undo and its Redo move it. No part of the song's: never read from an element nor written into one, nor compared
+    // (operator== leaves it out).
     std::uint64_t masterPutIn = 0;
 
     // One by its ID (the master's for its ID), or nullptr: a pointer into this value, valid while it lives: keep the value in
@@ -268,11 +268,10 @@ TrackID readTrackElementID (const juce::ValueTree& element);                    
 std::optional<TrackValue::Kind> readTrackKind (const juce::ValueTree& element); // none for no TRACK or MASTER
 
 // A song's tree's (PHAZITE) TRACK elements in the song's order, each folder before the tracks in it (only a folder's TRACKs
-// looked through, as readTracksValue() reads them); and the first of them of an ID (invalid for none): what reads the tracks
-// of a tree one element at a time (the loader's checks: readTrackOrder(); the versions' and the tests' readers of a tree). Each
-// a walk of the tree at the call, each TRACK looked at counted (Visits.h).
+// looked through, as readTracksValue() reads them): what reads the tracks of a tree one element at a time (the loader's
+// checks: readTrackOrder(), Sidechain.h's forgetSidechainLoopsIn()). A walk of the tree at the call, each TRACK looked at
+// counted (Visits.h).
 std::vector<juce::ValueTree> listTrackElements (const juce::ValueTree& song);
-juce::ValueTree findTrackElementByID (const juce::ValueTree& song, TrackID);
 
 // How many tracks were read into values whole (readTrackValue(), readHeldTrack(), keepTrackAsHeld() where it rewrites one)
 // since Phazite started, on any thread: for the test that the playlist's rows read each track whole at most once and a

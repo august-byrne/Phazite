@@ -339,14 +339,13 @@ void setMadeStore (Song& song, const std::vector<DeviceID>& made, const DeviceSt
                 known[(size_t) std::distance (made.begin(), found)] = true;
     }
 
-    // The entries of an item the store holds none of (a new ID: a duplicate's, a maker's, a version's device the song never
-    // held) are written outside the history: unseen while the item isn't in the song (the store keeps a removed item's
-    // entries and never writes, compares or counts them), they are left by the step's Undo, which takes the item out, and
-    // what is written for the item later outside the history (its state stored, a value moved in its window, a copied chain
-    // unsoloed) is what it holds when the step's Redo brings it back, as its element held it while the tree held the store.
-    // Written in the step, the Redo would put the made entries back over those later writes. An item the store holds entries
-    // of already (a version's or a merge's device come back under an ID the store knows) gets them in the step, so that its
-    // Undo can put the entries it had back.
+    // The entries of an item the store holds none of (a new ID: a duplicate's, a maker's, a version's device the song never held)
+    // are written outside the history: unseen while the item isn't in the song (the store keeps a removed item's entries and
+    // never writes, compares or counts them), they are left by the step's Undo, which takes the item out, and what is written for
+    // the item later outside the history (its state stored, a value moved in its window, a copied chain unsoloed) is what it
+    // holds when the step's Redo brings it back. Written in the step, the Redo would put the made entries back over those later
+    // writes. An item the store holds entries of already (a version's or a merge's device come back under an ID the store knows)
+    // gets them in the step, so that its Undo can put the entries it had back.
     auto outside = now;
 
     for (size_t i = 0; i < made.size(); ++i)
@@ -395,8 +394,7 @@ std::uint64_t countPluginValuePlacesBuilt() noexcept
 
 void forgetWindowPlace (Song& song, DeviceID id)
 {
-    if (auto* values = song.getValues())
-        values->setWindowPlace (id, std::nullopt);
+    song.getValues()->setWindowPlace (id, std::nullopt);
 }
 
 //==============================================================================

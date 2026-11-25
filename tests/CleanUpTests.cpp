@@ -204,7 +204,7 @@ TEST_CASE ("Clean Up keeps the audio that the project file as saved, its autosav
 TEST_CASE ("Clean Up and an import keep every file the song plays: each clip's by its ID, and its sampler's, pads' and tables'")
 {
     // What the song plays is read from its clips by their IDs (AudioClips.h: findAudioFilePaths()), not from its tree, which
-    // is to hold them no more (roadmap step S5.20): a look that found no clip there would offer every clip's file, and an
+    // is to hold them no more: a look that found no clip there would offer every clip's file, and an
     // import would delete every file it unpacked. Its devices' files are read from their sounds as before. Neither the
     // project file as saved nor a version holds these clips and devices, so the song alone keeps their files.
     TestSong s;

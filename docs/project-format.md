@@ -44,20 +44,11 @@ whole numbers in their digits without `.0`, a float's value in the fewest digits
 numbers in 15 significant digits, true and false as `1` and `0`, text without the characters XML 1.0 can't hold, and `&`
 `<` `>` `"` tab, line feed and carriage return escaped. Every other character is written as it is, in UTF-8.
 
-A reader must take any XML 1.0 (other writers may indent differently) and must keep what it doesn't know: Phazite keeps
-an element or property it doesn't know through a load and a save (an element with all it holds, but not text between
-its tags), but on a `CLIP`, a `WARP`, a `NOTE` or a `CONTROL`: a song's clips, their warp markers and a clip's notes and
-controllers' values are values in Phazite (each with the properties this page names), so a property or an element it
-doesn't know on one of them isn't kept, nor a property of the other kind of clip's (a `length` on an audio clip, a
-`file` on a MIDI clip). A track's and the master's own fields, switches and view are values too (each with the properties this
-page names), so a property or an element Phazite doesn't know on a `TRACK` or the `MASTER` goes as the song opens: a
-track's element holds its clips, its devices and containers, a folder's tracks, its `LANES`, its modulators and macros
-and its sends alone. Phazite writes a clip's properties only while they are set, so one another program wrote at its
-default (`offset="0"`, `name=""`) is gone at the next save. A `CURVE` holds its `POINT`s alone: an element of another
-type in one goes as the song opens. At the song's top (`PHAZITE`) nothing Phazite doesn't know is kept: a property of
-`PHAZITE` and an element of a type it doesn't know there, with all it holds, go as the song opens, as do a property and an
-element it doesn't know on `LASTKEY`, `PIANOROLL` and `MERGING` (the song holds its own as values: roadmap step
-S5.20). An element it does know, where `Schema.h` doesn't put it, it leaves out as it opens the file (section 7).
+A reader must take any XML 1.0 (other writers may indent differently). Phazite keeps nothing it doesn't know: the song
+holds what this page names, as values in Phazite's own types, so a property or an element it doesn't know, anywhere in
+the file, goes as the song opens, with all it holds, and so does text between tags. Phazite writes a clip's properties
+only while they are set, so one another program wrote at its default (`offset="0"`, `name=""`) is gone at the next
+save. An element it does know, where `Schema.h` doesn't put it, it leaves out as it opens the file (section 7).
 
 ## 3. The song
 
@@ -174,8 +165,8 @@ and elements.
 
 A track's devices are `DEVICE` elements in the order the sound goes through them, an instrument first, with containers
 (`CONTAINER`, each with its `CHAIN`s, then its macros) among them, written right after the track's clips and before its
-other children (a folder's before the tracks in it), as the song holds them beside its tree (in its devices' area, each by
-its ID, each owner's in its order). A device's `SOUNDS` is written before its `VALUES`, and a plug-in's `VALUE` children
+other children (a folder's before the tracks in it), as the song holds them (in its devices' area, each by its ID,
+each owner's in its order). A device's `SOUNDS` is written before its `VALUES`, and a plug-in's `VALUE` children
 after both.
 
 **Phazite's own devices** have a `type` ("phaziteSynth"), and their values set by hand in a `VALUES` child, a property
@@ -194,7 +185,7 @@ base 64 (RFC 4648): for a VST3, **its preset file**, a `.vstpreset` as the VST3 
 class ID, the processor's and the controller's chunks and their list), which any VST3 host reads and which DAWproject
 holds too. Its `VALUE` children are the values set by hand of the parameters Phazite moves, by the plug-in's own
 parameter IDs, written after its other children and sorted by their parameters (numbers as numbers: `"2"` before
-`"10"`), as the song holds them (in its devices' store, beside its tree: one value each, in no order of its own).
+`"10"`), as the song holds them (in its devices' store: one value each, in no order of its own).
 
 ## 5. Presets
 
@@ -213,9 +204,9 @@ state goes into a DAWproject as it is, since both hold its preset file.
 Phazite opens projects that others made, so it takes every project file as untrusted, its own included. A file that
 isn't XML, or whose element isn't `PHAZITE`, is refused with a reason. Any other is made consistent as it opens
 (`makeConsistent()`, in [`src/model/project/Project.cpp`](../src/model/project/Project.cpp)), with no undo step; a
-file Phazite wrote is consistent already and comes through unchanged, and so does what Phazite doesn't know:
+file Phazite wrote is consistent already and comes through unchanged:
 - **Places and kinds:** an element Phazite knows, where `Schema.h` doesn't put it, or a device or modulator of a type
-  Phazite hasn't, is left out with all it holds (a clip anywhere but on a track: a folder or a return holds none); an element of a type Phazite doesn't know stays where it is, untouched, but in a `CURVE`, which holds its points alone, in a `MODULATOR` or a `MACRO` (below), and at the song's top (`PHAZITE`), where it goes as the song opens with a property Phazite doesn't know there (section 2); a property that should be one of a set of words
+  Phazite hasn't, is left out with all it holds (a clip anywhere but on a track: a folder or a return holds none); an element or a property of a type Phazite doesn't know goes as the song opens (section 2); a property that should be one of a set of words
   (a track's kind, a clip's) and isn't is left out, a track without a kind becoming a track or a folder; text between
   tags is dropped.
 - **Numbers:** each number `Schema.h` gives a range is brought within it, made whole where it is an integer, and one
@@ -294,8 +285,7 @@ file Phazite wrote is consistent already and comes through unchanged, and so doe
     text of the same bytes); an empty `formatID` or `version` goes; a chain's `mute` or `solo` written off (`"0"`) goes; a
     store's property or a `VALUE` on a device that isn't a plug-in goes; and a device's `windowX` without its `windowY`
     gets a `windowY` of `0`, a `windowY` without its `windowX` goes;
-  - what neither covers goes from the first save, as the song holds its devices as values beside its tree and nothing
-    reads it: a `mix` on one of Phazite's own devices (whose mix is its `VALUES`' `mix`), a property Phazite doesn't know
+  - what neither covers goes from the first save, as the song holds its devices as values and nothing reads it: a `mix` on one of Phazite's own devices (whose mix is its `VALUES`' `mix`), a property Phazite doesn't know
     on a `DEVICE`, a `CONTAINER` or a `CHAIN`, and an element Phazite doesn't know in one; a device's window's place
     (`windowX`, `windowY`) stays;
   - a track's and the master's devices and containers are written right after its clips and before its other children,
@@ -317,7 +307,7 @@ file Phazite wrote is consistent already and comes through unchanged, and so doe
     (`mute="0"`) goes;
   - its view (a track's `height`, `collapsed`, `pinned`, `drumMode`, `drumOrder` and `drumHidden`; the master's `height`
     and `collapsed`) and each `LANE` of its `LANES` (`device`, `parameter`, `height`, `collapsed`): as Phazite writes
-    them, a lane's `collapsed="0"` going; an empty `LANES` goes (the song holds its lanes beside its tree, as a list,
+    them, a lane's `collapsed="0"` going; an empty `LANES` goes (the song holds its lanes as a list,
     none for none), and its `LANES` is written after its clips, its devices and a folder's tracks, before its modulators
     and its sends, so a file that held a folder's `LANES` between its tracks has it after them from its first save.
     Phazite's own writers write none for a `pinned` switched off, an empty `drumOrder` or `drumHidden`, and a lane's

@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The song's clips and a MIDI clip's notes and controllers' values as values (model/base/internal/ClipsValue.h: ClipValue,
-// SongClips; ClipNotesValue.h: ClipNotes), which the song holds beside its tree: the conversion between the values and a
-// clip's element (the one place that reads and writes CLIP, WARP, NOTE and CONTROL by name), and the keeper, which keeps
-// the song's values and its tree together for every change of the tree: a track taken out has its clips remembered with its
-// element and given back if the same element comes back (a move); a track or a clip that comes into the song as an element
-// with its clips' elements has them read into the values and taken out of the tree; a clip that joins an alias group takes
-// the group's one value of notes. Each rule through the tree and through the model's functions, with its Undo and Redo
-// (UndoCheck.h), the song's values checked after each (SongCheck.h: values).
+// SongClips; ClipNotesValue.h: ClipNotes), which the song holds: the conversion between the values and a clip's element (the one
+// place that reads and writes CLIP, WARP, NOTE and CONTROL by name), and the clips' code: a track taken out takes its clips,
+// which its Undo brings back; a clip that joins an alias group takes the group's one value of notes. Each rule through the
+// model's functions, with its Undo and Redo (UndoCheck.h), the song's values checked after each (SongCheck.h: values).
 //   phazite_tests.exe --test-case="Song values*"
 #include "GoldenFiles.h"
 #include "SongCheck.h"
@@ -487,10 +484,9 @@ TEST_CASE ("Song values: a clip's copies share its value, an alias joins its gro
 TEST_CASE ("A track deleted and brought back by Undo has its clips, sends, modulators, macros and devices; moved into a folder and "
            "out, and its line brought back from a version, it keeps them")
 {
-    // What the song's keeper does with a track's element taken out and put in again (the two cases above), as someone does it,
-    // through the model: so that it holds unchanged once the tracks leave the song's tree (roadmap step S5.20). Its devices
-    // hold a value off its default (the EQ's output), a sound (the sampler's) and a plug-in's own state set in its window and
-    // stored, so that what is compared whole covers a VALUES, a SOUNDS and a plug-in's state.
+    // A track taken out and put back (the two cases above), as someone does it, through the model. Its devices hold a value off
+    // its default (the EQ's output), a sound (the sampler's) and a plug-in's own state set in its window and stored, so that what
+    // is compared whole covers a VALUES, a SOUNDS and a plug-in's state.
     phazite::test::TestPlugin plugin; // before the song that holds one
     phazite::test::TestSong s;
     auto& song = *phazite::findSong (s.context);

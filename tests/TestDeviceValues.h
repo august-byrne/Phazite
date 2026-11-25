@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Devices, containers and chains made, read and written by the tests by the song and IDs, never by the song's elements of
-// them, as TestClips.h does for clips: the devices are moving beside the song's tree (roadmap step S5.20), and what a test
-// builds, reads or writes through these keeps working as they move. Their bodies are what the steps that move the devices
-// change; a test never reaches a live song's DEVICE, CONTAINER, CHAIN, VALUES, VALUE or SOUNDS element itself.
+// Devices, containers and chains made, read and written by the tests by the song and IDs, through the model, as TestClips.h does
+// for clips: the song holds its devices as values, so what a test builds, reads or writes goes through these, and what it reads
+// as a file holds it it reads from a whole copy (copyDevice()).
 #pragma once
 
 #include "TestHelpers.h"

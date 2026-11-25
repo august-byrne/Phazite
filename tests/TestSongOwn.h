@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// What the song holds of its own (its root's properties and small elements: the outline, the notes, the loop, the count of
-// IDs, the key set last, a merge waiting), set and read by the tests through the model, never on the live song's root
-// element: those are moving beside the song's tree (roadmap step S5.20), after which the live root holds no property, and
-// one Phazite doesn't know can't be set on it. What a test needs as a plain change to the song (a step to undo, an unsaved
-// change, a change no step makes) is a probe here, each a real, counted change the model makes; what it reads as the file
-// would hold it it reads from a whole copy (TestHelpers.h: copyWholeSong()). Their bodies are what the steps that move the
-// song's own change.
+// What the song holds of its own (its root's properties and small elements: the outline, the notes, the loop, the count of IDs,
+// the key set last, a merge waiting), set and read by the tests through the model: the song holds them as values, and one Phazite
+// doesn't know can't be set on it. What a test needs as a plain change to the song (a step to undo, an unsaved change, a change
+// no step makes) is a probe here, each a real, counted change the model makes; what it reads as the file would hold it it reads
+// from a whole copy (TestHelpers.h: copyWholeSong()).
 #pragma once
 
 #include "TestHelpers.h"
